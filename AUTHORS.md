@@ -7,17 +7,20 @@ This project is source-available with the intent to support other ministries by 
 GitHub usernames are indicated in parentheses, or as sole entry when no other name is available.
 
 ## Lead Developers
+
 ```
 Elijah Duffy (octacian)
 Cristian Ramos (cevr)
 ```
 
 ## Project Manager
+
 ```
 Sebastian Elias (sudosebastian)
 ```
 
 ## Developers
+
 (in alphabetical order, with over 10 commits excluding merges)
 
 ```

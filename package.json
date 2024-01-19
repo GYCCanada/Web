@@ -4,10 +4,14 @@
   "description": "",
   "private": true,
   "scripts": {
-    "lint": "eslint .",
+    "lint": "pnpm check:eslint --fix",
     "format": "prettier --write .",
     "prepare": "husky install",
-    "build": "nx run-many --target=build"
+    "build": "nx run-many --target=build",
+    "check": "concurrently \"npm:check:*\"",
+    "check:eslint": "eslint \"**/src/**/*.{js,ts,tsx,svelte}\"",
+    "check:prettier": "prettier --check .",
+    "check:types": "nx run-many --target=check"
   },
   "lint-staged": {
     "**/*.{js,ts,tsx}": [
@@ -21,6 +25,7 @@
     "@ianvs/prettier-plugin-sort-imports": "^4.1.1",
     "@typescript-eslint/eslint-plugin": "^6.19.0",
     "@typescript-eslint/parser": "^6.19.0",
+    "concurrently": "^8.2.2",
     "eslint": "^8.56.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.1.3",

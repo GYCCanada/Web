@@ -2,7 +2,11 @@
   "targetDefaults": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["{projectRoot}/dist", "{projectRoot}/.svelte-kit"],
+      "outputs": [
+        "{projectRoot}/dist",
+        "{projectRoot}/build",
+        "{projectRoot}/.svelte-kit"
+      ],
       "cache": true
     }
   },

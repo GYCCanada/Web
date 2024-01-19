@@ -21,7 +21,6 @@
     /* If NOT transpiling with TypeScript: */
     "moduleResolution": "Bundler",
     "module": "ESNext",
-    "noEmit": true,
     "lib": ["es2022"],
     "paths": {
       "payload/generated-types": ["./src/payload-types.ts"],

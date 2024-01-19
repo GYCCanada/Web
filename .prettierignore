@@ -1,5 +1,7 @@
 coverage
 public
 dist
+build
+.svelte-kit
 pnpm-lock.yaml
 pnpm-workspace.yaml

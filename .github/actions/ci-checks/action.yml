@@ -1,0 +1,12 @@
+name: 'CI checks'
+description: 'Run CI checks'
+runs:
+  using: 'composite'
+  steps:
+    - name: Build
+      run: pnpm build
+      shell: bash
+
+    - name: Checks
+      run: pnpm check
+      shell: bash
