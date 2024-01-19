@@ -20,6 +20,18 @@ module.exports = {
         sourceType: 'script',
       },
     },
+    {
+      files: ['./apps/web/**/*'],
+      env: {
+        browser: true,
+      },
+      extends: [
+        // add more generic rule sets here, such as:
+        // 'eslint:recommended',
+        'plugin:svelte/recommended',
+        'plugin:svelte/prettier',
+      ],
+    },
   ],
   parser: '@typescript-eslint/parser',
   parserOptions: {
