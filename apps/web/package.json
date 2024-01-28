@@ -1,5 +1,5 @@
 {
-  "name": "web",
+  "name": "@gycc/web",
   "version": "0.0.1",
   "private": true,
   "scripts": {
@@ -10,6 +10,7 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
   },
   "devDependencies": {
+    "@gycc/cms": "workspace:*",
     "@sveltejs/adapter-auto": "^3.1.0",
     "@sveltejs/kit": "^2.4.0",
     "@sveltejs/vite-plugin-svelte": "^3.0.1",

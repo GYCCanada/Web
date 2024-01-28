@@ -2,8 +2,7 @@ import path from 'path';
 
 import { viteBundler } from '@payloadcms/bundler-vite';
 import { mongooseAdapter } from '@payloadcms/db-mongodb';
-import { payloadCloud } from '@payloadcms/plugin-cloud';
-import { slateEditor } from '@payloadcms/richtext-slate';
+import { lexicalEditor } from '@payloadcms/richtext-lexical';
 import { buildConfig } from 'payload/config';
 
 import Users from './collections/Users';
@@ -13,7 +12,7 @@ export default buildConfig({
     user: Users.slug,
     bundler: viteBundler(),
   },
-  editor: slateEditor({}),
+  editor: lexicalEditor({}),
   collections: [Users],
   typescript: {
     outputFile: path.resolve(__dirname, 'payload-types.ts'),
@@ -21,7 +20,7 @@ export default buildConfig({
   graphQL: {
     schemaOutputFile: path.resolve(__dirname, 'generated-schema.graphql'),
   },
-  plugins: [payloadCloud()],
+  plugins: [],
   db: mongooseAdapter({
     url: process.env.DATABASE_URL,
   }),
