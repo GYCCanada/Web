@@ -1,6 +1,6 @@
-import 'dotenv/config';
+import "dotenv/config";
 
-import { z } from 'zod';
+import { z } from "zod";
 
 /**
  * This file is used to validate the environment variables.

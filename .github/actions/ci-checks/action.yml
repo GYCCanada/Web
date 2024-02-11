@@ -1,7 +1,7 @@
-name: 'CI checks'
-description: 'Run CI checks'
+name: "CI checks"
+description: "Run CI checks"
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Build
       run: pnpm build
