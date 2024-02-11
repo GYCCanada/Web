@@ -1,13 +1,13 @@
-import './env';
+import "./env";
 
-import express from 'express';
-import payload from 'payload';
+import express from "express";
+import payload from "payload";
 
 const app = express();
 
 // Redirect root to Admin panel
-app.get('/', (_, res) => {
-  res.redirect('/admin');
+app.get("/", (_, res) => {
+  res.redirect("/admin");
 });
 
 const start = async () => {

@@ -1,11 +1,11 @@
-import path from 'path';
+import path from "path";
 
-import { viteBundler } from '@payloadcms/bundler-vite';
-import { mongooseAdapter } from '@payloadcms/db-mongodb';
-import { lexicalEditor } from '@payloadcms/richtext-lexical';
-import { buildConfig } from 'payload/config';
+import { viteBundler } from "@payloadcms/bundler-vite";
+import { mongooseAdapter } from "@payloadcms/db-mongodb";
+import { lexicalEditor } from "@payloadcms/richtext-lexical";
+import { buildConfig } from "payload/config";
 
-import Users from './collections/Users';
+import Users from "./collections/Users";
 
 export default buildConfig({
   admin: {
@@ -15,10 +15,10 @@ export default buildConfig({
   editor: lexicalEditor({}),
   collections: [Users],
   typescript: {
-    outputFile: path.resolve(__dirname, 'payload-types.ts'),
+    outputFile: path.resolve(__dirname, "payload-types.ts"),
   },
   graphQL: {
-    schemaOutputFile: path.resolve(__dirname, 'generated-schema.graphql'),
+    schemaOutputFile: path.resolve(__dirname, "generated-schema.graphql"),
   },
   plugins: [],
   db: mongooseAdapter({
