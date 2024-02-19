@@ -1,0 +1,55 @@
+version: "3"
+
+services:
+  sveltekit:
+    image: gyccweb-pnpm-node
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/home/node
+      #- ./apps/web:/home/node/apps/web
+      #- web-node_modules:/home/node/apps/web/node_modules
+    working_dir: /home/node/apps/web
+    command: sh -c "pnpm install && pnpm run dev --host"
+    depends_on:
+      - payload
+    networks:
+      - cms-network
+
+  payload:
+    image: gyccweb-pnpm-node
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/cms:/home/app
+      - cms-node_modules:/home/app/node_modules
+    working_dir: /home/app
+    command: sh -c "pnpm install && pnpm dev"
+    depends_on:
+      - mongo
+    env_file:
+      - ./apps/cms/.env
+    networks:
+      - cms-network
+
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    command:
+      - --storageEngine=wiredTiger
+    volumes:
+      - data:/data/db
+    logging:
+      driver: none
+    networks:
+      - cms-network
+
+volumes:
+  data:
+  cms-node_modules:
+  #web-node_modules:
+
+networks:
+  cms-network:
+    driver: bridge

@@ -131,3 +131,5 @@ dist
 
 
 .nx/cache
+.pnpm-store
+apps/cms/pnpm-lock.yaml
