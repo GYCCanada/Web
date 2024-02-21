@@ -5,3 +5,4 @@ build
 .svelte-kit
 pnpm-lock.yaml
 pnpm-workspace.yaml
+modernizr-custom.js
