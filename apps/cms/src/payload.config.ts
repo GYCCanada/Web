@@ -6,6 +6,8 @@ import { lexicalEditor } from "@payloadcms/richtext-lexical";
 import { buildConfig } from "payload/config";
 
 import Users from "./collections/Users";
+import Pages from "./collections/Pages";
+import Menus from "./collections/Menus";
 
 export default buildConfig({
   admin: {
@@ -13,7 +15,7 @@ export default buildConfig({
     bundler: viteBundler(),
   },
   editor: lexicalEditor({}),
-  collections: [Users],
+  collections: [Users, Pages, Menus],
   typescript: {
     outputFile: path.resolve(__dirname, "payload-types.ts"),
   },
