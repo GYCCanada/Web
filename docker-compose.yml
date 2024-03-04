@@ -1,10 +1,10 @@
-version: "3"
+version: '3'
 
 services:
   sveltekit:
     image: gyccweb-pnpm-node
     ports:
-      - "5173:5173"
+      - '5173:5173'
     volumes:
       - .:/home/node
       #- ./apps/web:/home/node/apps/web
@@ -19,7 +19,7 @@ services:
   payload:
     image: gyccweb-pnpm-node
     ports:
-      - "3000:3000"
+      - '3000:3000'
     volumes:
       - ./apps/cms:/home/app
       - cms-node_modules:/home/app/node_modules
@@ -35,7 +35,7 @@ services:
   mongo:
     image: mongo:latest
     ports:
-      - "27017:27017"
+      - '27017:27017'
     command:
       - --storageEngine=wiredTiger
     volumes:
