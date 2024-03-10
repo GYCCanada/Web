@@ -7,6 +7,7 @@ import { LocalizationProvider } from '~/lib/localization/provider';
 import { root } from '~/lib/localization/translations';
 import { CloseIcon, LanguageIcon, MenuIcon } from '~/ui/icon';
 import { Portal } from '~/ui/portal';
+import { AnimatePresence, motion } from 'framer-motion';
 import * as React from 'react';
 import { Button } from 'react-aria-components';
 import { ClientOnly } from 'remix-utils/client-only';
@@ -51,19 +52,27 @@ function Nav() {
         </div>
       </nav>
       <ClientOnly>
-        {() =>
-          open ? (
-            <Portal>
-              <div className="bg-background text-foreground fixed inset-x-0 top-[60px] flex h-full flex-1 flex-col justify-center gap-10 p-4">
-                <NavItem to="/">{translate('nav.home')}</NavItem>
-                <NavItem to="/about">{translate('nav.about')}</NavItem>
-                <NavItem to="/contact">{translate('nav.contact')}</NavItem>
-                <NavItem to="/donate">{translate('nav.donate')}</NavItem>
-                <NavItem to="/join">{translate('nav.join')}</NavItem>
-              </div>
-            </Portal>
-          ) : null
-        }
+        {() => (
+          <Portal>
+            <AnimatePresence>
+              {open ? (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.2 }}
+                  className="bg-background text-foreground fixed inset-x-0 top-[60px] flex h-full flex-1 flex-col justify-center gap-10 p-4"
+                >
+                  <NavItem to="/">{translate('nav.home')}</NavItem>
+                  <NavItem to="/about">{translate('nav.about')}</NavItem>
+                  <NavItem to="/contact">{translate('nav.contact')}</NavItem>
+                  <NavItem to="/donate">{translate('nav.donate')}</NavItem>
+                  <NavItem to="/join">{translate('nav.join')}</NavItem>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </Portal>
+        )}
       </ClientOnly>
     </>
   );
