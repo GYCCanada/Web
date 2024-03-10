@@ -1,10 +1,7 @@
 import { Params, redirect } from '@remix-run/react';
 
-export const Locale = {
-  En: 'en',
-  Fr: 'fr',
-} as const;
-export type Locale = keyof typeof Locale;
+import { Locale } from './localization';
+
 export type Translations = {
   [key in Locale]: Translation;
 };
@@ -12,8 +9,8 @@ export type Translations = {
 export type Translation = Record<string, string>;
 
 export const RootTranslations = {
-  En: {},
-  Fr: {},
+  en: {},
+  fr: {},
 } satisfies Translations;
 
 // matches {{ key }} in a string
@@ -33,11 +30,14 @@ const isValidLocale = (locale: string): locale is Locale => {
 export const getTranslation = <T extends Translations>(
   params: Params,
   translations: T,
-): Translation => {
+): {
+  lang: Locale;
+  translation: T[Locale];
+} => {
   const lang = (params.lang || Locale.En) as Locale;
   if (!isValidLocale(lang)) {
     throw redirect('/');
   }
 
-  return translations[lang];
+  return { lang, translation: translations[lang] };
 };

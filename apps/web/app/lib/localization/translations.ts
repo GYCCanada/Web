@@ -1,7 +1,7 @@
 import { Translations } from './localization.server';
 
 export const root = {
-  En: {
+  en: {
     'nav.home': 'GYC Canada',
     'nav.about': 'Our Story',
     'nav.team': 'Meet the Team',
@@ -9,7 +9,7 @@ export const root = {
     'nav.donate': 'Give to the Mission',
     'nav.join': 'Join the Movement',
   },
-  Fr: {
+  fr: {
     'nav.home': 'GYC Canada',
     'nav.about': 'Notre histoire',
     'nav.team': 'Rencontrez l’équipe',

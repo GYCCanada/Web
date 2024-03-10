@@ -3,9 +3,12 @@ import { zinc } from 'tailwindcss/colors';
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./app/**/*.{tsx,html}'],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
+        background: 'rgb(var(--color-background))',
+        foreground: 'rgb(var(--color-foreground))',
         accent: {
           50: 'rgb(var(--color-accent-50) / <alpha-value>)',
           100: 'rgb(var(--color-accent-100) / <alpha-value>)',
