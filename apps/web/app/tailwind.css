@@ -1,3 +1,60 @@
+@import url('https://fonts.googleapis.com/css2?family=Work+Sans:ital,wght@0,100..900;1,100..900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --color-accent-50: 255 241 241;
+    --color-accent-100: 255 228 228;
+    --color-accent-200: 253 206 208;
+    --color-accent-300: 252 165 169;
+    --color-accent-400: 249 115 123;
+    --color-accent-500: 241 66 82;
+    --color-accent-600: 223 33 59;
+    --color-accent-700: 187 21 47;
+    --color-accent-800: 157 20 47;
+    --color-accent-900: 134 21 47;
+    --color-accent-950: 75 6 19;
+
+    --color-link-50: 237 248 255;
+    --color-link-100: 214 238 255;
+    --color-link-200: 182 226 255;
+    --color-link-300: 131 210 255;
+    --color-link-400: 73 184 255;
+    --color-link-500: 31 149 255;
+    --color-link-600: 7 117 255;
+    --color-link-700: 1 92 242;
+    --color-link-800: 8 74 197;
+    --color-link-900: 14 66 154;
+    --color-link-950: 14 41 93;
+  }
+}
+
+@layer base {
+  * {
+    position: relative;
+    flex-shrink: 0;
+    min-width: 0;
+    min-height: 0;
+  }
+  body {
+    @apply bg-neutral-50 text-neutral-950;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
+    font-family:
+      Work Sans,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      Roboto,
+      Oxygen,
+      Ubuntu,
+      Cantarell,
+      'Open Sans',
+      'Helvetica Neue',
+      sans-serif;
+  }
+}

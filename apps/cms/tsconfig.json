@@ -20,7 +20,7 @@
     "declarationMap": true,
     /* If NOT transpiling with TypeScript: */
     "moduleResolution": "Bundler",
-    "module": "ESNext",
+    "module": "Preserve",
     "lib": ["es2022"],
     "paths": {
       "payload/generated-types": ["./src/payload-types.ts"],
