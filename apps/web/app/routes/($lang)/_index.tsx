@@ -57,7 +57,7 @@ export default function Index() {
           </TextField>
         </div>
       </div>
-      <RadioGroup orientation="horizontal" defaultValue="yes">
+      <RadioGroup defaultValue="yes">
         <Label>Test</Label>
         <Radios>
           <Radio value="yes">Yes</Radio>

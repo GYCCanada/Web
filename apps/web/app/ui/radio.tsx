@@ -14,7 +14,10 @@ const _RadioGroup = React.forwardRef<
   RadioGroupProps & {
     variant?: InputVariant;
   }
->(function _RadioGroup({ className, variant = 'negative', ...props }, ref) {
+>(function _RadioGroup(
+  { className, variant = 'negative', orientation, ...props },
+  ref,
+) {
   return (
     <RadioGroup
       ref={ref}
@@ -28,6 +31,7 @@ const _RadioGroup = React.forwardRef<
         gridTemplateAreas: '"label"\n"radio"',
       }}
       data-variant={variant}
+      orientation={orientation ? orientation : 'horizontal'}
       {...props}
     />
   );
