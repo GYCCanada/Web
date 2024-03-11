@@ -61,7 +61,7 @@ function Nav() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.2 }}
-                  className="bg-background text-foreground fixed inset-x-0 top-[60px] flex h-full flex-1 flex-col justify-center gap-10 p-4"
+                  className="bg-background text-foreground fixed inset-x-0 top-[60px] flex h-[calc(100%_-_60px)] flex-1 flex-col justify-center gap-10 p-4"
                 >
                   <NavItem to="/">{translate('nav.home')}</NavItem>
                   <NavItem to="/about">{translate('nav.about')}</NavItem>
