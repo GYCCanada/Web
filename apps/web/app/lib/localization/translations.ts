@@ -109,7 +109,7 @@ const fr = {
   'nav.volunteer': 'Rejoignez le mouvement',
   'footer.copy': `© ${new Date().getFullYear()} GYC Canada. Tous droits réservés.`,
   'footer.affiliation': 'Un ministère affilié à {{gyc}}.',
-  'contact.title': 'Faites partie du {{movement}}',
+  'contact.title': 'Vous voulez entrer en contact?',
   'contact.directions':
     'Vous pouvez nous joindre à tout moment par courriel à {{email}}, ou avec le formulaire ci-dessous.',
   'contact.form.name': 'Nom',

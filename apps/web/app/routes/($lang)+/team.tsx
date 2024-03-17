@@ -87,8 +87,8 @@ export default function Index() {
           className="absolute inset-0 h-full w-full object-cover"
           alt={translate('team.image.alt') as string}
         />
-        <div className="flex items-start justify-center gap-6 text-neutral-950">
-          <h1 className="shrink text-balance text-5xl">
+        <div className="flex items-center justify-center gap-6 text-neutral-950">
+          <h1 className="shrink text-balance text-2xl sm:text-3xl md:text-4xl lg:text-5xl">
             {translate('team.title', {
               movement: (
                 <span className="italic">
@@ -98,7 +98,7 @@ export default function Index() {
             })}
           </h1>
           <img
-            className="block size-[140px] object-contain"
+            className="block size-[140px] -rotate-90 object-contain"
             src="/gycc-logo.png"
             alt={translate('team.image.alt') as string}
           />
