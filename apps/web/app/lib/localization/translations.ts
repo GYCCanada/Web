@@ -9,8 +9,9 @@ const en = {
   'nav.volunteer': 'Join the Movement',
   'footer.copy': `© ${new Date().getFullYear()} GYC Canada. All rights reserved.`,
   'footer.affiliation': 'A {{gyc}} affiliate ministry.',
-  'conact.title': 'Become a part of the {{movement}}',
-  'contact.movement': 'movement',
+  'contact.title': 'Want to get in touch?',
+  'contact.directions':
+    'You can reach us anytime via email at {{email}}, or with the form below.',
   'contact.form.name': 'Name',
   'contact.form.name.placeholder': 'Type your full name here',
   'contact.form.name.required': 'Please enter your name',
@@ -33,6 +34,18 @@ const en = {
   'contact.form.submit': 'Send it',
   'contact.form.error':
     'An error occurred while sending your message. Please try again later.',
+  'give.title': 'Support the {{movement}}.',
+  'give.movement': 'movement',
+  'give.reason':
+    'Our call to mission, is to be the light of the world. Not a light hidden in the corner, covered by the humdrum of life, but in the open, where all can see. GYC Canada wants to magnify that light, to bring it to all of Canada.',
+  'give.directions': "Here's how you can give:",
+  'give.directions.1': "Enter the amount you'd like to give.",
+  'give.directions.2': 'Choose your preferred payment method.',
+  'give.directions.3':
+    'Tap on "Make this a monthly donation" if you want to give monthly.',
+  'give.directions.4':
+    'If there\'s a specific purpose for your gift, let us know in the "Add a note" section.',
+  'give.contine': 'Continue',
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -46,8 +59,9 @@ const fr = {
   'nav.volunteer': 'Rejoignez le mouvement',
   'footer.copy': `© ${new Date().getFullYear()} GYC Canada. Tous droits réservés.`,
   'footer.affiliation': 'Un ministère affilié à {{gyc}}.',
-  'conact.title': 'Faites partie du {{movement}}',
-  'contact.movement': 'mouvement',
+  'contact.title': 'Faites partie du {{movement}}',
+  'contact.directions':
+    'Vous pouvez nous joindre à tout moment par courriel à {{email}}, ou avec le formulaire ci-dessous.',
   'contact.form.name': 'Nom',
   'contact.form.name.placeholder': 'Entrez votre nom complet ici',
   'contact.form.name.required': 'Veuillez entrer votre nom',
@@ -71,6 +85,18 @@ const fr = {
   'contact.form.submit': 'Envoyer',
   'contact.form.error':
     "Une erreur s'est produite lors de l'envoi de votre message. Veuillez réessayer plus tard.",
+  'give.title': 'Soutenez le {{movement}}.',
+  'give.movement': 'mouvement',
+  'give.reason':
+    "Notre appel à la mission est d'être la lumière du monde. Pas une lumière cachée dans un coin, couverte par la routine de la vie, mais à découvert, où tout le monde peut la voir. GYC Canada veut magnifier cette lumière, la porter à tout le Canada.",
+  'give.directions': 'Voici comment vous pouvez donner :',
+  'give.directions.1': 'Entrez le montant que vous souhaitez donner.',
+  'give.directions.2': 'Choisissez votre mode de paiement préféré.',
+  'give.directions.3':
+    'Cliquez sur "Faire un don mensuel" si vous souhaitez donner mensuellement.',
+  'give.directions.4':
+    'Si votre don a un but spécifique, veuillez nous en informer dans la section "Ajouter une note".',
+  'give.contine': 'Continuer',
 } as const satisfies Record<TranslationKey, string>;
 
 export const root = {

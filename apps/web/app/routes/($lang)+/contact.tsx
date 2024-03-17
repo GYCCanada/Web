@@ -5,8 +5,10 @@ import { Form, redirect, useActionData } from '@remix-run/react';
 import { useTranslate } from '~/lib/localization/context';
 import { sendMail } from '~/lib/mailer.server';
 import { Button } from '~/ui/button';
+import { ExternalLink } from '~/ui/external-link';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
 import { Label } from '~/ui/label';
+import { Main } from '~/ui/main';
 import { Radio, RadioGroup, Radios } from '~/ui/radio';
 import { TextField } from '~/ui/text-field';
 import { match } from 'ts-pattern';
@@ -135,14 +137,20 @@ export default function Index() {
   const method = fields.method.value as 'email' | 'phone' | 'both';
 
   return (
-    <div className="bg-wood-50 flex flex-col gap-12 overflow-y-auto px-3 py-16 dark:bg-neutral-800">
-      <h1 className="text-5xl">
-        {translate('conact.title', {
-          movement: (
-            <span className="italic">{translate('contact.movement')}</span>
-          ),
-        })}
-      </h1>
+    <Main>
+      <div className="flex flex-col gap-4">
+        <h1 className="text-5xl">{translate('contact.title')}</h1>
+        <p>
+          {translate('contact.directions', {
+            email: (
+              <ExternalLink href="mailto:hello@gyccanada.org">
+                hello@gyccanada.org
+              </ExternalLink>
+            ),
+          })}
+        </p>
+      </div>
+
       <FormProvider context={f.context}>
         <Form
           className="flex flex-col gap-4"
@@ -224,6 +232,6 @@ export default function Index() {
           </div>
         </Form>
       </FormProvider>
-    </div>
+    </Main>
   );
 }

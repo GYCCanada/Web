@@ -2,7 +2,7 @@ import clsx from 'clsx';
 import * as React from 'react';
 
 export const linkStyle =
-  'text-link-700 hover:text-link-600 active:text-link-800 duration-200 hover:underline active:underline';
+  'dark:text-link-500 dark:hover:text-link-600 dark:active:text-link-700 text-link-700 hover:text-link-600 active:text-link-800 duration-200 hover:underline active:underline';
 
 export const ExternalLink = React.forwardRef<
   HTMLAnchorElement,
