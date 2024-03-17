@@ -1,3 +1,4 @@
+import { useField, useInputControl } from '@conform-to/react';
 import clsx from 'clsx';
 import * as React from 'react';
 import {
@@ -18,6 +19,8 @@ const _RadioGroup = React.forwardRef<
   { className, variant = 'negative', orientation, ...props },
   ref,
 ) {
+  const [meta] = useField(props.name ?? '');
+  const control = useInputControl(meta as any);
   return (
     <RadioGroup
       ref={ref}
@@ -33,6 +36,12 @@ const _RadioGroup = React.forwardRef<
       data-variant={variant}
       orientation={orientation ? orientation : 'horizontal'}
       {...props}
+      name={meta.name}
+      value={(control.value as any) ?? props.defaultValue ?? props.value}
+      onChange={control.change}
+      onBlur={control.blur}
+      isInvalid={meta.errors && meta.errors.length > 0}
+      isRequired={meta.required}
     />
   );
 });

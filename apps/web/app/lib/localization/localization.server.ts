@@ -1,6 +1,7 @@
 import { Params, redirect } from '@remix-run/react';
 
 import { Locale } from './localization';
+import { root } from './translations';
 
 export type Translations = {
   [key in Locale]: Translation;
@@ -22,10 +23,12 @@ export const interpolate = (str: string, values: Record<string, string>) => {
   });
 };
 
-const isValidLocale = (locale: string): locale is Locale => {
+export function assertValidLocale(locale: string): asserts locale is Locale {
   //@ts-expect-error - we're checking if the value is in the enum
-  return Object.values(Locale).includes(locale);
-};
+  if (!Object.values(Locale).includes(locale)) {
+    throw redirect('/');
+  }
+}
 
 export const getTranslation = <T extends Translations>(
   params: Params,
@@ -35,9 +38,26 @@ export const getTranslation = <T extends Translations>(
   translation: T[Locale];
 } => {
   const lang = (params.lang || Locale.En) as Locale;
-  if (!isValidLocale(lang)) {
-    throw redirect('/');
-  }
-
+  assertValidLocale(lang);
   return { lang, translation: translations[lang] };
+};
+
+export const getLocale = (params: Params): Locale => {
+  const lang = (params.lang || Locale.En) as Locale;
+  assertValidLocale(lang);
+  return lang;
+};
+
+export const translate = <L extends Locale, Key extends keyof (typeof root)[L]>(
+  locale: L,
+  key: Key,
+  params?: Record<string, string>,
+) => {
+  const translation = root[locale][key] as string;
+  if (params) {
+    return translation.replace(interpolationRegex, (match, group) => {
+      return params[group] || match;
+    });
+  }
+  return translation;
 };

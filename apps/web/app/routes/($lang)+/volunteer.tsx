@@ -2,7 +2,7 @@ import type { MetaFunction } from '@remix-run/node';
 
 export const meta: MetaFunction = () => {
   return [
-    { title: 'While It Is Day | GYCC' },
+    { title: 'Volunteer | GYCC' },
     { name: 'description', content: 'Welcome to GYCC!' },
   ];
 };

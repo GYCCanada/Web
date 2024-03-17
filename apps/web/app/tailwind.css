@@ -30,6 +30,18 @@
     --color-link-900: 14 66 154;
     --color-link-950: 14 41 93;
 
+    --color-wood-50: 249 247 243;
+    --color-wood-100: 241 237 227;
+    --color-wood-200: 226 216 198;
+    --color-wood-300: 207 190 162;
+    --color-wood-400: 187 159 124;
+    --color-wood-500: 173 137 98;
+    --color-wood-600: 160 119 86;
+    --color-wood-700: 133 97 73;
+    --color-wood-800: 109 80 63;
+    --color-wood-900: 89 66 53;
+    --color-wood-950: 47 33 27;
+
     --color-background: 250 250 250;
     --color-foreground: 9 9 11;
   }
