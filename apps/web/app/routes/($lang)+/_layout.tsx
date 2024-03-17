@@ -45,6 +45,15 @@ function Nav() {
   const [open, setOpen] = React.useState(false);
   const toggle = () => setOpen((prev) => !prev);
   const translate = useTranslate();
+
+  React.useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'auto';
+    }
+  }, [open]);
+
   return (
     <>
       <nav className="bg-background text-foreground sticky inset-x-0 top-0 z-10 flex h-[60px] items-center justify-between gap-4 px-3 py-2">
@@ -105,6 +114,14 @@ function Nav() {
                     to="/about"
                   >
                     {translate('nav.about')}
+                  </NavItem>
+                  <NavItem
+                    onClick={() => {
+                      setOpen(false);
+                    }}
+                    to="/team"
+                  >
+                    {translate('nav.team')}
                   </NavItem>
                   <NavItem
                     onClick={() => {
@@ -224,7 +241,7 @@ function Footer() {
   const translate = useTranslate();
   const { currentConference } = useLoaderData<typeof loader>();
   return (
-    <footer className="bg-background text-foreground flex flex-col gap-12 px-7 py-10">
+    <footer className="bg-background text-foreground flex flex-col gap-12 px-4 py-10">
       <div className="flex flex-col gap-3">
         <p>{translate('footer.copy')}</p>
         <div className="flex items-center gap-4">
