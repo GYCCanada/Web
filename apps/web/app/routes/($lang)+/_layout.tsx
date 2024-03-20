@@ -267,7 +267,7 @@ function Footer() {
             <FacebookIcon className="size-6" />
           </a>
         </div>
-        <p>291 Queen Street, Strathroy Ontario N7G2J3</p>
+        <p>291 Queen Street, Strathroy Ontario N7G 2J3</p>
       </div>
 
       <div className="flex flex-col gap-2">

@@ -81,9 +81,9 @@ export default function Index() {
   const { team, board } = useLoaderData<typeof loader>();
   return (
     <Main>
-      <div className="mx-auto flex h-[478px] w-full max-w-[1200px] flex-col p-4">
+      <div className="mx-auto flex h-[700px] w-full max-w-[1200px] flex-col p-4">
         <img
-          src="/team.png"
+          src="/group-van-2022.jpg"
           className="absolute inset-0 h-full w-full object-cover"
           alt={translate('team.image.alt') as string}
         />
