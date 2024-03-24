@@ -237,7 +237,7 @@ function GradientLine({
   return (
     <div
       className={clsx(
-        'h-2 w-full bg-gradient-to-r from-transparent to-[#0061FF]',
+        'to-link-700 h-2 w-full bg-gradient-to-r from-transparent',
         className,
       )}
     >
