@@ -1,4 +1,4 @@
-import { LinksFunction, LoaderFunctionArgs } from '@remix-run/node';
+import { LoaderFunctionArgs } from '@remix-run/node';
 import {
   Links,
   Meta,
@@ -9,11 +9,8 @@ import {
 } from '@remix-run/react';
 
 import { ClientHintCheck, getHints } from './lib/client-hints';
-import tailwindHref from './tailwind.css?url';
 
-export const links: LinksFunction = () => {
-  return [{ rel: 'stylesheet', href: tailwindHref }];
-};
+import './tailwind.css';
 
 export const loader = ({ request }: LoaderFunctionArgs) => {
   return {

@@ -5,11 +5,13 @@ import * as React from 'react';
 
 import { Locale } from './localization';
 import { Translation } from './localization.server';
-import { root, TranslationKey } from './translations';
+import { TranslationKey } from './translations';
 
 export const LocalizationContext = React.createContext<Translation | undefined>(
   undefined,
 );
+
+const interpolationRegex = /{{([^}]+)}}/g;
 
 export function useTranslate(): <Key extends TranslationKey>(
   key: Key,
@@ -23,23 +25,23 @@ export function useTranslate(): <Key extends TranslationKey>(
   return (key, params) => {
     if (params) {
       const translated = translations[key] as string;
-      const result: any[] = [];
+      const split: React.ReactNode[] = translated.split(interpolationRegex);
       for (const param in params) {
-        const index = translated.indexOf(`{{${param}}}`);
+        const index = split.indexOf(param);
         if (index === -1) {
           throw new Error(
             `Parameter "${param}" not found in translation "${key}"`,
           );
         }
-        const [head, tail] = translated.split(`{{${param}}}`);
 
-        return [head, (params as any)[param], tail].map((part, i) =>
-          React.isValidElement(part)
-            ? React.cloneElement(part, { key: i })
-            : part,
-        );
+        split[index] = params[param];
       }
-      return result;
+
+      return split.map((part, i) =>
+        React.isValidElement(part)
+          ? React.cloneElement(part, { key: i })
+          : part,
+      );
     }
     return translations[key] as any;
   };

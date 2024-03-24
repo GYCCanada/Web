@@ -58,7 +58,7 @@ function Nav() {
     <>
       <nav className="bg-background text-foreground sticky inset-x-0 top-0 z-10 flex h-[60px] items-center justify-between gap-4 px-3 py-2">
         <img
-          src="/gycc-logo-small-red.png"
+          src="/logo/gycc-logo-small-red.png"
           alt="GYCC Logo"
           className="size-[44px]"
         />

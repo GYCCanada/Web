@@ -1,6 +1,33 @@
 import { Locale } from './localization';
 
 const en = {
+  'main.reserve': 'Reserve',
+  'main.time_left': 'See you in {{days}} days',
+  'main.gyc_tagline':
+    'GYC Canada is a {{movement}} of young people {{for}} young people.',
+  'main.gyc_tagline.movement': 'movement',
+  'main.gyc_tagline.for': 'for',
+  'main.read_our_story': 'Read our story',
+  'main.meet_the_team': 'Meet the team',
+  'main.newsletter.title': 'Stay in the loop',
+  'main.newsletter.subtitle':
+    'We’ll send our monthly newsletter straight to your inbox, give you a chance for early-bird pricing the moment it launches, and more!',
+  'main.newsletter.name.label': 'Full Name',
+  'main.newsletter.name.placeholder': 'Full Name',
+  'main.newsletter.email.label': 'Email',
+  'main.newsletter.email.placeholder': 'Email',
+  'main.newsletter.submit': 'Sign up',
+  'main.newsletter.error':
+    'An error occurred while signing you up. Please try again later.',
+  'main.newsletter.success': 'You have been signed up successfully!',
+  'main.socials.title':
+    'Don’t forget to follow us on social media to get to know our team and stay even more up-to-date!',
+  'main.join.title': 'Join the Movement',
+  'main.join.subtitle':
+    'GYC Canada is a non-profit organization run by a handful of amazing volunteers.{{br}}That means we depend entirely on your attendance and donations to keep the movement pushing forward.',
+  'main.donate.link': 'Consider donating',
+  'main.join.link': 'Volunteer',
+
   'nav.home': 'GYC Canada',
   'nav.about': 'Our Story',
   'nav.team': 'Meet the Team',
@@ -101,6 +128,32 @@ const en = {
 export type TranslationKey = keyof typeof en;
 
 const fr = {
+  'main.reserve': 'Réserve',
+  'main.time_left': 'Rendez-vous dans {{days}} jours',
+  'main.gyc_tagline':
+    'GYC Canada est un {{movement}} de jeunes {{for}} les jeunes.',
+  'main.gyc_tagline.movement': 'mouvement',
+  'main.gyc_tagline.for': 'pour',
+  'main.read_our_story': 'Lire notre histoire',
+  'main.meet_the_team': 'Rencontrez l’équipe',
+  'main.newsletter.title': 'Restez informé',
+  'main.newsletter.subtitle':
+    'Nous enverrons notre bulletin mensuel directement dans votre boîte de réception, vous donnant la chance de profiter des tarifs de lancement dès leur lancement, et plus encore!',
+  'main.newsletter.name.label': 'Nom complet',
+  'main.newsletter.name.placeholder': 'Nom complet',
+  'main.newsletter.email.placeholder': 'Courriel',
+  'main.newsletter.email.label': 'Courriel',
+  'main.newsletter.submit': "S'inscrire",
+  'main.newsletter.error':
+    "Une erreur s'est produite lors de votre inscription. Veuillez réessayer plus tard.",
+  'main.newsletter.success': 'Vous avez été inscrit avec succès!',
+  'main.socials.title':
+    'N’oubliez pas de nous suivre sur les réseaux sociaux pour mieux connaître notre équipe et rester encore plus à jour!',
+  'main.join.title': 'Rejoignez le mouvement',
+  'main.join.subtitle':
+    'GYC Canada est une organisation à but non lucratif dirigée par une poignée de bénévoles incroyables.{{br}}Cela signifie que nous dépendons entièrement de votre présence et de vos dons pour faire avancer le mouvement.',
+  'main.donate.link': 'Considérez un don',
+  'main.join.link': 'Faire du bénévolat',
   'nav.home': 'GYC Canada',
   'nav.about': 'Notre histoire',
   'nav.team': 'Rencontrez l’équipe',
