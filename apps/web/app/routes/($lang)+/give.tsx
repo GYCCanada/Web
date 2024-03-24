@@ -13,7 +13,7 @@ export const meta: MetaFunction = () => {
 export default function Index() {
   const translate = useTranslate();
   return (
-    <Main className="px-3 py-12">
+    <Main className="gap-10 px-3 py-12">
       <div className="flex flex-col gap-4">
         <h1 className="text-5xl">
           {translate('give.title', {

@@ -193,7 +193,7 @@ export default function Index() {
   const method = fields.method.value;
 
   return (
-    <Main className="px-4 py-12">
+    <Main className="gap-10 px-4 py-12">
       <div className="flex flex-col gap-4">
         <h1 className="text-5xl">
           {translate('volunteer.title', {

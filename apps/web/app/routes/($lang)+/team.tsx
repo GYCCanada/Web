@@ -80,7 +80,7 @@ export default function Index() {
   const translate = useTranslate();
   const { team, board } = useLoaderData<typeof loader>();
   return (
-    <Main>
+    <Main className="gap-10">
       <div className="mx-auto flex h-[700px] w-full max-w-[1200px] flex-col p-4">
         <img
           src="/group-van-2022.jpg"

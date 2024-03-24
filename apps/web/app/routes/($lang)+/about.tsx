@@ -1,4 +1,5 @@
 import type { MetaFunction } from '@remix-run/node';
+import { Main } from '~/ui/main';
 
 export const meta: MetaFunction = () => {
   return [
@@ -8,5 +9,5 @@ export const meta: MetaFunction = () => {
 };
 
 export default function Index() {
-  return <div className="flex flex-1 flex-col"></div>;
+  return <Main className="gap-10 px-3 py-12">About Us</Main>;
 }
