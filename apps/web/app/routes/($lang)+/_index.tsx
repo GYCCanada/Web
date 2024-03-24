@@ -10,7 +10,7 @@ import { useTranslate } from '~/lib/localization/context';
 import { Locale } from '~/lib/localization/localization';
 import { getLocale } from '~/lib/localization/localization.server';
 import { Button, buttonStyle } from '~/ui/button';
-import { FieldErrors } from '~/ui/field-error';
+import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
 import { Label } from '~/ui/label';
 import { Link } from '~/ui/link';
 import { Main } from '~/ui/main';
@@ -303,6 +303,11 @@ function NewsletterForm() {
             <Button type="submit" variant="accent">
               {translate('main.newsletter.submit')}
             </Button>
+            {form.errors && form.errors.length > 0 ? (
+              <p className={fieldErrorStyle}>
+                {translate('volunteer.form.error')}
+              </p>
+            ) : null}
           </div>
         </Form>
       </FormProvider>
