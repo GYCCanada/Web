@@ -12,7 +12,6 @@ const schema = z.discriminatedUnion('NODE_ENV', [
     MAIL_PASS: z.string(),
     MAIL_FROM: z.string(),
     MAIL_TO: z.string(),
-    CONTACT_EMAIL: z.string(),
   }),
 ]);
 
