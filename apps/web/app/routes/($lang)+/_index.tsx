@@ -105,7 +105,7 @@ export default function Index() {
         <p className="text-xl italic">{conference.tagline}</p>
       </section>
       <TimeLeft />
-      <section className="flex flex-col bg-[#15191C] px-3 py-12 text-5xl">
+      <section className="flex flex-col px-3 py-12 text-5xl">
         <h3 className="text-5xl">
           {translate('main.gyc_tagline', {
             movement: (
@@ -123,7 +123,7 @@ export default function Index() {
           })}
         </h3>
       </section>
-      <section className="flex flex-col bg-[#15191C] pt-16 text-5xl">
+      <section className="flex flex-col pt-16 text-5xl">
         <img
           src="/main/people.png"
           alt="Mission"
@@ -219,7 +219,7 @@ function TimeLeft() {
   const days = dayjs(conference.dates[0]).diff(dayjs(), 'days');
 
   return (
-    <section className="flex flex-col items-center justify-center gap-6 bg-[#15191C] p-3 py-16 text-center text-4xl">
+    <section className="flex flex-col items-center justify-center gap-6 p-3 py-16 text-center text-4xl">
       {translate('main.time_left', {
         days: <p className="py-10 text-[144px] tabular-nums">{days}</p>,
       })}

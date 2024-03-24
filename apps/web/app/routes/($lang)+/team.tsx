@@ -98,13 +98,13 @@ export default function Index() {
             })}
           </h1>
           <img
-            className="block size-[140px] -rotate-90 object-contain"
-            src="/logo/gycc-logo.png"
+            className="block size-[140px] object-contain"
+            src="/logo/gycc.png"
             alt={translate('team.image.alt') as string}
           />
         </div>
       </div>
-      <div className="flex flex-col gap-8 px-4">
+      <div className="flex flex-col gap-8 p-4">
         <p>{translate('team.subtitle')}</p>
 
         <div className="grid grid-cols-2 gap-4 pb-20 sm:grid-cols-3  md:grid-cols-4 lg:grid-cols-5">
