@@ -45,8 +45,8 @@ const conference: Record<Locale, Conference> = {
   en: {
     title: 'While It Is Day',
     dates: [
-      dayjs('2024-08-21', 'UTC').valueOf(),
-      dayjs('2024-08-25', 'UTC').valueOf(),
+      dayjs('2024-08-21').utc().valueOf(),
+      dayjs('2024-08-25').utc().valueOf(),
     ],
     location: 'British Columbia',
     tagline:
