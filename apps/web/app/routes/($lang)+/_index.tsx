@@ -90,6 +90,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function Index() {
   const { conference } = useLoaderData<typeof loader>();
+  const hints = useHints();
   const translate = useTranslate();
   return (
     <Main>
@@ -107,10 +108,10 @@ export default function Index() {
         <div className="flex flex-col gap-1 text-4xl">
           <h2>{conference.verse}</h2>
           <h2>
-            {dayjs(conference.dates[0]).format('MMM')}{' '}
-            {dayjs(conference.dates[0]).format('D')}-
-            {dayjs(conference.dates[1]).format('D')},{' '}
-            {dayjs(conference.dates[0]).format('YYYY')}
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
+            {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
           </h2>
           <h2>{conference.location}</h2>
         </div>
