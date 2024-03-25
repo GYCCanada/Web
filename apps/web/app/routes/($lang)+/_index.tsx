@@ -55,7 +55,10 @@ const conference: Record<Locale, Conference> = {
   },
   fr: {
     title: "Tant qu'il fait jour",
-    dates: [dayjs('2024-08-21').valueOf(), dayjs('2024-08-25').valueOf()],
+    dates: [
+      dayjs('2024-08-21').utc().valueOf(),
+      dayjs('2024-08-25').utc().valueOf(),
+    ],
     location: 'Colombie-Britannique',
     tagline:
       '“Il faut que je fasse, tandis qu’il est jour, les œuvres de celui qui m’a envoyé; la nuit vient, où personne ne peut travailler.”',
