@@ -6,6 +6,7 @@ import type {
   MetaFunction,
 } from '@remix-run/node';
 import { Form, redirect, useActionData, useLoaderData } from '@remix-run/react';
+import { useHints } from '~/lib/client-hints';
 import { useTranslate } from '~/lib/localization/context';
 import { Locale } from '~/lib/localization/localization';
 import { getLocale } from '~/lib/localization/localization.server';
@@ -17,8 +18,11 @@ import { Main } from '~/ui/main';
 import { TextField } from '~/ui/text-field';
 import clsx from 'clsx';
 import dayjs from 'dayjs';
+import timezone from 'dayjs/plugin/timezone';
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import { z } from 'zod';
+
+dayjs.extend(timezone);
 
 export const meta: MetaFunction = () => {
   return [
@@ -213,10 +217,13 @@ export default function Index() {
 }
 
 function TimeLeft() {
+  const hints = useHints();
   const { conference } = useLoaderData<typeof loader>();
   const translate = useTranslate();
 
-  const days = dayjs(conference.dates[0]).diff(dayjs(), 'days');
+  const days = dayjs(conference.dates[0])
+    .tz(hints.timeZone)
+    .diff(dayjs().tz(hints.timeZone), 'days');
 
   return (
     <section className="flex flex-col items-center justify-center gap-6 p-3 py-16 text-center text-4xl">
