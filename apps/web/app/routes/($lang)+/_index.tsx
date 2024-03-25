@@ -19,9 +19,11 @@ import { TextField } from '~/ui/text-field';
 import clsx from 'clsx';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
+import utc from 'dayjs/plugin/utc';
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import { z } from 'zod';
 
+dayjs.extend(utc);
 dayjs.extend(timezone);
 
 export const meta: MetaFunction = () => {
