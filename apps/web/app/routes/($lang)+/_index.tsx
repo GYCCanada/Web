@@ -44,7 +44,10 @@ type Conference = {
 const conference: Record<Locale, Conference> = {
   en: {
     title: 'While It Is Day',
-    dates: [dayjs('2024-08-21').valueOf(), dayjs('2024-08-25').valueOf()],
+    dates: [
+      dayjs('2024-08-21', 'UTC').valueOf(),
+      dayjs('2024-08-25', 'UTC').valueOf(),
+    ],
     location: 'British Columbia',
     tagline:
       '“I must work the works of Him who sent Me while it is day; the night is coming when no one can work.”',
