@@ -5,6 +5,7 @@ import {
   useLoaderData,
   useLocation,
 } from '@remix-run/react';
+import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { useTranslate } from '~/lib/localization/context';
 import { Locale } from '~/lib/localization/localization';
@@ -44,12 +45,47 @@ export default function Layout() {
 }
 
 function Nav() {
+  const breakpoint = useBreakpoint();
+
+  return match(breakpoint)
+    .when(
+      (bp) => bp < Breakpoint.Xl,
+      () => <PopupNav />,
+    )
+    .otherwise(() => <TopNav />);
+}
+
+function TopNav() {
+  const translate = useTranslate();
+  return (
+    <header className="bg-background text-foreground w-full">
+      <nav className="mx-auto flex h-[60px] w-[--width] items-center justify-between gap-4 px-3 py-2">
+        <Link to="/">
+          <img
+            src="/logo/gycc-logo-small-red.png"
+            alt="GYCC Logo"
+            className="size-[44px]"
+          />
+        </Link>
+        <NavItem to="/">{translate('nav.home')}</NavItem>
+        <NavItem to="/about">{translate('nav.about')}</NavItem>
+        <NavItem to="/team">{translate('nav.team')}</NavItem>
+        <NavItem to="/contact">{translate('nav.contact')}</NavItem>
+        <NavItem to="/give">{translate('nav.give')}</NavItem>
+        <NavItem to="/volunteer">{translate('nav.volunteer')}</NavItem>
+        <Language />
+      </nav>
+    </header>
+  );
+}
+
+function PopupNav() {
   const [open, setOpen] = React.useState(false);
   const toggle = () => setOpen((prev) => !prev);
   const translate = useTranslate();
 
   return (
-    <header className="bg-background text-foreground w-full ">
+    <header className="bg-background text-foreground w-full">
       <nav className="mx-auto flex h-[60px] w-[--width] items-center justify-between gap-4 px-3 py-2">
         <Link
           to="/"
@@ -228,7 +264,7 @@ function NavItem({
         show: { opacity: 1, y: 0 },
       }}
       className={
-        'data-[active]:text-accent-600 hover:text-accent-500 active:text-accent-700 text-5xl font-medium uppercase duration-200'
+        'data-[active]:text-accent-600 hover:text-accent-500 active:text-accent-700 text-5xl font-medium uppercase duration-200 xl:text-base'
       }
       data-active={isActive ? '' : undefined}
     >
