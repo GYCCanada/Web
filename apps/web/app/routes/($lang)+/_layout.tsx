@@ -279,8 +279,8 @@ function Footer() {
   return (
     <footer className="bg-background text-foreground">
       <div className="mx-auto flex w-[--width] flex-col gap-12 px-4 py-10">
-        <div className="flex flex-col gap-12 xl:flex-row xl:justify-between">
-          <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-12 md:flex-row">
+          <div className="flex flex-col gap-3 md:flex-1">
             <p>{translate('footer.copy')}</p>
             <div className="flex items-center gap-4">
               <a
@@ -308,7 +308,7 @@ function Footer() {
             <p>291 Queen Street, Strathroy Ontario N7G 2J3</p>
           </div>
 
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 md:flex-1">
             <p className="text-neutral-500">{translate('footer.links')}</p>
             <Link to={`/`} className={linkStyle}>
               {currentConference.name} {currentConference.year}
