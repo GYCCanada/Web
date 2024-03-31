@@ -7,11 +7,9 @@ export const buttonStyle =
   ' ' +
   'data-[variant=accent]:bg-accent-600 data-[variant=accent]:text-accent-50 data-[variant=accent]:hover:bg-accent-700 data-[variant=accent]:data-[pressed]:bg-accent-500 data-[variant=accent]:active:bg-accent-500' +
   ' ' +
-  'data-[variant=positive]:bg-neutral-50 data-[variant=positive]:text-neutral-950 data-[variant=positive]:hover:bg-neutral-200 data-[variant=positive]:data-[pressed]:bg-neutral-300 data-[variant=positive]:active:bg-neutral-300' +
-  ' ' +
-  'data-[variant=negative]:bg-neutral-900 data-[variant=negative]:text-neutral-50 data-[variant=negative]:hover:bg-neutral-800 data-[variant=negative]:data-[pressed]:bg-neutral-700 data-[variant=negative]:active:bg-neutral-700';
+  'data-[variant=default]:bg-button-background data-[variant=default]:text-button-foreground data-[variant=default]:hover:bg-button-background-hover data-[variant=default]:data-[pressed]:bg-button-background-active data-[variant=default]:active:bg-button-background-active';
 
-export type ButtonVariant = 'accent' | 'positive' | 'negative';
+export type ButtonVariant = 'accent' | 'default';
 
 const Button = React.forwardRef<
   HTMLButtonElement,

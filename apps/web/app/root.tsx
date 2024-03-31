@@ -2,10 +2,9 @@ import { LoaderFunctionArgs } from '@remix-run/node';
 import { Links, Meta, Outlet, Scripts, useLoaderData } from '@remix-run/react';
 
 import { ClientHintCheck, getHints } from './lib/client-hints';
+import { Main } from './ui/main';
 
 import './tailwind.css';
-
-import { Main } from './ui/main';
 
 export const loader = ({ request }: LoaderFunctionArgs) => {
   return {

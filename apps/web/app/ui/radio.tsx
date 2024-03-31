@@ -74,12 +74,10 @@ const _Radio = React.forwardRef<HTMLLabelElement, RadioProps>(function _Radio(
       ref={ref}
       className={(values) =>
         clsx(
-          'flex rounded-full border-2 px-3 py-1.5 duration-200 data-[focused]:outline-none',
+          'bg-radio-background text-radio-foreground border-radio-border flex cursor-pointer rounded-full border-2 px-3 py-1.5 outline-none duration-200',
           'data-[selected]:!bg-accent-600 data-[selected]:!text-accent-50',
           'hover:!bg-accent-500 hover:!text-accent-50',
-          'data-[pressed]:!bg-accent-400 data-[pressed]:!text-accent-50',
-          'group-data-[variant=positive]:border-zinc-50 group-data-[variant=positive]:bg-zinc-950 group-data-[variant=positive]:text-zinc-50',
-          'group-data-[variant=negative]:border-zinc-950 group-data-[variant=negative]:bg-zinc-50 group-data-[variant=negative]:text-zinc-950',
+          'data-[pressed]:bg-accent-400 data-[pressed]:text-accent-50',
           typeof className === 'function' ? className(values) : className,
         )
       }

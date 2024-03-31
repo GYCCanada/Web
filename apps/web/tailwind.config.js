@@ -1,5 +1,3 @@
-import { zinc } from 'tailwindcss/colors';
-
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./app/**/*.{tsx,html}'],
@@ -35,7 +33,19 @@ export default {
           900: 'rgb(var(--color-link-900) / <alpha-value>)',
           950: 'rgb(var(--color-link-950) / <alpha-value>)',
         },
-        neutral: zinc,
+        neutral: {
+          50: 'rgb(var(--color-neutral-50) / <alpha-value>)',
+          100: 'rgb(var(--color-neutral-100) / <alpha-value>)',
+          200: 'rgb(var(--color-neutral-200) / <alpha-value>)',
+          300: 'rgb(var(--color-neutral-300) / <alpha-value>)',
+          400: 'rgb(var(--color-neutral-400) / <alpha-value>)',
+          500: 'rgb(var(--color-neutral-500) / <alpha-value>)',
+          600: 'rgb(var(--color-neutral-600) / <alpha-value>)',
+          700: 'rgb(var(--color-neutral-700) / <alpha-value>)',
+          800: 'rgb(var(--color-neutral-800) / <alpha-value>)',
+          900: 'rgb(var(--color-neutral-900) / <alpha-value>)',
+          950: 'rgb(var(--color-neutral-950) / <alpha-value>)',
+        },
         wood: {
           50: 'rgb(var(--color-wood-50) / <alpha-value>)',
           100: 'rgb(var(--color-wood-100) / <alpha-value>)',
@@ -48,6 +58,22 @@ export default {
           800: 'rgb(var(--color-wood-800) / <alpha-value>)',
           900: 'rgb(var(--color-wood-900) / <alpha-value>)',
           950: 'rgb(var(--color-wood-950) / <alpha-value>)',
+        },
+        button: {
+          background: 'rgb(var(--color-button-background))',
+          foreground: 'rgb(var(--color-button-foreground))',
+          'background-hover': 'rgb(var(--color-button-background-hover))',
+          'background-active': 'rgb(var(--color-button-background-active))',
+        },
+        input: {
+          background: 'rgb(var(--color-input-background))',
+          foreground: 'rgb(var(--color-input-foreground))',
+          placeholder: 'rgb(var(--color-input-placeholder))',
+        },
+        radio: {
+          background: 'rgb(var(--color-radio-background))',
+          foreground: 'rgb(var(--color-radio-foreground))',
+          border: 'rgb(var(--color-radio-border))',
         },
       },
     },
