@@ -49,8 +49,8 @@ function Nav() {
   const translate = useTranslate();
 
   return (
-    <>
-      <nav className="bg-background text-foreground sticky inset-x-0 top-0 z-10 flex h-[60px] items-center justify-between gap-4 px-3 py-2">
+    <header className="bg-background text-foreground w-full ">
+      <nav className="mx-auto flex h-[60px] w-[--width] items-center justify-between gap-4 px-3 py-2">
         <Link
           to="/"
           onClick={() => {
@@ -81,10 +81,9 @@ function Nav() {
               {open ? (
                 <motion.div
                   variants={{
-                    hidden: { opacity: 0, y: -10 },
+                    hidden: { opacity: 0 },
                     show: {
                       opacity: 1,
-                      y: 0,
                       transition: {
                         staggerChildren: 0.1,
                         ease: 'easeInOut',
@@ -154,7 +153,7 @@ function Nav() {
           </Portal>
         )}
       </ClientOnly>
-    </>
+    </header>
   );
 }
 
