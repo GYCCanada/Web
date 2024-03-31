@@ -264,7 +264,7 @@ function NavItem({
         show: { opacity: 1, y: 0 },
       }}
       className={
-        'data-[active]:text-accent-600 hover:text-accent-500 active:text-accent-700 text-5xl font-medium uppercase duration-200 xl:text-base'
+        'data-[active]:text-accent-600 hover:text-accent-500 active:text-accent-700 text-5xl font-medium duration-200 max-xl:uppercase xl:text-base'
       }
       data-active={isActive ? '' : undefined}
     >
