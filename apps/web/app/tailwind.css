@@ -6,6 +6,7 @@
 
 @layer base {
   :root {
+    --width: min(80rem, 100%);
     --color-accent-50: 255 241 241;
     --color-accent-100: 255 228 228;
     --color-accent-200: 253 206 208;
@@ -85,5 +86,6 @@
   body {
     height: 100%;
     width: 100%;
+    overflow-x: hidden;
   }
 }

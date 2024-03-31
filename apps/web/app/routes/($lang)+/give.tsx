@@ -13,8 +13,8 @@ export const meta: MetaFunction = () => {
 export default function Index() {
   const translate = useTranslate();
   return (
-    <Main className="gap-10 px-3 py-12">
-      <div className="flex flex-col gap-4">
+    <Main className="gap-10 px-3 py-12 md:gap-16">
+      <div className="flex flex-col gap-4 md:gap-16">
         <h1 className="text-5xl">
           {translate('give.title', {
             movement: (
@@ -33,14 +33,14 @@ export default function Index() {
           <li>{translate('give.directions.3')}</li>
           <li>{translate('give.directions.4')}</li>
         </ol>
-        <div>
-          <a
-            className={buttonStyle}
-            href="https://www.paypal.com/donate/?hosted_button_id=FBZXG43LWD232&fbclid=IwAR027jskxadQlC1PFallSB0btxLH0bB0kd-xDM8UQ76ASneG0hXqsnTbJu8"
-          >
-            {translate('give.contine')}
-          </a>
-        </div>
+      </div>
+      <div>
+        <a
+          className={buttonStyle}
+          href="https://www.paypal.com/donate/?hosted_button_id=FBZXG43LWD232&fbclid=IwAR027jskxadQlC1PFallSB0btxLH0bB0kd-xDM8UQ76ASneG0hXqsnTbJu8"
+        >
+          {translate('give.contine')}
+        </a>
       </div>
     </Main>
   );

@@ -2,7 +2,7 @@
  * This file contains utilities for using client hints for user preference which
  * are needed by the server, but are only known by the browser.
  */
-import { getHintUtils } from '@epic-web/client-hints';
+import { ClientHint, getHintUtils } from '@epic-web/client-hints';
 import {
   clientHint as colorSchemeHint,
   subscribeToSchemeChange,
@@ -13,10 +13,34 @@ import { type loader as rootLoader } from '~/root';
 import * as React from 'react';
 import invariant from 'tiny-invariant';
 
+export const Breakpoint = {
+  Sm: 0,
+  Md: 1,
+  Lg: 2,
+  Xl: 3,
+} as const;
+export type Breakpoint = (typeof Breakpoint)[keyof typeof Breakpoint];
+
+/**
+ * This breakpoint hint allows us to know the current breakpoint of the user's
+ * device. We use this to render the correct layout for the user's device on the initial
+ * render.
+ */
+const breakpointHints = {
+  cookieName: 'breakpoint',
+  fallback: Breakpoint.Sm as Breakpoint,
+  getValueCode: `window.innerWidth <= 640 ? 0 : window.innerWidth <= 1024 ? 1 : window.innerWidth <= 1280 ? 2 : 3`,
+  transform(value): Breakpoint {
+    return Number.isNaN(value)
+      ? (Breakpoint.Sm as Breakpoint)
+      : (Number(value) as Breakpoint);
+  },
+} as const satisfies ClientHint<Breakpoint>;
+
 const hintsUtils = getHintUtils({
   theme: colorSchemeHint,
   timeZone: timeZoneHint,
-  // add other hints here
+  breakpoint: breakpointHints,
 });
 
 export const { getHints } = hintsUtils;
@@ -57,5 +81,33 @@ export function ClientHintCheck() {
         __html: hintsUtils.getClientHintCheckScript(),
       }}
     />
+  );
+}
+
+export function useBreakpoint(): Breakpoint {
+  const hints = useHints();
+  return React.useSyncExternalStore(
+    React.useCallback((cb) => {
+      window.addEventListener('resize', cb);
+      window.addEventListener('orientationchange', cb);
+      window.addEventListener('load', cb);
+      return () => {
+        window.removeEventListener('resize', cb);
+        window.removeEventListener('orientationchange', cb);
+        window.removeEventListener('load', cb);
+      };
+    }, []),
+    React.useCallback(
+      () =>
+        window.innerWidth <= 640
+          ? Breakpoint.Sm
+          : window.innerWidth <= 1024
+            ? Breakpoint.Md
+            : window.innerWidth <= 1280
+              ? Breakpoint.Lg
+              : Breakpoint.Xl,
+      [],
+    ),
+    React.useCallback(() => hints.breakpoint, [hints.breakpoint]),
   );
 }

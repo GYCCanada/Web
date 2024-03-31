@@ -8,15 +8,13 @@ export function Main({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-wood-50 flex flex-col dark:bg-neutral-800">
-      <main
-        className={clsx(
-          'mx-auto flex w-full max-w-[1200px] flex-col overflow-y-auto pb-16',
-          className,
-        )}
-      >
-        {children}
-      </main>
-    </div>
+    <main
+      className={clsx(
+        'bg-wood-50 flex flex-col overflow-y-auto pb-16 dark:bg-neutral-800 [&>*:not(.full-bleed)]:mx-auto [&>*:not(.full-bleed)]:w-[--width]',
+        className,
+      )}
+    >
+      {children}
+    </main>
   );
 }

@@ -35,8 +35,10 @@ export default function Layout() {
   return (
     <LocalizationProvider translation={translation}>
       <Nav />
-      <Outlet />
-      <Footer />
+      <div className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
+        <Outlet />
+        <Footer />
+      </div>
     </LocalizationProvider>
   );
 }
@@ -45,14 +47,6 @@ function Nav() {
   const [open, setOpen] = React.useState(false);
   const toggle = () => setOpen((prev) => !prev);
   const translate = useTranslate();
-
-  React.useEffect(() => {
-    if (open) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'auto';
-    }
-  }, [open]);
 
   return (
     <>

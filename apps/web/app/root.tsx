@@ -12,6 +12,8 @@ import { ClientHintCheck, getHints } from './lib/client-hints';
 
 import './tailwind.css';
 
+import { Main } from './ui/main';
+
 export const loader = ({ request }: LoaderFunctionArgs) => {
   return {
     requestInfo: {
@@ -26,7 +28,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
-      className={data.requestInfo.hints.theme === 'dark' ? 'dark' : undefined}
+      className={data?.requestInfo.hints.theme === 'dark' ? 'dark' : undefined}
     >
       <head>
         <ClientHintCheck />
@@ -46,4 +48,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return <Outlet />;
+}
+
+export function ErrorBoundary() {
+  return (
+    <Main className="flex h-screen flex-col items-center justify-center">
+      <h1>Something went wrong...</h1>
+    </Main>
+  );
 }

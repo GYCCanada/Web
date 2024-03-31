@@ -6,7 +6,7 @@ import type {
   MetaFunction,
 } from '@remix-run/node';
 import { Form, redirect, useActionData, useLoaderData } from '@remix-run/react';
-import { useHints } from '~/lib/client-hints';
+import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
 import { useTranslate } from '~/lib/localization/context';
 import { Locale } from '~/lib/localization/localization';
 import { getLocale } from '~/lib/localization/localization.server';
@@ -21,6 +21,7 @@ import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
+import { match } from 'ts-pattern';
 import { z } from 'zod';
 
 dayjs.extend(utc);
@@ -38,7 +39,11 @@ type Conference = {
   dates: [number, number];
   location: string;
   tagline: string;
-  verse: string;
+  bible: {
+    book: string;
+    chapter: number;
+    verse: number;
+  };
 };
 
 const conference: Record<Locale, Conference> = {
@@ -51,7 +56,11 @@ const conference: Record<Locale, Conference> = {
     location: 'British Columbia',
     tagline:
       '“I must work the works of Him who sent Me while it is day; the night is coming when no one can work.”',
-    verse: 'John 9:4',
+    bible: {
+      book: 'John',
+      chapter: 9,
+      verse: 4,
+    },
   },
   fr: {
     title: "Tant qu'il fait jour",
@@ -62,7 +71,11 @@ const conference: Record<Locale, Conference> = {
     location: 'Colombie-Britannique',
     tagline:
       '“Il faut que je fasse, tandis qu’il est jour, les œuvres de celui qui m’a envoyé; la nuit vient, où personne ne peut travailler.”',
-    verse: 'Jean 9:4',
+    bible: {
+      book: 'Jean',
+      chapter: 9,
+      verse: 4,
+    },
   },
 };
 
@@ -81,44 +94,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return submission.reply();
   }
 
-  const data = submission.payload;
-
-  console.log(data);
+  // const data = submission.payload;
 
   return redirect(new URL(request.url).pathname);
 };
 
 export default function Index() {
-  const { conference } = useLoaderData<typeof loader>();
-  const hints = useHints();
   const translate = useTranslate();
   return (
     <Main>
-      <section className="flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
-        <div>
-          <img
-            src="/2024/hero.png"
-            alt={conference.title}
-            className="aspect-auto w-full"
-          />
-          <Button className="absolute -bottom-6 right-4">
-            {translate('main.reserve')}
-          </Button>
-        </div>
-        <div className="flex flex-col gap-1 text-4xl">
-          <h2>{conference.verse}</h2>
-          <h2>
-            {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
-            {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
-            {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
-            {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
-          </h2>
-          <h2>{conference.location}</h2>
-        </div>
-        <p className="text-xl italic">{conference.tagline}</p>
-      </section>
+      <Hero />
       <TimeLeft />
-      <section className="flex flex-col px-3 py-12 text-5xl">
+      <section className="flex flex-col px-3 py-12 text-5xl md:hidden">
         <h3 className="text-5xl">
           {translate('main.gyc_tagline', {
             movement: (
@@ -136,13 +123,29 @@ export default function Index() {
           })}
         </h3>
       </section>
-      <section className="flex flex-col pt-16 text-5xl">
+      <section className="flex flex-col gap-6 pt-16 text-5xl md:flex-row-reverse md:justify-between">
         <img
           src="/main/people.png"
           alt="Mission"
-          className="aspect-auto w-full"
+          className="aspect-auto max-md:w-full md:flex-1"
         />
-        <div className="absolute top-0 flex flex-col gap-6 p-3">
+        <div className="flex flex-col gap-6 p-3 max-md:absolute max-md:top-0 md:flex-1">
+          <h3 className="text-5xl max-md:hidden">
+            {translate('main.gyc_tagline', {
+              movement: (
+                <span className="inline-block w-max italic">
+                  <GradientLine className="absolute inset-x-0 bottom-2" />
+                  <span>{translate('main.gyc_tagline.movement')}</span>
+                </span>
+              ),
+              for: (
+                <span className="inline-block w-max italic">
+                  <GradientLine className="absolute inset-x-0 bottom-2" />
+                  <span>{translate('main.gyc_tagline.for')}</span>
+                </span>
+              ),
+            })}
+          </h3>
           <div>
             <Link to="/about" className={buttonStyle} data-variant="accent">
               {translate('main.read_our_story')}
@@ -156,72 +159,138 @@ export default function Index() {
         </div>
       </section>
       <NewsletterForm />
-      <section className="flex flex-col gap-6 p-3">
-        <p>{translate('main.socials.title')}</p>
-        <div className="flex items-center gap-2.5">
-          <a
-            href="https://www.instagram.com/gyccanada"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="bg-foreground text-background px-4 py-3"
-          >
-            <InstagramIcon className="size-8" />
-          </a>
-          <a
-            href="https://www.youtube.com/@gyccanada"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="bg-foreground text-background px-4 py-3"
-          >
-            <YoutubeIcon className="size-8" />
-          </a>
-          <a
-            href="https://www.facebook.com/GYCCanada"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="bg-foreground text-background px-4 py-3"
-          >
-            <FacebookIcon className="size-8" />
-          </a>
-        </div>
-      </section>
-      <section className="flex flex-col gap-6 p-3">
+
+      <section className="flex flex-col gap-6 p-3 md:flex-row-reverse md:py-32">
         <img
           src="/main/mission.png"
           alt="Mission"
-          className="aspect-auto w-full"
+          className="aspect-auto max-md:w-full md:flex-1"
         />
-        <h2 className="text-accent-600 text-4xl font-bold">
-          {translate('main.join.title')}
-        </h2>
-        <p>
-          {translate('main.join.subtitle', {
-            br: (
-              <>
-                <br />
-                <br />
-              </>
-            ),
-          })}
-        </p>
-        <div className="flex flex-col gap-4">
-          <div>
-            <Link to="/give" className={buttonStyle} data-variant="accent">
-              {translate('main.donate.link')}
-            </Link>
-          </div>
-          <div>
-            <Link
-              to="/volunteer"
-              className={buttonStyle}
-              data-variant="positive"
-            >
-              {translate('main.join.link')}
-            </Link>
+        <div className="flex flex-col gap-6 md:flex-1">
+          <h2 className="text-accent-600 text-4xl font-bold">
+            {translate('main.join.title')}
+          </h2>
+          <p>
+            {translate('main.join.subtitle', {
+              br: (
+                <>
+                  <br />
+                  <br />
+                </>
+              ),
+            })}
+          </p>
+          <div className="flex flex-col gap-4">
+            <div>
+              <Link to="/give" className={buttonStyle} data-variant="accent">
+                {translate('main.donate.link')}
+              </Link>
+            </div>
+            <div>
+              <Link
+                to="/volunteer"
+                className={buttonStyle}
+                data-variant="positive"
+              >
+                {translate('main.join.link')}
+              </Link>
+            </div>
           </div>
         </div>
       </section>
     </Main>
+  );
+}
+
+function Hero() {
+  const breakpoint = useBreakpoint();
+  return match(breakpoint)
+    .when(
+      (b) => b <= Breakpoint.Md,
+      () => <MobileHero />,
+    )
+    .otherwise(() => <DesktopHero />);
+}
+
+function MobileHero() {
+  const { conference } = useLoaderData<typeof loader>();
+  const hints = useHints();
+  const translate = useTranslate();
+  return (
+    <section className="flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
+      <div>
+        <img
+          src="/2024/hero.png"
+          alt={conference.title}
+          className="aspect-auto w-full"
+        />
+        <Button className="absolute -bottom-6 right-4">
+          {translate('main.reserve')}
+        </Button>
+      </div>
+      <div className="flex flex-col gap-1 text-4xl">
+        <h2>
+          {conference.bible.book} {conference.bible.chapter}:
+          {conference.bible.verse}
+        </h2>
+        <h2>
+          {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
+          {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
+          {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
+          {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
+        </h2>
+        <h3>{conference.location}</h3>
+      </div>
+      <p className="text-xl italic">{conference.tagline}</p>
+    </section>
+  );
+}
+function DesktopHero() {
+  const { conference } = useLoaderData<typeof loader>();
+  const hints = useHints();
+  const translate = useTranslate();
+  return (
+    <section className="full-bleed flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
+      <div className="mx-auto flex w-[--width] gap-10 py-16">
+        <div className="flex flex-1 flex-col gap-10">
+          <img
+            src="/2024/hero.png"
+            alt={conference.title}
+            className="aspect-auto w-full"
+          />
+          <p className="text-2xl italic">{conference.tagline}</p>
+        </div>
+        <div className="flex w-1/4 flex-col justify-between gap-6">
+          <div
+            className="flex flex-col justify-end uppercase"
+            style={{
+              writingMode: 'vertical-rl',
+            }}
+          >
+            <h1 className="text-[96px] font-black leading-tight tracking-tight">
+              {conference.bible.book}
+            </h1>
+            <h1 className="text-[168px] font-black leading-[0.5]">
+              {conference.bible.chapter}:{conference.bible.verse}
+            </h1>
+          </div>
+          <div className="flex flex-col gap-10">
+            <div className="flex flex-col gap-6">
+              <h2 className="text-5xl">
+                {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
+                {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
+                {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
+                {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
+              </h2>
+              <h3 className="text-5xl">{conference.location}</h3>
+            </div>
+            <div>
+              <Button>{translate('main.reserve')}</Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -235,9 +304,13 @@ function TimeLeft() {
     .diff(dayjs().tz(hints.timeZone), 'days');
 
   return (
-    <section className="flex flex-col items-center justify-center gap-6 p-3 py-16 text-center text-4xl">
+    <section className="flex flex-col items-center justify-center gap-6 p-3 py-16 text-center text-4xl lg:h-screen lg:gap-12 lg:text-[64px]">
       {translate('main.time_left', {
-        days: <p className="py-10 text-[144px] tabular-nums">{days}</p>,
+        days: (
+          <p className="py-10 text-[144px] tabular-nums lg:py-20 lg:text-[256px]">
+            {days}
+          </p>
+        ),
       })}
     </section>
   );
@@ -283,50 +356,88 @@ function NewsletterForm() {
     },
   });
   return (
-    <section className="flex flex-col gap-4 px-3 py-16">
-      <div className="text-accent-600 flex items-center gap-2">
-        <h2 className="text-accent-600 text-4xl font-bold">
-          {translate('main.newsletter.title')}
-        </h2>
-        <PaperPlane className="h-20 w-20" />
-      </div>
-      <p>{translate('main.newsletter.subtitle')}</p>
-      <FormProvider context={form.context}>
-        <Form method="POST" className="flex flex-col gap-4" id={form.id}>
-          <TextField name={fields.name.name}>
-            <Label>{translate('main.newsletter.name.label')}</Label>
-
-            <TextField.Input
-              type="text"
-              placeholder={
-                translate('main.newsletter.name.placeholder') as string
-              }
-            />
-            <FieldErrors errors={fields.name.errors} />
-          </TextField>
-          <TextField name={fields.email.name}>
-            <Label>{translate('main.newsletter.email.label')}</Label>
-            <TextField.Input
-              type="email"
-              placeholder={
-                translate('main.newsletter.email.placeholder') as string
-              }
-            />
-            <FieldErrors errors={fields.email.errors} />
-          </TextField>
-
-          <div>
-            <Button type="submit" variant="accent">
-              {translate('main.newsletter.submit')}
-            </Button>
-            {form.errors && form.errors.length > 0 ? (
-              <p className={fieldErrorStyle}>
-                {translate('volunteer.form.error')}
-              </p>
-            ) : null}
+    <section className="flex flex-col gap-4 px-3 py-16 md:py-32">
+      <div className="flex flex-col gap-4 md:flex-row-reverse">
+        <img
+          src="/main/mission.png"
+          alt="Mission"
+          className="aspect-auto max-md:w-full md:flex-1"
+        />
+        <div className="flex flex-col gap-4 md:flex-1">
+          <div className="text-accent-600 flex items-center gap-2">
+            <h2 className="text-accent-600 text-4xl font-bold">
+              {translate('main.newsletter.title')}
+            </h2>
+            <PaperPlane className="h-20 w-20" />
           </div>
-        </Form>
-      </FormProvider>
+          <p>{translate('main.newsletter.subtitle')}</p>
+          <FormProvider context={form.context}>
+            <Form method="POST" className="flex flex-col gap-4" id={form.id}>
+              <TextField name={fields.name.name}>
+                <Label>{translate('main.newsletter.name.label')}</Label>
+
+                <TextField.Input
+                  type="text"
+                  placeholder={
+                    translate('main.newsletter.name.placeholder') as string
+                  }
+                />
+                <FieldErrors errors={fields.name.errors} />
+              </TextField>
+              <TextField name={fields.email.name}>
+                <Label>{translate('main.newsletter.email.label')}</Label>
+                <TextField.Input
+                  type="email"
+                  placeholder={
+                    translate('main.newsletter.email.placeholder') as string
+                  }
+                />
+                <FieldErrors errors={fields.email.errors} />
+              </TextField>
+
+              <div>
+                <Button type="submit" variant="accent">
+                  {translate('main.newsletter.submit')}
+                </Button>
+                {form.errors && form.errors.length > 0 ? (
+                  <p className={fieldErrorStyle}>
+                    {translate('volunteer.form.error')}
+                  </p>
+                ) : null}
+              </div>
+            </Form>
+          </FormProvider>
+        </div>
+      </div>
+      <div className="flex flex-col gap-6">
+        <p>{translate('main.socials.title')}</p>
+        <div className="flex items-center gap-2.5">
+          <a
+            href="https://www.instagram.com/gyccanada"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-foreground text-background px-4 py-3"
+          >
+            <InstagramIcon className="size-8" />
+          </a>
+          <a
+            href="https://www.youtube.com/@gyccanada"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-foreground text-background px-4 py-3"
+          >
+            <YoutubeIcon className="size-8" />
+          </a>
+          <a
+            href="https://www.facebook.com/GYCCanada"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-foreground text-background px-4 py-3"
+          >
+            <FacebookIcon className="size-8" />
+          </a>
+        </div>
+      </div>
     </section>
   );
 }

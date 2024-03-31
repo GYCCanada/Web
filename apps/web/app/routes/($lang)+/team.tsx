@@ -81,14 +81,14 @@ export default function Index() {
   const { team, board } = useLoaderData<typeof loader>();
   return (
     <Main className="gap-10">
-      <div className="mx-auto flex h-[700px] w-full max-w-[1200px] flex-col p-4">
+      <div className="mx-auto flex h-[700px] w-full max-w-[1200px] flex-col p-4 md:h-[478px] md:pt-0">
         <img
           src="/group-van-2022.jpg"
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-cover md:object-top"
           alt={translate('team.image.alt') as string}
         />
-        <div className="flex items-center justify-center gap-6 text-neutral-950">
-          <h1 className="shrink text-balance text-2xl sm:text-3xl md:text-4xl lg:text-5xl">
+        <div className="flex items-center justify-center gap-6 text-neutral-950 md:pt-8">
+          <h1 className="flex-1 shrink text-balance text-2xl sm:text-3xl md:max-w-[30%] md:text-4xl lg:text-5xl">
             {translate('team.title', {
               movement: (
                 <span className="italic">
