@@ -33,10 +33,20 @@ export const loader = ({ params }: LoaderFunctionArgs) => {
 
 export default function Layout() {
   const { translation } = useLoaderData<typeof loader>();
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const location = useLocation();
+
+  React.useEffect(() => {
+    containerRef.current?.scrollTo(0, 0);
+  }, [location.pathname]);
+
   return (
     <LocalizationProvider translation={translation}>
       <Nav />
-      <div className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
+      <div
+        className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden"
+        ref={containerRef}
+      >
         <Outlet />
         <Footer />
       </div>

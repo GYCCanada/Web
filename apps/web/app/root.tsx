@@ -1,12 +1,5 @@
 import { LoaderFunctionArgs } from '@remix-run/node';
-import {
-  Links,
-  Meta,
-  Outlet,
-  Scripts,
-  ScrollRestoration,
-  useLoaderData,
-} from '@remix-run/react';
+import { Links, Meta, Outlet, Scripts, useLoaderData } from '@remix-run/react';
 
 import { ClientHintCheck, getHints } from './lib/client-hints';
 
@@ -39,7 +32,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         {children}
-        <ScrollRestoration />
         <Scripts />
       </body>
     </html>
