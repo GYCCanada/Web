@@ -277,62 +277,67 @@ function Footer() {
   const translate = useTranslate();
   const { currentConference } = useLoaderData<typeof loader>();
   return (
-    <footer className="bg-background text-foreground flex flex-col gap-12 px-4 py-10">
-      <div className="flex flex-col gap-3">
-        <p>{translate('footer.copy')}</p>
-        <div className="flex items-center gap-4">
-          <a
-            href="https://www.instagram.com/gyccanada"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <InstagramIcon className="size-6" />
-          </a>
-          <a
-            href="https://www.youtube.com/@gyccanada"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <YoutubeIcon className="size-6" />
-          </a>
-          <a
-            href="https://www.facebook.com/GYCCanada"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <FacebookIcon className="size-6" />
-          </a>
+    <footer className="bg-background text-foreground">
+      <div className="mx-auto flex w-[--width] flex-col gap-12 px-4 py-10">
+        <div className="flex flex-col gap-12 xl:flex-row xl:justify-between">
+          <div className="flex flex-col gap-3">
+            <p>{translate('footer.copy')}</p>
+            <div className="flex items-center gap-4">
+              <a
+                href="https://www.instagram.com/gyccanada"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <InstagramIcon className="size-6" />
+              </a>
+              <a
+                href="https://www.youtube.com/@gyccanada"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <YoutubeIcon className="size-6" />
+              </a>
+              <a
+                href="https://www.facebook.com/GYCCanada"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <FacebookIcon className="size-6" />
+              </a>
+            </div>
+            <p>291 Queen Street, Strathroy Ontario N7G 2J3</p>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <p className="text-neutral-500">{translate('footer.links')}</p>
+            <Link to={`/`} className={linkStyle}>
+              {currentConference.name} {currentConference.year}
+            </Link>
+            <Link to="/about" className={linkStyle}>
+              {translate('nav.about')}
+            </Link>
+            <Link to="/contact" className={linkStyle}>
+              {translate('nav.contact')}
+            </Link>
+            <Link to="/give" className={linkStyle}>
+              {translate('nav.give')}
+            </Link>
+          </div>
         </div>
-        <p>291 Queen Street, Strathroy Ontario N7G 2J3</p>
-      </div>
 
-      <div className="flex flex-col gap-2">
-        <Link to={`/`} className={linkStyle}>
-          {currentConference.name} {currentConference.year}
-        </Link>
-        <Link to="/about" className={linkStyle}>
-          {translate('nav.about')}
-        </Link>
-        <Link to="/contact" className={linkStyle}>
-          {translate('nav.contact')}
-        </Link>
-        <Link to="/give" className={linkStyle}>
-          {translate('nav.give')}
-        </Link>
+        <p>
+          {translate('footer.affiliation', {
+            gyc: (
+              <ExternalLink
+                href="https://gycweb.org"
+                className="text-accent-600 hover:text-accent-500 active:text-accent-700"
+              >
+                GYC
+              </ExternalLink>
+            ),
+          })}
+        </p>
       </div>
-
-      <p>
-        {translate('footer.affiliation', {
-          gyc: (
-            <ExternalLink
-              href="https://gycweb.org"
-              className="text-accent-600 hover:text-accent-500 active:text-accent-700"
-            >
-              GYC
-            </ExternalLink>
-          ),
-        })}
-      </p>
     </footer>
   );
 }

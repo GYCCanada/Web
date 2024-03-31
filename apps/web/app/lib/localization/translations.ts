@@ -36,6 +36,7 @@ const en = {
   'nav.volunteer': 'Join the Movement',
   'footer.copy': `© ${new Date().getFullYear()} GYC Canada. All rights reserved.`,
   'footer.affiliation': 'A {{gyc}} affiliate ministry.',
+  'footer.links': 'Quick Links',
   'contact.title': 'Want to get in touch?',
   'contact.directions':
     'You can reach us anytime via email at {{email}}, or with the form below.',
@@ -162,6 +163,7 @@ const fr = {
   'nav.volunteer': 'Rejoignez le mouvement',
   'footer.copy': `© ${new Date().getFullYear()} GYC Canada. Tous droits réservés.`,
   'footer.affiliation': 'Un ministère affilié à {{gyc}}.',
+  'footer.links': 'Liens rapides',
   'contact.title': 'Vous voulez entrer en contact?',
   'contact.directions':
     'Vous pouvez nous joindre à tout moment par courriel à {{email}}, ou avec le formulaire ci-dessous.',
