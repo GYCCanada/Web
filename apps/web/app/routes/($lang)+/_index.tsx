@@ -402,8 +402,8 @@ interface SpeakerCardProps {
 
 function SpeakerCard({ name, activity, img }: SpeakerCardProps) {
   return (
-    <div className="relative aspect-square min-h-[350px] w-full">
-      <div className="text-link-50 bg-link-600 left-1 top-1 size-[95%] h-[90%]  -rotate-3 p-4">
+    <div className="relative aspect-square w-full">
+      <div className="text-link-50 bg-link-600 left-1 top-1 size-[95%] h-[90%]  -rotate-3 overflow-hidden p-4">
         <p className="break-words text-[100px] font-black uppercase leading-[0.8] tracking-tight opacity-30">
           {activity}
         </p>
