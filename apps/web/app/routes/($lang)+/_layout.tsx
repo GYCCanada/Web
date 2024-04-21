@@ -44,6 +44,7 @@ export default function Layout() {
     <LocalizationProvider translation={translation}>
       <Nav />
       <div
+        data-scroll-container
         className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden"
         ref={containerRef}
       >

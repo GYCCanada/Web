@@ -13,7 +13,7 @@ const en = {
   'main.gyc_tagline.for': 'for',
   'main.read_our_story': 'Read our story',
   'main.meet_the_team': 'Meet the team',
-  'main.newsletter.title': 'Stay in the loop',
+  'main.newsletter.title': 'Get notified when registration opens',
   'main.newsletter.subtitle':
     'We’ll send our monthly newsletter straight to your inbox, give you a chance for early-bird pricing the moment it launches, and more!',
   'main.newsletter.name.label': 'Full Name',
@@ -145,7 +145,7 @@ const fr: Record<TranslationKey, string> = {
   'main.gyc_tagline.for': 'pour',
   'main.read_our_story': 'Lire notre histoire',
   'main.meet_the_team': 'Rencontrez l’équipe',
-  'main.newsletter.title': 'Restez informé',
+  'main.newsletter.title': 'Soyez informé lorsque l’inscription ouvre',
   'main.newsletter.subtitle':
     'Nous enverrons notre bulletin mensuel directement dans votre boîte de réception, vous donnant la chance de profiter des tarifs de lancement dès leur lancement, et plus encore!',
   'main.newsletter.name.label': 'Nom complet',

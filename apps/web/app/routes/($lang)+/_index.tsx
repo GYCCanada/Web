@@ -20,6 +20,7 @@ import { TextField } from '~/ui/text-field';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
+import { motion, transform, useMotionValue } from 'framer-motion';
 import {
   ArrowRightIcon,
   FacebookIcon,
@@ -27,6 +28,7 @@ import {
   PlayIcon,
   YoutubeIcon,
 } from 'lucide-react';
+import * as React from 'react';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
@@ -93,11 +95,6 @@ const conference: Record<Locale, Conference> = {
         activity: 'Morning Plenary',
         img: '/team/yves.jpg',
       },
-      {
-        name: 'John Doe',
-        activity: 'Morning Plenary',
-        img: '/team/yves.jpg',
-      },
     ],
     seminars: [
       {
@@ -134,8 +131,38 @@ const conference: Record<Locale, Conference> = {
       chapter: 9,
       verse: 4,
     },
-    seminars: [],
-    speakers: [],
+    speakers: [
+      {
+        name: 'John Doe',
+        activity: 'Plénière du matin',
+        img: '/team/yves.jpg',
+      },
+      {
+        name: 'John Doe',
+        activity: 'Plénière du matin',
+        img: '/team/yves.jpg',
+      },
+    ],
+    seminars: [
+      {
+        title: 'Titre du séminaire',
+        speaker: {
+          name: 'John Doe',
+          activity: 'Plénière du matin',
+          img: '/team/yves.jpg',
+        },
+        description: 'Description du séminaire',
+      },
+      {
+        title: 'Titre du séminaire',
+        speaker: {
+          name: 'John Doe',
+          activity: 'Plénière du matin',
+          img: '/team/yves.jpg',
+        },
+        description: 'Description du séminaire',
+      },
+    ],
   },
 };
 
@@ -170,7 +197,7 @@ export default function Index() {
         {translate('main.speakers.title')}
       </h2>
       <section className="relative flex flex-col gap-6 px-3 py-12">
-        <div className="flex flex-col gap-10 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="flex flex-col gap-20 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {conference.speakers.map((speaker, i) => (
             <SpeakerCard key={i} {...speaker} />
           ))}
@@ -180,7 +207,7 @@ export default function Index() {
         {translate('main.seminars.title')}
       </h2>
       <section className="flex flex-col gap-6 px-3 py-12">
-        <div className="flex flex-col gap-10 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="flex flex-col gap-20 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {conference.seminars.map((seminar, i) => (
             <SpeakerCard
               key={i}
@@ -401,13 +428,86 @@ interface SpeakerCardProps {
 }
 
 function SpeakerCard({ name, activity, img }: SpeakerCardProps) {
+  const id = React.useId();
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  // const none = motionValue(0);
+  const top = useMotionValue(20);
+  const left = useMotionValue(20);
+  const rotate = useMotionValue(0);
+
+  React.useEffect(() => {
+    const scrollContainer = document.querySelector('[data-scroll-container]');
+
+    if (!scrollContainer) return;
+
+    let isInViewport = false;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting) {
+          isInViewport = true;
+        } else {
+          isInViewport = false;
+        }
+      },
+      {
+        root: scrollContainer,
+
+        threshold: 0,
+      },
+    );
+
+    observer.observe(ref.current!);
+
+    const initialCardRect = ref.current?.getBoundingClientRect();
+
+    if (!initialCardRect) return;
+
+    function onScroll() {
+      const containerEle = document.querySelector(
+        '[data-scroll-container]',
+      ) as HTMLElement;
+      if (!containerEle) return;
+      if (!isInViewport) return;
+      const scrollY = containerEle.scrollTop + containerEle.clientHeight;
+
+      const bounds = [
+        initialCardRect!.top,
+        initialCardRect!.top + initialCardRect!.height,
+      ];
+
+      const nextTop = transform(scrollY, bounds, [20, 4]);
+      const nextLeft = transform(scrollY, bounds, [20, 4]);
+      const nextRotate = transform(scrollY, bounds, [0, -3]);
+
+      top.set(nextTop);
+      left.set(nextLeft);
+      rotate.set(nextRotate);
+    }
+
+    scrollContainer.addEventListener('scroll', onScroll);
+    return () => {
+      observer.disconnect();
+      scrollContainer.removeEventListener('scroll', onScroll);
+    };
+  }, [top, left, rotate]);
+
   return (
-    <div className="relative aspect-square w-full">
-      <div className="text-link-50 bg-link-600 left-1 top-1 size-[95%] h-[90%]  -rotate-3 overflow-hidden p-4">
+    <div className="relative aspect-square w-full" ref={ref} id={id}>
+      <motion.div
+        className="text-link-50 bg-link-600 rota size-[95%] h-[90%] overflow-hidden p-4"
+        style={{
+          left,
+          top,
+          rotate,
+        }}
+      >
         <p className="break-words text-[100px] font-black uppercase leading-[0.8] tracking-tight opacity-30">
           {activity}
         </p>
-      </div>
+      </motion.div>
 
       <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
         <img className="size-full" src={img} alt={`${name}, ${activity}`} />
@@ -493,12 +593,13 @@ function NewsletterForm() {
           className="aspect-auto max-md:w-full md:flex-1"
         />
         <div className="flex flex-col gap-4 md:flex-1">
-          <div className="text-accent-600 flex shrink items-center gap-2">
-            <h2 className="text-accent-600 text-4xl font-bold">
-              {translate('main.newsletter.title')}
-            </h2>
-            <PaperPlane className="size-16" />
-          </div>
+          <h2 className="text-accent-600 flex-1 shrink text-4xl font-bold">
+            {translate('main.newsletter.title')}
+            <span className="inline-flex align-middle">
+              <PaperPlane className="size-16" />
+            </span>
+          </h2>
+
           <p>{translate('main.newsletter.subtitle')}</p>
           <FormProvider context={form.context}>
             <Form method="POST" className="flex flex-col gap-4" id={form.id}>
