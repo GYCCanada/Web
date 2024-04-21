@@ -2,7 +2,11 @@ import { Locale } from './localization';
 
 const en = {
   'main.reserve': 'Reserve',
+  'main.read_bible': 'Read in Context',
+  'main.watch-promo': 'Watch promo',
   'main.time_left': 'See you in {{days}} days',
+  'main.speakers.title': 'Speakers',
+  'main.seminars.title': 'Seminars',
   'main.gyc_tagline':
     'GYC Canada is a {{movement}} of young people {{for}} young people.',
   'main.gyc_tagline.movement': 'movement',
@@ -128,9 +132,13 @@ const en = {
 
 export type TranslationKey = keyof typeof en;
 
-const fr = {
+const fr: Record<TranslationKey, string> = {
   'main.reserve': 'Réserve',
+  'main.read_bible': 'Lire en contexte',
+  'main.watch-promo': 'Regardez la promo',
   'main.time_left': 'Rendez-vous dans {{days}} jours',
+  'main.speakers.title': 'Conférenciers',
+  'main.seminars.title': 'Séminaires',
   'main.gyc_tagline':
     'GYC Canada est un {{movement}} de jeunes {{for}} les jeunes.',
   'main.gyc_tagline.movement': 'mouvement',
@@ -254,7 +262,7 @@ const fr = {
   'volunteer.form.submit': 'Soumettre',
   'volunteer.form.error':
     "Une erreur s'est produite lors de l'envoi de votre message. Veuillez réessayer plus tard.",
-} as const satisfies Record<TranslationKey, string>;
+};
 
 export const root = {
   en,

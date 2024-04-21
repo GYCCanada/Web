@@ -7,20 +7,26 @@ import type {
 } from '@remix-run/node';
 import { Form, redirect, useActionData, useLoaderData } from '@remix-run/react';
 import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
-import { useTranslate } from '~/lib/localization/context';
+import { useLocale, useTranslate } from '~/lib/localization/context';
 import { Locale } from '~/lib/localization/localization';
 import { getLocale } from '~/lib/localization/localization.server';
 import { Button, buttonStyle } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
+import { LocalizedImage } from '~/ui/image';
 import { Label } from '~/ui/label';
 import { Link } from '~/ui/link';
 import { Main } from '~/ui/main';
 import { TextField } from '~/ui/text-field';
-import clsx from 'clsx';
 import dayjs from 'dayjs';
 import timezone from 'dayjs/plugin/timezone';
 import utc from 'dayjs/plugin/utc';
-import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
+import {
+  ArrowRightIcon,
+  FacebookIcon,
+  InstagramIcon,
+  PlayIcon,
+  YoutubeIcon,
+} from 'lucide-react';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
@@ -44,6 +50,20 @@ type Conference = {
     chapter: number;
     verse: number;
   };
+  speakers: Speaker[];
+  seminars: Seminar[];
+};
+
+type Speaker = {
+  name: string;
+  activity: string;
+  img: string;
+};
+
+type Seminar = {
+  title: string;
+  speaker: Speaker;
+  description: string;
 };
 
 const conference: Record<Locale, Conference> = {
@@ -61,6 +81,44 @@ const conference: Record<Locale, Conference> = {
       chapter: 9,
       verse: 4,
     },
+
+    speakers: [
+      {
+        name: 'John Doe',
+        activity: 'Morning Plenary',
+        img: '/team/yves.jpg',
+      },
+      {
+        name: 'John Doe',
+        activity: 'Morning Plenary',
+        img: '/team/yves.jpg',
+      },
+      {
+        name: 'John Doe',
+        activity: 'Morning Plenary',
+        img: '/team/yves.jpg',
+      },
+    ],
+    seminars: [
+      {
+        title: 'Seminar Title',
+        speaker: {
+          name: 'John Doe',
+          activity: 'Morning Plenary',
+          img: '/team/yves.jpg',
+        },
+        description: 'Seminar Description',
+      },
+      {
+        title: 'Seminar Title',
+        speaker: {
+          name: 'John Doe',
+          activity: 'Morning Plenary',
+          img: '/team/yves.jpg',
+        },
+        description: 'Seminar Description',
+      },
+    ],
   },
   fr: {
     title: "Tant qu'il fait jour",
@@ -76,6 +134,8 @@ const conference: Record<Locale, Conference> = {
       chapter: 9,
       verse: 4,
     },
+    seminars: [],
+    speakers: [],
   },
 };
 
@@ -101,11 +161,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function Index() {
   const translate = useTranslate();
+  const { conference } = useLoaderData<typeof loader>();
   return (
     <Main>
       <Hero />
-      <TimeLeft />
-      <section className="flex flex-col px-3 py-12 text-5xl md:hidden">
+      {/* <TimeLeft /> */}
+      <h2 className="sticky top-0 bg-inherit px-3 text-4xl font-bold">
+        {translate('main.speakers.title')}
+      </h2>
+      <section className="relative flex flex-col gap-6 px-3 py-12">
+        <div className="flex flex-col gap-10 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {conference.speakers.map((speaker, i) => (
+            <SpeakerCard key={i} {...speaker} />
+          ))}
+        </div>
+      </section>
+      <h2 className="sticky top-0 px-3 text-4xl font-bold">
+        {translate('main.seminars.title')}
+      </h2>
+      <section className="flex flex-col gap-6 px-3 py-12">
+        <div className="flex flex-col gap-10 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {conference.seminars.map((seminar, i) => (
+            <SpeakerCard
+              key={i}
+              img={seminar.speaker.img}
+              name={seminar.speaker.name}
+              activity={seminar.title}
+            />
+          ))}
+        </div>
+      </section>
+      {/* <section className="flex flex-col px-3 py-12 text-5xl md:hidden">
         <h3 className="text-5xl">
           {translate('main.gyc_tagline', {
             movement: (
@@ -129,7 +215,7 @@ export default function Index() {
           alt="Mission"
           className="aspect-auto max-md:w-full md:flex-1"
         />
-        <div className="flex flex-col gap-6 p-3 max-md:absolute max-md:top-0 md:flex-1">
+        <div className="flex flex-col gap-6 p-4 max-md:absolute max-md:top-0 md:flex-1">
           <h3 className="text-5xl max-md:hidden">
             {translate('main.gyc_tagline', {
               movement: (
@@ -157,10 +243,10 @@ export default function Index() {
             </Link>
           </div>
         </div>
-      </section>
+      </section> */}
       <NewsletterForm />
 
-      <section className="flex flex-col gap-6 p-3 md:flex-row-reverse md:py-32">
+      <section className="flex flex-col gap-6 p-4 md:flex-row-reverse md:py-32">
         <img
           src="/main/mission.png"
           alt="Mission"
@@ -216,32 +302,45 @@ function MobileHero() {
   const { conference } = useLoaderData<typeof loader>();
   const hints = useHints();
   const translate = useTranslate();
+  const locale = useLocale();
   return (
-    <section className="flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
+    <section className="flex flex-col gap-10 p-4 pb-16">
       <div>
-        <img
-          src="/2024/hero.png"
-          alt={conference.title}
-          className="aspect-auto w-full"
+        <LocalizedImage
+          srcs={{
+            en: '/2024/en/hero-mobile.jpg',
+            fr: '/2024/fr/hero-mobile.jpg',
+          }}
         />
-        <Button className="absolute -bottom-6 right-4">
-          {translate('main.reserve')}
+        <Button className="absolute -bottom-6 left-4" variant="default">
+          <PlayIcon className="size-5" /> {translate('main.watch-promo')}
         </Button>
       </div>
-      <div className="flex flex-col gap-1 text-4xl">
-        <h2>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2 text-4xl">
+          <h2>
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
+            {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
+          </h2>
+          <h3>{conference.location}</h3>
+        </div>
+        <p className="text-balance text-xl italic">{conference.tagline}</p>
+        <p className="text-xl uppercase">
           {conference.bible.book} {conference.bible.chapter}:
           {conference.bible.verse}
-        </h2>
-        <h2>
-          {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
-          {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
-          {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
-          {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
-        </h2>
-        <h3>{conference.location}</h3>
+        </p>
+        <div>
+          <a
+            className={buttonStyle}
+            data-variant="accent"
+            href={`https://www.biblegateway.com/passage/?search=${conference.bible.book}+${conference.bible.chapter}&version=${locale === 'en' ? 'NKJV' : 'LSG'}`}
+          >
+            {translate('main.read_bible')}
+          </a>
+        </div>
       </div>
-      <p className="text-xl italic">{conference.tagline}</p>
     </section>
   );
 }
@@ -250,13 +349,14 @@ function DesktopHero() {
   const hints = useHints();
   const translate = useTranslate();
   return (
-    <section className="full-bleed flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
+    <section className="full-bleed flex flex-col gap-10 p-4 pb-16">
       <div className="mx-auto flex w-[--width] gap-10 py-16">
         <div className="flex flex-1 flex-col gap-10">
-          <img
-            src="/2024/hero.png"
-            alt={conference.title}
-            className="aspect-auto w-full"
+          <LocalizedImage
+            srcs={{
+              en: '/2024/en/hero-desktop.jpg',
+              fr: '/2024/fr/hero-desktop.jpg',
+            }}
           />
           <p className="text-2xl italic">{conference.tagline}</p>
         </div>
@@ -294,46 +394,75 @@ function DesktopHero() {
   );
 }
 
-function TimeLeft() {
-  const hints = useHints();
-  const { conference } = useLoaderData<typeof loader>();
-  const translate = useTranslate();
-
-  const days = dayjs(conference.dates[0])
-    .tz(hints.timeZone)
-    .diff(dayjs().tz(hints.timeZone), 'days');
-
-  return (
-    <section className="flex flex-col items-center justify-center gap-6 p-3 py-16 text-center text-4xl lg:h-screen lg:gap-12 lg:text-[64px]">
-      {translate('main.time_left', {
-        days: (
-          <p className="py-10 text-[144px] tabular-nums lg:py-20 lg:text-[256px]">
-            {days}
-          </p>
-        ),
-      })}
-    </section>
-  );
+interface SpeakerCardProps {
+  name: string;
+  activity: string;
+  img: string;
 }
 
-function GradientLine({
-  children,
-  className,
-}: {
-  children?: React.ReactNode;
-  className?: string;
-}) {
+function SpeakerCard({ name, activity, img }: SpeakerCardProps) {
   return (
-    <div
-      className={clsx(
-        'to-link-700 h-2 w-full bg-gradient-to-r from-transparent',
-        className,
-      )}
-    >
-      {children}
+    <div className="relative aspect-square min-h-[350px] w-full">
+      <div className="text-link-50 bg-link-600 left-1 top-1 size-[95%] h-[90%]  -rotate-3 p-4">
+        <p className="break-words text-[100px] font-black uppercase leading-[0.8] tracking-tight opacity-30">
+          {activity}
+        </p>
+      </div>
+
+      <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
+        <img className="size-full" src={img} alt={`${name}, ${activity}`} />
+        <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4">
+          <div className="flex items-center gap-2">
+            <h3 className="text-3xl font-bold leading-5">{name}</h3>
+            <ArrowRightIcon className="size-8" />
+          </div>
+          <p className="text-xl">{activity}</p>
+        </div>
+      </div>
     </div>
   );
 }
+
+// function TimeLeft() {
+//   const hints = useHints();
+//   const { conference } = useLoaderData<typeof loader>();
+//   const translate = useTranslate();
+
+//   const days = dayjs(conference.dates[0])
+//     .tz(hints.timeZone)
+//     .diff(dayjs().tz(hints.timeZone), 'days');
+
+//   return (
+//     <section className="flex flex-col items-center justify-center gap-6 p-4 py-16 text-center text-4xl lg:h-screen lg:gap-12 lg:text-[64px]">
+//       {translate('main.time_left', {
+//         days: (
+//           <p className="py-10 text-[144px] tabular-nums lg:py-20 lg:text-[256px]">
+//             {days}
+//           </p>
+//         ),
+//       })}
+//     </section>
+//   );
+// }
+
+// function GradientLine({
+//   children,
+//   className,
+// }: {
+//   children?: React.ReactNode;
+//   className?: string;
+// }) {
+//   return (
+//     <div
+//       className={clsx(
+//         'to-link-700 h-2 w-full bg-gradient-to-r from-transparent',
+//         className,
+//       )}
+//     >
+//       {children}
+//     </div>
+//   );
+// }
 
 const schema = z.object({
   email: z.string(),
@@ -364,11 +493,11 @@ function NewsletterForm() {
           className="aspect-auto max-md:w-full md:flex-1"
         />
         <div className="flex flex-col gap-4 md:flex-1">
-          <div className="text-accent-600 flex items-center gap-2">
+          <div className="text-accent-600 flex shrink items-center gap-2">
             <h2 className="text-accent-600 text-4xl font-bold">
               {translate('main.newsletter.title')}
             </h2>
-            <PaperPlane className="h-20 w-20" />
+            <PaperPlane className="size-16" />
           </div>
           <p>{translate('main.newsletter.subtitle')}</p>
           <FormProvider context={form.context}>
