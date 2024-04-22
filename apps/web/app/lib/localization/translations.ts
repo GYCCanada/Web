@@ -3,10 +3,7 @@ import { Locale } from './localization';
 const en = {
   'main.reserve': 'Reserve',
   'main.read_bible': 'Read in Context',
-  'main.watch-promo': 'Watch promo',
   'main.time_left': 'See you in {{days}} days',
-  'main.speakers.title': 'Speakers',
-  'main.seminars.title': 'Seminars',
   'main.gyc_tagline':
     'GYC Canada is a {{movement}} of young people {{for}} young people.',
   'main.gyc_tagline.movement': 'movement',
@@ -128,6 +125,14 @@ const en = {
   'volunteer.form.submit': 'Submit',
   'volunteer.form.error':
     'An error occurred while sending your message. Please try again later.',
+  'registration.watch-promo': 'Watch promo',
+  'registration.speakers.title': 'Speakers',
+  'registration.seminars.title': 'Seminars',
+  'registration.faq.title': 'Got Questions?',
+  'registration.faq.subtitle':
+    'More detailed conference information won’t be available until registration opens. You may also contact us if you need to get in touch, or check our FAQ for quick answers.',
+  'registration.faq.contact': 'Get in touch',
+  'registration.faq.view': 'View FAQ',
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -135,10 +140,9 @@ export type TranslationKey = keyof typeof en;
 const fr: Record<TranslationKey, string> = {
   'main.reserve': 'Réserve',
   'main.read_bible': 'Lire en contexte',
-  'main.watch-promo': 'Regardez la promo',
+
   'main.time_left': 'Rendez-vous dans {{days}} jours',
-  'main.speakers.title': 'Conférenciers',
-  'main.seminars.title': 'Séminaires',
+
   'main.gyc_tagline':
     'GYC Canada est un {{movement}} de jeunes {{for}} les jeunes.',
   'main.gyc_tagline.movement': 'mouvement',
@@ -262,6 +266,14 @@ const fr: Record<TranslationKey, string> = {
   'volunteer.form.submit': 'Soumettre',
   'volunteer.form.error':
     "Une erreur s'est produite lors de l'envoi de votre message. Veuillez réessayer plus tard.",
+  'registration.watch-promo': 'Regardez la promo',
+  'registration.speakers.title': 'Conférenciers',
+  'registration.seminars.title': 'Séminaires',
+  'registration.faq.title': 'Des questions?',
+  'registration.faq.subtitle':
+    "Des informations plus détaillées sur la conférence ne seront pas disponibles avant l'ouverture des inscriptions. Vous pouvez également nous contacter si vous avez besoin de nous joindre, ou consulter notre FAQ pour des réponses rapides.",
+  'registration.faq.contact': 'Entrer en contact',
+  'registration.faq.view': 'Voir FAQ',
 };
 
 export const root = {

@@ -9,16 +9,24 @@ import { Form, redirect, useActionData, useLoaderData } from '@remix-run/react';
 import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
-import { useTranslate } from '~/lib/localization/context';
+import { useLocale, useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization.server';
 import { Button, buttonStyle } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
+import { LocalizedImage } from '~/ui/image';
 import { Label } from '~/ui/label';
 import { Link } from '~/ui/link';
 import { Main } from '~/ui/main';
 import { TextField } from '~/ui/text-field';
-import clsx from 'clsx';
-import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
+import { motion, transform, useMotionValue } from 'framer-motion';
+import {
+  ArrowRightIcon,
+  FacebookIcon,
+  InstagramIcon,
+  PlayIcon,
+  YoutubeIcon,
+} from 'lucide-react';
+import * as React from 'react';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
@@ -31,9 +39,7 @@ export const meta: MetaFunction = () => {
 
 export const loader = ({ params }: LoaderFunctionArgs) => {
   const locale = getLocale(params);
-  return {
-    conference: getCurrentConference(locale),
-  };
+  return { conference: getCurrentConference(locale) };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -51,100 +57,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function Index() {
   const translate = useTranslate();
+  const { conference } = useLoaderData<typeof loader>();
   return (
     <Main>
       <Hero />
-      <TimeLeft />
-      <section className="flex flex-col px-3 py-12 text-5xl md:hidden">
-        <h3 className="text-5xl">
-          {translate('main.gyc_tagline', {
-            movement: (
-              <span className="inline-block w-max italic">
-                <GradientLine className="absolute inset-x-0 bottom-2" />
-                <span>{translate('main.gyc_tagline.movement')}</span>
-              </span>
-            ),
-            for: (
-              <span className="inline-block w-max italic">
-                <GradientLine className="absolute inset-x-0 bottom-2" />
-                <span>{translate('main.gyc_tagline.for')}</span>
-              </span>
-            ),
-          })}
-        </h3>
-      </section>
-      <section className="flex flex-col gap-6 pt-16 text-5xl md:flex-row-reverse md:justify-between">
-        <img
-          src="/main/people.png"
-          alt="Mission"
-          className="aspect-auto max-md:w-full md:flex-1"
-        />
-        <div className="flex flex-col gap-6 p-3 max-md:absolute max-md:top-0 md:flex-1">
-          <h3 className="text-5xl max-md:hidden">
-            {translate('main.gyc_tagline', {
-              movement: (
-                <span className="inline-block w-max italic">
-                  <GradientLine className="absolute inset-x-0 bottom-2" />
-                  <span>{translate('main.gyc_tagline.movement')}</span>
-                </span>
-              ),
-              for: (
-                <span className="inline-block w-max italic">
-                  <GradientLine className="absolute inset-x-0 bottom-2" />
-                  <span>{translate('main.gyc_tagline.for')}</span>
-                </span>
-              ),
-            })}
-          </h3>
-          <div>
-            <Link to="/about" className={buttonStyle} data-variant="accent">
-              {translate('main.read_our_story')}
-            </Link>
-          </div>
-          <div>
-            <Link to="/team" className={buttonStyle} data-variant="positive">
-              {translate('main.meet_the_team')}
-            </Link>
-          </div>
+      <section className="relative flex flex-col gap-6 px-3 py-12">
+        <StickyTitle className="bg-inherit text-4xl font-bold data-[sticky]:fixed data-[sticky]:top-[60px] data-[sticky]:z-10">
+          {translate('registration.speakers.title')}
+        </StickyTitle>
+        <div className="flex flex-col gap-20 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {conference.speakers.map((speaker, i) => (
+            <SpeakerCard key={i} {...speaker} />
+          ))}
         </div>
       </section>
+      <section className="flex flex-col gap-6 px-3 py-12">
+        <h2 className="sticky top-0 bg-inherit text-4xl font-bold">
+          {translate('registration.seminars.title')}
+        </h2>
+        <div className="flex flex-col gap-20 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {conference.seminars.map((seminar, i) => (
+            <SpeakerCard
+              key={i}
+              img={seminar.speaker.img}
+              name={seminar.speaker.name}
+              activity={seminar.title}
+            />
+          ))}
+        </div>
+      </section>
+
       <NewsletterForm />
 
-      <section className="flex flex-col gap-6 p-3 md:flex-row-reverse md:py-32">
-        <img
-          src="/main/mission.png"
-          alt="Mission"
-          className="aspect-auto max-md:w-full md:flex-1"
-        />
-        <div className="flex flex-col gap-6 md:flex-1">
-          <h2 className="text-accent-600 text-4xl font-bold">
-            {translate('main.join.title')}
-          </h2>
-          <p>
-            {translate('main.join.subtitle', {
-              br: (
-                <>
-                  <br />
-                  <br />
-                </>
-              ),
-            })}
-          </p>
-          <div className="flex flex-col gap-4">
-            <div>
-              <Link to="/give" className={buttonStyle} data-variant="accent">
-                {translate('main.donate.link')}
-              </Link>
-            </div>
-            <div>
-              <Link
-                to="/volunteer"
-                className={buttonStyle}
-                data-variant="positive"
-              >
-                {translate('main.join.link')}
-              </Link>
-            </div>
+      <section className="flex flex-col gap-6 p-4 md:py-32">
+        <h2 className="text-accent-600 text-4xl font-bold">
+          {translate('registration.faq.title')}
+        </h2>
+        <p>{translate('registration.faq.subtitle')}</p>
+        <div className="flex flex-col gap-4">
+          <div>
+            <Link to="/contact" className={buttonStyle} data-variant="accent">
+              {translate('registration.faq.contact')}
+            </Link>
+          </div>
+          <div>
+            <Link to="/faq" className={buttonStyle} data-variant="positive">
+              {translate('registration.faq.view')}
+            </Link>
           </div>
         </div>
       </section>
@@ -166,36 +125,46 @@ function MobileHero() {
   const { conference } = useLoaderData<typeof loader>();
   const hints = useHints();
   const translate = useTranslate();
+  const locale = useLocale();
   return (
-    <section className="flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
+    <section className="flex flex-col gap-10 pb-16">
       <div>
-        <img
-          src="/2024/hero.png"
-          alt={conference.title}
-          className="aspect-auto w-full"
+        <LocalizedImage
+          srcs={{
+            en: '/2024/en/hero-mobile.jpg',
+            fr: '/2024/fr/hero-mobile.jpg',
+          }}
         />
-        <Link
-          to="/registration"
-          className={clsx(buttonStyle, 'absolute -bottom-6 right-4')}
-          data-variant="accent"
-        >
-          {translate('main.reserve')}
-        </Link>
+        <Button className="absolute -bottom-6 left-4" variant="default">
+          <PlayIcon className="size-5" />{' '}
+          {translate('registration.watch-promo')}
+        </Button>
       </div>
-      <div className="flex flex-col gap-1 text-4xl">
-        <h2>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2 text-4xl">
+          <h2>
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
+            {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
+          </h2>
+          <h3>{conference.location}</h3>
+        </div>
+        <p className="text-balance text-xl italic">{conference.tagline}</p>
+        <p className="text-xl uppercase">
           {conference.bible.book} {conference.bible.chapter}:
           {conference.bible.verse}
-        </h2>
-        <h2>
-          {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
-          {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
-          {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
-          {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
-        </h2>
-        <h3>{conference.location}</h3>
+        </p>
+        <div>
+          <a
+            className={buttonStyle}
+            data-variant="accent"
+            href={`https://www.biblegateway.com/passage/?search=${conference.bible.book}+${conference.bible.chapter}&version=${locale === 'en' ? 'NKJV' : 'LSG'}`}
+          >
+            {translate('main.read_bible')}
+          </a>
+        </div>
       </div>
-      <p className="text-xl italic">{conference.tagline}</p>
     </section>
   );
 }
@@ -204,13 +173,14 @@ function DesktopHero() {
   const hints = useHints();
   const translate = useTranslate();
   return (
-    <section className="full-bleed flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
+    <section className="full-bleed flex flex-col gap-10 p-4 pb-16">
       <div className="mx-auto flex w-[--width] gap-10 py-16">
         <div className="flex flex-1 flex-col gap-10">
-          <img
-            src="/2024/hero.png"
-            alt={conference.title}
-            className="aspect-auto w-full"
+          <LocalizedImage
+            srcs={{
+              en: '/2024/en/hero-desktop.jpg',
+              fr: '/2024/fr/hero-desktop.jpg',
+            }}
           />
           <p className="text-2xl italic">{conference.tagline}</p>
         </div>
@@ -239,13 +209,7 @@ function DesktopHero() {
               <h3 className="text-5xl">{conference.location}</h3>
             </div>
             <div>
-              <Link
-                to="/registration"
-                className={clsx(buttonStyle, 'absolute -bottom-6 right-4')}
-                data-variant="accent"
-              >
-                {translate('main.reserve')}
-              </Link>
+              <Button>{translate('registration.watch-promo')}</Button>
             </div>
           </div>
         </div>
@@ -254,43 +218,99 @@ function DesktopHero() {
   );
 }
 
-function TimeLeft() {
-  const hints = useHints();
-  const { conference } = useLoaderData<typeof loader>();
-  const translate = useTranslate();
-
-  const days = dayjs(conference.dates[0])
-    .tz(hints.timeZone)
-    .diff(dayjs().tz(hints.timeZone), 'days');
-
-  return (
-    <section className="flex flex-col items-center justify-center gap-6 p-3 py-16 text-center text-4xl lg:h-screen lg:gap-12 lg:text-[64px]">
-      {translate('main.time_left', {
-        days: (
-          <p className="py-10 text-[144px] tabular-nums lg:py-20 lg:text-[256px]">
-            {days}
-          </p>
-        ),
-      })}
-    </section>
-  );
+interface SpeakerCardProps {
+  name: string;
+  activity: string;
+  img: string;
 }
 
-function GradientLine({
-  children,
-  className,
-}: {
-  children?: React.ReactNode;
-  className?: string;
-}) {
+function SpeakerCard({ name, activity, img }: SpeakerCardProps) {
+  const id = React.useId();
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  const position = useMotionValue(20);
+  const rotate = useMotionValue(0);
+
+  React.useEffect(() => {
+    const scrollContainer = document.querySelector('[data-scroll-container]');
+
+    if (!scrollContainer) return;
+
+    let isInViewport = false;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting) {
+          isInViewport = true;
+        } else {
+          isInViewport = false;
+        }
+      },
+      {
+        root: scrollContainer,
+
+        threshold: 0,
+      },
+    );
+
+    observer.observe(ref.current!);
+
+    const initialCardRect = ref.current?.getBoundingClientRect();
+
+    if (!initialCardRect) return;
+    const bounds = [
+      initialCardRect.top,
+      initialCardRect.top + initialCardRect.height,
+    ];
+
+    function onScroll() {
+      const containerEle = document.querySelector(
+        '[data-scroll-container]',
+      ) as HTMLElement;
+      if (!containerEle) return;
+      if (!isInViewport) return;
+      const scrollY = containerEle.scrollTop + containerEle.clientHeight;
+
+      const nextPosition = transform(scrollY, bounds, [20, 4]);
+      const nextRotate = transform(scrollY, bounds, [0, -3]);
+
+      position.set(nextPosition);
+      rotate.set(nextRotate);
+    }
+
+    scrollContainer.addEventListener('scroll', onScroll);
+    return () => {
+      observer.disconnect();
+      scrollContainer.removeEventListener('scroll', onScroll);
+    };
+  }, [position, rotate]);
+
   return (
-    <div
-      className={clsx(
-        'to-link-700 h-2 w-full bg-gradient-to-r from-transparent',
-        className,
-      )}
-    >
-      {children}
+    <div className="relative aspect-square w-full" ref={ref} id={id}>
+      <motion.div
+        className="text-link-50 bg-link-600 rota size-[95%] h-[90%] overflow-hidden p-4"
+        style={{
+          left: position,
+          top: position,
+          rotate,
+        }}
+      >
+        <p className="break-words text-[100px] font-black uppercase leading-[0.8] tracking-tight opacity-30">
+          {activity}
+        </p>
+      </motion.div>
+
+      <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
+        <img className="size-full" src={img} alt={`${name}, ${activity}`} />
+        <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4">
+          <div className="flex items-center gap-2">
+            <h3 className="text-3xl font-bold leading-5">{name}</h3>
+            <ArrowRightIcon className="size-8" />
+          </div>
+          <p className="text-xl">{activity}</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -324,9 +344,11 @@ function NewsletterForm() {
           className="aspect-auto max-md:w-full md:flex-1"
         />
         <div className="flex flex-col gap-4 md:flex-1">
-          <h2 className="text-accent-600 text-4xl font-bold">
+          <h2 className="text-accent-600 flex-1 shrink text-4xl font-bold">
             {translate('main.newsletter.title')}
-            <PaperPlane className="inline h-20 w-20" />
+            <span className="inline-flex align-middle">
+              <PaperPlane className="size-16" />
+            </span>
           </h2>
 
           <p>{translate('main.newsletter.subtitle')}</p>
@@ -433,5 +455,61 @@ function PaperPlane(props: React.SVGProps<SVGSVGElement>) {
         strokeWidth="2"
       />
     </svg>
+  );
+}
+
+function StickyTitle({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const ref = React.useRef<HTMLHeadingElement>(null);
+
+  const [isSticky, setIsSticky] = React.useState(false);
+
+  React.useEffect(() => {
+    const element = ref.current;
+    const scrollContainer = document.querySelector('[data-scroll-container]');
+    if (!scrollContainer) return;
+    if (!element) return;
+    const container = element.parentElement;
+    if (!container) return;
+    let headerIsVisible = false;
+    let containerIsVisible = false;
+    const containerObserver = new IntersectionObserver(
+      ([e]) => {
+        containerIsVisible = e.isIntersecting;
+        setIsSticky(containerIsVisible && !headerIsVisible);
+      },
+      {
+        root: scrollContainer,
+        threshold: 0.5,
+      },
+    );
+    const headerObserver = new IntersectionObserver(
+      ([e]) => {
+        headerIsVisible = e.isIntersecting;
+        setIsSticky(containerIsVisible && !headerIsVisible);
+      },
+      {
+        root: scrollContainer,
+        threshold: 0,
+      },
+    );
+    containerObserver.observe(container);
+    headerObserver.observe(element);
+
+    return () => {
+      containerObserver.disconnect();
+      headerObserver.disconnect();
+    };
+  }, []);
+
+  return (
+    <h2 className={className} ref={ref} data-sticky={isSticky ? '' : undefined}>
+      {children}
+    </h2>
   );
 }
