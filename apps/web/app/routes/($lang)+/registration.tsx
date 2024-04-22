@@ -32,8 +32,8 @@ import { z } from 'zod';
 
 export const meta: MetaFunction = () => {
   return [
-    { title: 'While It Is Day | GYCC' },
-    { name: 'description', content: 'Welcome to GYCC!' },
+    { title: '2024 Registration | GYCC' },
+    { name: 'description', content: 'Register for the 2024 conference.' },
   ];
 };
 
@@ -55,7 +55,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return redirect(new URL(request.url).pathname);
 };
 
-export default function Index() {
+export default function Registration() {
   const translate = useTranslate();
   const { conference } = useLoaderData<typeof loader>();
   return (

@@ -241,7 +241,7 @@ function DesktopHero() {
             <div>
               <Link
                 to="/registration"
-                className={clsx(buttonStyle, 'absolute -bottom-6 right-4')}
+                className={clsx(buttonStyle)}
                 data-variant="accent"
               >
                 {translate('main.reserve')}
