@@ -13,6 +13,7 @@ import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization.server';
 import { Button, buttonStyle } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
+import { LocalizedImage } from '~/ui/image';
 import { Label } from '~/ui/label';
 import { Link } from '~/ui/link';
 import { Main } from '~/ui/main';
@@ -169,8 +170,11 @@ function MobileHero() {
   return (
     <section className="flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
       <div>
-        <img
-          src="/2024/hero.png"
+        <LocalizedImage
+          srcs={{
+            en: '/2024/en/hero-mobile.jpg',
+            fr: '/2024/fr/hero-mobile.jpg',
+          }}
           alt={conference.title}
           className="aspect-auto w-full"
         />
@@ -207,8 +211,11 @@ function DesktopHero() {
     <section className="full-bleed flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
       <div className="mx-auto flex w-[--width] gap-10 py-16">
         <div className="flex flex-1 flex-col gap-10">
-          <img
-            src="/2024/hero.png"
+          <LocalizedImage
+            srcs={{
+              en: '/2024/en/hero-desktop.jpg',
+              fr: '/2024/fr/hero-desktop.jpg',
+            }}
             alt={conference.title}
             className="aspect-auto w-full"
           />
