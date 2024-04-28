@@ -303,7 +303,7 @@ function SpeakerCard({ name, activity, img }: SpeakerCardProps) {
 
       <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
         <img className="size-full" src={img} alt={`${name}, ${activity}`} />
-        <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4">
+        <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4 text-white">
           <div className="flex items-center gap-2">
             <h3 className="text-3xl font-bold leading-5">{name}</h3>
             <ArrowRightIcon className="size-8" />
