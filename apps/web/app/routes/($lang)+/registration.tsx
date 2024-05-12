@@ -5,7 +5,13 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from '@remix-run/node';
-import { Form, redirect, useActionData, useLoaderData } from '@remix-run/react';
+import {
+  Form,
+  redirect,
+  useActionData,
+  useLoaderData,
+  useSearchParams,
+} from '@remix-run/react';
 import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
@@ -18,8 +24,15 @@ import { Label } from '~/ui/label';
 import { Link } from '~/ui/link';
 import { Main } from '~/ui/main';
 import { TextField } from '~/ui/text-field';
-import { motion, transform, useMotionValue } from 'framer-motion';
 import {
+  AnimatePresence,
+  motion,
+  MotionConfig,
+  transform,
+  useMotionValue,
+} from 'framer-motion';
+import {
+  ArrowLeftIcon,
   ArrowRightIcon,
   FacebookIcon,
   InstagramIcon,
@@ -27,6 +40,7 @@ import {
   YoutubeIcon,
 } from 'lucide-react';
 import * as React from 'react';
+import { useButton } from 'react-aria';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
@@ -116,7 +130,7 @@ function MobileHero() {
           <PlayIcon className="size-5" /> {translate('registration.register')}
         </Button>
       </div>
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4 px-4">
         <div className="flex flex-col gap-2 text-4xl">
           <h2>
             {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
@@ -204,7 +218,7 @@ function SpeakersAndSeminars() {
         <h2 className="bg-inherit text-4xl font-bold data-[sticky]:fixed data-[sticky]:top-[60px] data-[sticky]:z-10">
           {translate('registration.speakers.title')}
         </h2>
-        <div className="flex flex-col gap-20 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="flex flex-col gap-20 md:grid md:grid-cols-1">
           {conference.speakers.map((speaker, i) => (
             <SpeakerCard key={i} {...speaker} />
           ))}
@@ -214,13 +228,14 @@ function SpeakersAndSeminars() {
         <h2 className="sticky top-0 bg-inherit text-4xl font-bold">
           {translate('registration.seminars.title')}
         </h2>
-        <div className="flex flex-col gap-20 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="flex flex-col gap-20 md:grid md:grid-cols-1">
           {conference.seminars.map((seminar, i) => (
             <SpeakerCard
               key={i}
               img={seminar.speaker.img}
               name={seminar.speaker.name}
               activity={seminar.title}
+              bio={seminar.speaker.bio}
             />
           ))}
         </div>
@@ -233,19 +248,212 @@ interface SpeakerCardProps {
   name: string;
   activity: string;
   img: string;
+  bio: string;
 }
 
-function SpeakerCard({ name, activity, img }: SpeakerCardProps) {
+function SpeakerCard(props: SpeakerCardProps) {
+  const breakpoint = useBreakpoint();
+  return match(breakpoint)
+    .when(
+      (b) => b <= Breakpoint.Md,
+      () => <MobileSpeakerCard {...props} />,
+    )
+    .otherwise(() => <DesktopSpeakerCard {...props} />);
+}
+
+function DesktopSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const id = React.useId();
+  const { position, rotate } = useCardRotation(ref);
+  return (
+    <div className="flex items-start gap-8">
+      <motion.div className="relative aspect-square flex-1" ref={ref} id={id}>
+        <motion.div
+          className="text-link-50 bg-link-600 rota size-[95%] h-[90%] overflow-hidden p-4"
+          style={{
+            left: position,
+            top: position,
+            rotate,
+          }}
+        >
+          <p className="break-words text-[100px] font-black uppercase leading-[0.8] tracking-tight opacity-30">
+            {activity}
+          </p>
+        </motion.div>
+
+        <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
+          <img className="size-full" src={img} alt={`${name}, ${activity}`} />
+          <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4 text-white">
+            <div className="flex items-center gap-2">
+              <motion.h3 className="text-3xl font-bold leading-5 text-white">
+                {name}
+              </motion.h3>
+            </div>
+            <motion.p className="text-xl text-white">{activity}</motion.p>
+          </div>
+        </div>
+      </motion.div>
+
+      <div className="flex flex-[3] flex-col gap-8">
+        <div className="flex flex-col gap-4">
+          <motion.h3 className="text-3xl font-bold leading-5">{name}</motion.h3>
+          <motion.p className="text-xl">{activity}</motion.p>
+        </div>
+
+        <motion.p className="text-xl">{bio}</motion.p>
+      </div>
+    </div>
+  );
+}
+
+function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
   const id = React.useId();
   const ref = React.useRef<HTMLDivElement>(null);
+  const { position, rotate } = useCardRotation(ref);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isActive =
+    searchParams.has('speaker') && searchParams.get('speaker') === id;
+
+  function onPress() {
+    if (isActive) {
+      setSearchParams((searchParams) => {
+        searchParams.delete('speaker');
+        return searchParams;
+      });
+    } else {
+      setSearchParams((searchParams) => {
+        searchParams.set('speaker', id);
+        return searchParams;
+      });
+    }
+  }
+
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  const heightRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const height = container.offsetHeight;
+    heightRef.current = height;
+  }, [isActive]);
+
+  const bioRef = React.useRef<HTMLDivElement>(null);
+
+  const cardProps = useButton({ onPress, elementType: 'div' }, ref);
+  const bioProps = useButton({ onPress, elementType: 'div' }, bioRef);
+
+  return (
+    <MotionConfig transition={{ type: 'spring', duration: 0.3, bounce: 0 }}>
+      <motion.div
+        animate={{
+          height: heightRef.current || undefined,
+        }}
+      >
+        <div className="overflow-hidden" ref={containerRef}>
+          <AnimatePresence mode="popLayout" initial={false}>
+            {isActive ? (
+              <motion.div
+                key="bio"
+                custom={isActive}
+                variants={SpeakerCardVariants}
+                initial="initial"
+                animate="enter"
+                exit="exit"
+                className="flex flex-col gap-8 p-4 outline-none"
+                ref={bioRef}
+                {...(bioProps.buttonProps as any)}
+              >
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <ArrowLeftIcon className="size-8" />
+                    <motion.h3 className="text-3xl font-bold leading-5">
+                      {name}
+                    </motion.h3>
+                  </div>
+                  <motion.p className="text-xl">{activity}</motion.p>
+                </div>
+
+                <motion.p className="text-xl">{bio}</motion.p>
+              </motion.div>
+            ) : (
+              <motion.div
+                className="relative aspect-square w-full outline-none"
+                ref={ref}
+                id={id}
+                key="image"
+                custom={isActive}
+                variants={SpeakerCardVariants}
+                initial="initial"
+                animate="enter"
+                exit="exit"
+                {...(cardProps.buttonProps as any)}
+              >
+                <motion.div
+                  className="text-link-50 bg-link-600 rota size-[95%] h-[90%] overflow-hidden p-4"
+                  style={{
+                    left: position,
+                    top: position,
+                    rotate,
+                  }}
+                >
+                  <p className="break-words text-[100px] font-black uppercase leading-[0.8] tracking-tight opacity-30">
+                    {activity}
+                  </p>
+                </motion.div>
+
+                <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
+                  <img
+                    className="size-full"
+                    src={img}
+                    alt={`${name}, ${activity}`}
+                  />
+                  <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4 text-white">
+                    <div className="flex items-center gap-2">
+                      <motion.h3 className="text-3xl font-bold leading-5 text-white">
+                        {name}
+                      </motion.h3>
+                      <ArrowRightIcon className="size-8" />
+                    </div>
+                    <motion.p className="text-xl text-white">
+                      {activity}
+                    </motion.p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
+    </MotionConfig>
+  );
+}
+
+const SpeakerCardVariants = {
+  initial: (isActive: boolean) => ({
+    opacity: 0,
+    x: isActive ? '-100%' : '100%',
+  }),
+  enter: {
+    opacity: 1,
+    x: 0,
+  },
+  exit: (isActive: boolean) => ({
+    opacity: 0,
+    x: isActive ? '-100%' : '100%',
+  }),
+};
+
+function useCardRotation(ref: React.RefObject<HTMLDivElement>) {
   const position = useMotionValue(20);
   const rotate = useMotionValue(0);
-
   React.useEffect(() => {
     const scrollContainer = document.querySelector('[data-scroll-container]');
 
     if (!scrollContainer) return;
+    if (!ref.current) return;
 
     let isInViewport = false;
 
@@ -295,35 +503,12 @@ function SpeakerCard({ name, activity, img }: SpeakerCardProps) {
       observer.disconnect();
       scrollContainer.removeEventListener('scroll', onScroll);
     };
-  }, [position, rotate]);
+  }, [position, rotate, ref]);
 
-  return (
-    <div className="relative aspect-square w-full" ref={ref} id={id}>
-      <motion.div
-        className="text-link-50 bg-link-600 rota size-[95%] h-[90%] overflow-hidden p-4"
-        style={{
-          left: position,
-          top: position,
-          rotate,
-        }}
-      >
-        <p className="break-words text-[100px] font-black uppercase leading-[0.8] tracking-tight opacity-30">
-          {activity}
-        </p>
-      </motion.div>
-
-      <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
-        <img className="size-full" src={img} alt={`${name}, ${activity}`} />
-        <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4 text-white">
-          <div className="flex items-center gap-2">
-            <h3 className="text-3xl font-bold leading-5 text-white">{name}</h3>
-            <ArrowRightIcon className="size-8" />
-          </div>
-          <p className="text-xl text-white">{activity}</p>
-        </div>
-      </div>
-    </div>
-  );
+  return {
+    position,
+    rotate,
+  };
 }
 
 const schema = z.object({
