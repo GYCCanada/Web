@@ -49,7 +49,7 @@ const conference: Record<Locale, Conference> = {
       dayjs('2024-08-21').utcOffset(0).endOf('day').valueOf(),
     ],
 
-    location: 'British Columbia',
+    location: 'Kelowna, British Columbia',
     tagline:
       '“I must work the works of Him who sent Me while it is day; the night is coming when no one can work.”',
     bible: {
@@ -135,7 +135,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       dayjs('2024-05-01').utcOffset(0).startOf('day').valueOf(),
       dayjs('2024-08-21').utcOffset(0).endOf('day').valueOf(),
     ],
-    location: 'Colombie-Britannique',
+    location: 'Kelowna, Colombie-Britannique',
     tagline:
       '“Il faut que je fasse, tandis qu’il est jour, les œuvres de celui qui m’a envoyé; la nuit vient, où personne ne peut travailler.”',
     bible: {

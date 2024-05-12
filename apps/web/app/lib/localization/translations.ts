@@ -134,6 +134,10 @@ const en = {
     'More detailed conference information won’t be available until registration opens. You may also contact us if you need to get in touch, or check our FAQ for quick answers.',
   'registration.faq.contact': 'Get in touch',
   'registration.faq.view': 'View FAQ',
+  'registration.register.title': 'Register now with early-bird rates!',
+  'registration.register.subtitle':
+    'See you on August 21 at the Rutland SDA church in Kelowna, British Columbia. Sign up before June 22nd to secure earlybird pricing.',
+  'registration.register.button': 'Register Now',
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -276,6 +280,11 @@ const fr: Record<TranslationKey, string> = {
     "Des informations plus détaillées sur la conférence ne seront pas disponibles avant l'ouverture des inscriptions. Vous pouvez également nous contacter si vous avez besoin de nous joindre, ou consulter notre FAQ pour des réponses rapides.",
   'registration.faq.contact': 'Entrer en contact',
   'registration.faq.view': 'Voir FAQ',
+  'registration.register.title':
+    'Inscrivez-vous dès maintenant avec des tarifs de lancement!',
+  'registration.register.subtitle':
+    'Rendez-vous le 21 août à l’église adventiste de Rutland à Kelowna, en Colombie-Britannique. Inscrivez-vous avant le 22 juin pour bénéficier des tarifs de lancement.',
+  'registration.register.button': "S'inscrire",
 };
 
 export const root = {

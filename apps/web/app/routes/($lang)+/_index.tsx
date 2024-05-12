@@ -114,11 +114,11 @@ export default function Index() {
       </section>
       <NewsletterForm />
 
-      <section className="flex flex-col gap-6 p-3 md:flex-row-reverse md:py-32">
+      <section className="flex flex-col gap-6 overflow-hidden p-3 md:h-[800px] md:flex-row-reverse md:py-32">
         <img
-          src="/main/mission.png"
-          alt="Mission"
-          className="aspect-auto max-md:w-full md:flex-1"
+          src="/topography.svg"
+          className="absolute top-0 h-full w-full object-cover opacity-20 max-md:right-0 md:left-1/2"
+          alt=""
         />
         <div className="flex flex-col gap-6 md:flex-1">
           <h2 className="text-accent-600 text-4xl font-bold">
@@ -144,7 +144,7 @@ export default function Index() {
               <Link
                 to="/volunteer"
                 className={buttonStyle}
-                data-variant="positive"
+                data-variant="default"
               >
                 {translate('main.join.link')}
               </Link>
@@ -326,13 +326,13 @@ function NewsletterForm() {
     },
   });
   return (
-    <section className="flex flex-col gap-4 px-3 py-16 md:py-32">
+    <section className="flex flex-col gap-4 overflow-hidden px-3 py-16 md:h-[800px] md:py-32">
+      <img
+        src="/topography.svg"
+        className="absolute top-0 h-full w-full object-cover opacity-20 max-md:right-0 md:left-1/2"
+        alt=""
+      />
       <div className="flex flex-col gap-4 md:flex-row-reverse">
-        <img
-          src="/main/mission.png"
-          alt="Mission"
-          className="aspect-auto max-md:w-full md:flex-1"
-        />
         <div className="flex flex-col gap-4 md:flex-1">
           <h2 className="text-accent-600 text-4xl font-bold">
             {translate('main.newsletter.title')}
