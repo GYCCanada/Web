@@ -4,9 +4,10 @@ import { dayjs } from './dayjs';
 import { Locale } from './localization/localization';
 import { assertValidLocale } from './localization/localization.server';
 
-type Conference = {
+export type Conference = {
   title: string;
-  dates: [number, number];
+  dates: [start: number, end: number];
+  registration: [start: number, end: number];
   location: string;
   tagline: string;
   bible: {
@@ -16,6 +17,7 @@ type Conference = {
   };
   speakers: Speaker[];
   seminars: Seminar[];
+  promos: string[];
 };
 
 type Speaker = {
@@ -39,9 +41,14 @@ const conference: Record<Locale, Conference> = {
   en: {
     title: 'While It Is Day',
     dates: [
-      dayjs('2024-08-21').add(23, 'hours').utc().valueOf(),
-      dayjs('2024-08-25').add(23, 'hours').utc().valueOf(),
+      dayjs('2024-08-21').utcOffset(0).startOf('day').valueOf(),
+      dayjs('2024-08-25').utcOffset(0).endOf('day').valueOf(),
     ],
+    registration: [
+      dayjs('2024-05-17').utcOffset(0).endOf('day').valueOf(),
+      dayjs('2024-08-21').utcOffset(0).endOf('day').valueOf(),
+    ],
+
     location: 'British Columbia',
     tagline:
       '“I must work the works of Him who sent Me while it is day; the night is coming when no one can work.”',
@@ -116,12 +123,17 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         description: 'Seminar Description',
       },
     ],
+    promos: [],
   },
   fr: {
     title: "Tant qu'il fait jour",
     dates: [
-      dayjs('2024-08-21').add(23, 'hours').utc().valueOf(),
-      dayjs('2024-08-25').add(23, 'hours').utc().valueOf(),
+      dayjs('2024-08-21').utcOffset(0).startOf('day').valueOf(),
+      dayjs('2024-08-25').utcOffset(0).endOf('day').valueOf(),
+    ],
+    registration: [
+      dayjs('2024-05-01').utcOffset(0).startOf('day').valueOf(),
+      dayjs('2024-08-21').utcOffset(0).endOf('day').valueOf(),
     ],
     location: 'Colombie-Britannique',
     tagline:
@@ -183,6 +195,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         description: 'Seminar Description',
       },
     ],
+    promos: [],
   },
 };
 

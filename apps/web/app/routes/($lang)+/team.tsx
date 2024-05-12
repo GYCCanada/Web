@@ -7,7 +7,7 @@ import { Main } from '~/ui/main';
 export const meta: MetaFunction = () => {
   return [
     { title: 'The Team | GYCC' },
-    { name: 'description', content: 'Welcome to GYCC!' },
+    { name: 'description', content: 'Meet the team behind GYCC' },
   ];
 };
 

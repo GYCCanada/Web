@@ -16,6 +16,7 @@ import { ExternalLink, linkStyle } from '~/ui/external-link';
 import { CloseIcon, LanguageIcon, MenuIcon } from '~/ui/icon';
 import { Link } from '~/ui/link';
 import { Portal } from '~/ui/portal';
+import dayjs from 'dayjs';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import * as React from 'react';
@@ -68,6 +69,7 @@ function Nav() {
 
 function TopNav() {
   const translate = useTranslate();
+
   return (
     <header className="bg-background text-foreground w-full">
       <nav className="mx-auto flex h-[60px] w-[--width] items-center justify-between gap-4 px-3 py-2">
@@ -78,7 +80,11 @@ function TopNav() {
             className="size-[44px]"
           />
         </Link>
-        <NavItem to="/">{translate('nav.home')}</NavItem>
+        <NavItem to="/">
+          {translate('nav.home', {
+            year: new Date().getFullYear(),
+          })}
+        </NavItem>
         <NavItem to="/about">{translate('nav.about')}</NavItem>
         <NavItem to="/team">{translate('nav.team')}</NavItem>
         <NavItem to="/contact">{translate('nav.contact')}</NavItem>
@@ -152,7 +158,9 @@ function PopupNav() {
                     }}
                     to="/"
                   >
-                    {translate('nav.home')}
+                    {translate('nav.home', {
+                      year: new Date().getFullYear(),
+                    })}
                   </NavItem>
                   <NavItem
                     onClick={() => {
@@ -320,9 +328,12 @@ function Footer() {
           </div>
 
           <div className="flex flex-col gap-2 md:flex-1">
-            <p className="text-neutral-500">{translate('footer.links')}</p>
+            <p className="text-neutral-50 dark:text-neutral-500">
+              {translate('footer.links')}
+            </p>
             <Link to={`/`} className={linkStyle}>
-              {currentConference.name} {currentConference.year}
+              {currentConference.title}{' '}
+              {dayjs(currentConference.dates[0]).format('YYYY')}
             </Link>
             <Link to="/about" className={linkStyle}>
               {translate('nav.about')}

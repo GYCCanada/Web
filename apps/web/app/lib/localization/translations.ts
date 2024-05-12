@@ -1,7 +1,7 @@
 import { Locale } from './localization';
 
 const en = {
-  'main.reserve': 'Reserve',
+  'main.reserve': 'Learn More',
   'main.read_bible': 'Read in Context',
   'main.time_left': 'See you in {{days}} days',
   'main.gyc_tagline':
@@ -10,7 +10,7 @@ const en = {
   'main.gyc_tagline.for': 'for',
   'main.read_our_story': 'Read our story',
   'main.meet_the_team': 'Meet the team',
-  'main.newsletter.title': 'Get notified when registration opens',
+  'main.newsletter.title': 'Stay in the loop',
   'main.newsletter.subtitle':
     'We’ll send our monthly newsletter straight to your inbox, give you a chance for early-bird pricing the moment it launches, and more!',
   'main.newsletter.name.label': 'Full Name',
@@ -29,7 +29,7 @@ const en = {
   'main.donate.link': 'Consider donating',
   'main.join.link': 'Volunteer',
 
-  'nav.home': 'GYC Canada',
+  'nav.home': '{{year}} Conference',
   'nav.about': 'Our Story',
   'nav.team': 'Meet the Team',
   'nav.contact': 'Get in Touch',
@@ -126,6 +126,7 @@ const en = {
   'volunteer.form.error':
     'An error occurred while sending your message. Please try again later.',
   'registration.watch-promo': 'Watch promo',
+  'registration.register': 'Register',
   'registration.speakers.title': 'Speakers',
   'registration.seminars.title': 'Seminars',
   'registration.faq.title': 'Got Questions?',
@@ -138,7 +139,7 @@ const en = {
 export type TranslationKey = keyof typeof en;
 
 const fr: Record<TranslationKey, string> = {
-  'main.reserve': 'Réserve',
+  'main.reserve': 'En savoir plus',
   'main.read_bible': 'Lire en contexte',
 
   'main.time_left': 'Rendez-vous dans {{days}} jours',
@@ -149,7 +150,7 @@ const fr: Record<TranslationKey, string> = {
   'main.gyc_tagline.for': 'pour',
   'main.read_our_story': 'Lire notre histoire',
   'main.meet_the_team': 'Rencontrez l’équipe',
-  'main.newsletter.title': 'Soyez informé lorsque l’inscription ouvre',
+  'main.newsletter.title': 'Inscrivez-vous à notre bulletin d’information',
   'main.newsletter.subtitle':
     'Nous enverrons notre bulletin mensuel directement dans votre boîte de réception, vous donnant la chance de profiter des tarifs de lancement dès leur lancement, et plus encore!',
   'main.newsletter.name.label': 'Nom complet',
@@ -167,7 +168,7 @@ const fr: Record<TranslationKey, string> = {
     'GYC Canada est une organisation à but non lucratif dirigée par une poignée de bénévoles incroyables.{{br}}Cela signifie que nous dépendons entièrement de votre présence et de vos dons pour faire avancer le mouvement.',
   'main.donate.link': 'Considérez un don',
   'main.join.link': 'Faire du bénévolat',
-  'nav.home': 'GYC Canada',
+  'nav.home': 'Conférence {{year}}',
   'nav.about': 'Notre histoire',
   'nav.team': 'Rencontrez l’équipe',
   'nav.contact': 'Entrer en contact',
@@ -267,6 +268,7 @@ const fr: Record<TranslationKey, string> = {
   'volunteer.form.error':
     "Une erreur s'est produite lors de l'envoi de votre message. Veuillez réessayer plus tard.",
   'registration.watch-promo': 'Regardez la promo',
+  'registration.register': 'Inscrivez-vous',
   'registration.speakers.title': 'Conférenciers',
   'registration.seminars.title': 'Séminaires',
   'registration.faq.title': 'Des questions?',

@@ -117,7 +117,7 @@ const schema = z.discriminatedUnion('method', [
 export const meta: MetaFunction = () => {
   return [
     { title: 'Volunteer | GYCC' },
-    { name: 'description', content: 'Welcome to GYCC!' },
+    { name: 'description', content: 'Volunteer with GYCC' },
   ];
 };
 
@@ -193,7 +193,7 @@ export default function Index() {
   const method = fields.method.value;
 
   return (
-    <Main className="gap-10 px-4 py-12 md:gap-16">
+    <Main className="gap-10 px-4 py-12 text-2xl md:gap-16">
       <div className="flex flex-col gap-4 md:gap-16">
         <h1 className="text-5xl">
           {translate('volunteer.title', {

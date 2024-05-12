@@ -57,35 +57,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function Registration() {
   const translate = useTranslate();
-  const { conference } = useLoaderData<typeof loader>();
+
   return (
     <Main>
       <Hero />
-      <section className="relative flex flex-col gap-6 px-3 py-12">
-        <StickyTitle className="bg-inherit text-4xl font-bold data-[sticky]:fixed data-[sticky]:top-[60px] data-[sticky]:z-10">
-          {translate('registration.speakers.title')}
-        </StickyTitle>
-        <div className="flex flex-col gap-20 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {conference.speakers.map((speaker, i) => (
-            <SpeakerCard key={i} {...speaker} />
-          ))}
-        </div>
-      </section>
-      <section className="flex flex-col gap-6 px-3 py-12">
-        <h2 className="sticky top-0 bg-inherit text-4xl font-bold">
-          {translate('registration.seminars.title')}
-        </h2>
-        <div className="flex flex-col gap-20 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {conference.seminars.map((seminar, i) => (
-            <SpeakerCard
-              key={i}
-              img={seminar.speaker.img}
-              name={seminar.speaker.name}
-              activity={seminar.title}
-            />
-          ))}
-        </div>
-      </section>
+      <SpeakersAndSeminars />
 
       <NewsletterForm />
 
@@ -126,6 +102,7 @@ function MobileHero() {
   const hints = useHints();
   const translate = useTranslate();
   const locale = useLocale();
+
   return (
     <section className="flex flex-col gap-10 pb-16">
       <div>
@@ -136,8 +113,7 @@ function MobileHero() {
           }}
         />
         <Button className="absolute -bottom-6 left-4" variant="default">
-          <PlayIcon className="size-5" />{' '}
-          {translate('registration.watch-promo')}
+          <PlayIcon className="size-5" /> {translate('registration.register')}
         </Button>
       </div>
       <div className="flex flex-col gap-4">
@@ -168,6 +144,7 @@ function MobileHero() {
     </section>
   );
 }
+
 function DesktopHero() {
   const { conference } = useLoaderData<typeof loader>();
   const hints = useHints();
@@ -209,12 +186,46 @@ function DesktopHero() {
               <h3 className="text-5xl">{conference.location}</h3>
             </div>
             <div>
-              <Button>{translate('registration.watch-promo')}</Button>
+              <Button>{translate('registration.register')}</Button>
             </div>
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function SpeakersAndSeminars() {
+  const { conference } = useLoaderData<typeof loader>();
+  const translate = useTranslate();
+  return (
+    <>
+      <section className="relative flex flex-col gap-6 px-3 py-12">
+        <h2 className="bg-inherit text-4xl font-bold data-[sticky]:fixed data-[sticky]:top-[60px] data-[sticky]:z-10">
+          {translate('registration.speakers.title')}
+        </h2>
+        <div className="flex flex-col gap-20 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {conference.speakers.map((speaker, i) => (
+            <SpeakerCard key={i} {...speaker} />
+          ))}
+        </div>
+      </section>
+      <section className="flex flex-col gap-6 px-3 py-12">
+        <h2 className="sticky top-0 bg-inherit text-4xl font-bold">
+          {translate('registration.seminars.title')}
+        </h2>
+        <div className="flex flex-col gap-20 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {conference.seminars.map((seminar, i) => (
+            <SpeakerCard
+              key={i}
+              img={seminar.speaker.img}
+              name={seminar.speaker.name}
+              activity={seminar.title}
+            />
+          ))}
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -305,10 +316,10 @@ function SpeakerCard({ name, activity, img }: SpeakerCardProps) {
         <img className="size-full" src={img} alt={`${name}, ${activity}`} />
         <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4 text-white">
           <div className="flex items-center gap-2">
-            <h3 className="text-3xl font-bold leading-5">{name}</h3>
+            <h3 className="text-3xl font-bold leading-5 text-white">{name}</h3>
             <ArrowRightIcon className="size-8" />
           </div>
-          <p className="text-xl">{activity}</p>
+          <p className="text-xl text-white">{activity}</p>
         </div>
       </div>
     </div>
@@ -455,61 +466,5 @@ function PaperPlane(props: React.SVGProps<SVGSVGElement>) {
         strokeWidth="2"
       />
     </svg>
-  );
-}
-
-function StickyTitle({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  const ref = React.useRef<HTMLHeadingElement>(null);
-
-  const [isSticky, setIsSticky] = React.useState(false);
-
-  React.useEffect(() => {
-    const element = ref.current;
-    const scrollContainer = document.querySelector('[data-scroll-container]');
-    if (!scrollContainer) return;
-    if (!element) return;
-    const container = element.parentElement;
-    if (!container) return;
-    let headerIsVisible = false;
-    let containerIsVisible = false;
-    const containerObserver = new IntersectionObserver(
-      ([e]) => {
-        containerIsVisible = e.isIntersecting;
-        setIsSticky(containerIsVisible && !headerIsVisible);
-      },
-      {
-        root: scrollContainer,
-        threshold: 0.5,
-      },
-    );
-    const headerObserver = new IntersectionObserver(
-      ([e]) => {
-        headerIsVisible = e.isIntersecting;
-        setIsSticky(containerIsVisible && !headerIsVisible);
-      },
-      {
-        root: scrollContainer,
-        threshold: 0,
-      },
-    );
-    containerObserver.observe(container);
-    headerObserver.observe(element);
-
-    return () => {
-      containerObserver.disconnect();
-      headerObserver.disconnect();
-    };
-  }, []);
-
-  return (
-    <h2 className={className} ref={ref} data-sticky={isSticky ? '' : undefined}>
-      {children}
-    </h2>
   );
 }

@@ -26,7 +26,10 @@ import { z } from 'zod';
 export const meta: MetaFunction = () => {
   return [
     { title: 'While It Is Day | GYCC' },
-    { name: 'description', content: 'Welcome to GYCC!' },
+    {
+      name: 'description',
+      content: `${new Date().getFullYear()} Conference details`,
+    },
   ];
 };
 
