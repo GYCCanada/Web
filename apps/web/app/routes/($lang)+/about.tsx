@@ -10,7 +10,7 @@ export const meta: MetaFunction = () => {
 
 export default function Index() {
   return (
-    <Main className="gap-10 px-3 py-12 text-2xl">
+    <Main className="gap-10 px-3 py-12 text-2xl md:px-16">
       <h1 className="text-5xl">About Us</h1>
       <p>
         GYC Canada (Generation Youth Christ) is a youth-initiated and led

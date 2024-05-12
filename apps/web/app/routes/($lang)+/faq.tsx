@@ -11,7 +11,7 @@ export const meta: MetaFunction = () => {
 
 export default function FaqPage() {
   return (
-    <Main className="gap-10 px-3 py-12 text-2xl">
+    <Main className="gap-10 px-3 py-12 text-2xl md:px-16">
       <h1 className="text-5xl">Frequently Asked Questions</h1>
 
       <QuestionLayout>

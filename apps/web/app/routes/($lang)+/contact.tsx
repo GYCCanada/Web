@@ -137,7 +137,7 @@ export default function Index() {
   const method = fields.method.value as 'email' | 'phone' | 'both';
 
   return (
-    <Main className="gap-10 px-3 py-4 md:py-16">
+    <Main className="gap-10 px-3 py-4 text-2xl md:py-16">
       <div className="flex flex-col gap-4 md:gap-16">
         <h1 className="text-5xl">{translate('contact.title')}</h1>
         <p>
