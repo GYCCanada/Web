@@ -138,6 +138,30 @@ const en = {
   'registration.register.subtitle':
     'See you on August 21 at the Rutland SDA church in Kelowna, British Columbia. Sign up before June 22nd to secure earlybird pricing.',
   'registration.register.button': 'Register Now',
+  'about.title': 'Our Story',
+  'about.1': `GYC Canada (Generation Youth Christ) is a youth-initiated and led
+        movement of Seventh-day Adventists from diverse, united in a common
+        commitment to serious Bible study, intense prayer, uncompromising
+        lifestyle, and boldness in sharing Christ with others.`,
+  'about.2': `GYC Canada seeks to uphold the distinctive message of the Seventh-day
+        Adventist Church and equip and inspire young Adventists to be Christian
+        ambassadors to their respective places of work and study.`,
+  'about.3': `GYC Canada is the Canadian affiliate of GYC. We are Canadian Seventh-day
+        Adventist young people who seek to promote the spirit and ideals of GYC
+        in Canada.`,
+  'about.4': `GYC Canada is a recognized independent supporting ministry of the
+        Seventh-day Adventist Church of Canada. GYC Canada supports the
+        Seventh-day Adventist Church and encourages young people across Canada
+        to be active members in their local churches.`,
+  'about.disclaimer': `Disclaimer: GYC Canada does not accept tithes. We encourage donors to
+        give tithes to their respective churches.`,
+  'about.quote.1': `“Let no one despise you for your youth, but set the believers an
+          example in speech, in conduct, in love, in faith, in purity.” {{verse}}`,
+  'about.quote.1.verse': '1 Timothy 4:12',
+  'about.quote.2': `“With such an army of workers as our youth, rightly trained, might
+          furnish, how soon the message of a crucified, risen, and soon-coming
+          Saviour might be carried to the whole world!” {{source}}`,
+  'about.quote.2.source': 'Education, p. 271.2',
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -285,6 +309,34 @@ const fr: Record<TranslationKey, string> = {
   'registration.register.subtitle':
     'Rendez-vous le 21 août à l’église adventiste de Rutland à Kelowna, en Colombie-Britannique. Inscrivez-vous avant le 22 juin pour bénéficier des tarifs de lancement.',
   'registration.register.button': "S'inscrire",
+
+  'about.title': 'Notre histoire',
+  'about.1': `GYC Canada (Generation Youth Christ) est un mouvement de jeunes
+        adventistes du septième jour, diversifiés, unis dans un engagement
+        commun envers une étude sérieuse de la Bible, une prière intense, un
+        style de vie sans compromis et une audace à partager le Christ avec
+        les autres.`,
+  'about.2': `GYC Canada cherche à défendre le message distinctif de l'Église
+        adventiste du septième jour et à équiper et inspirer les jeunes
+        adventistes à être des ambassadeurs chrétiens dans leurs lieux de
+        travail et d'études respectifs.`,
+  'about.3': `GYC Canada est l'affilié canadien de GYC. Nous sommes des jeunes
+        adventistes du septième jour canadiens qui cherchent à promouvoir
+        l'esprit et les idéaux de GYC au Canada.`,
+  'about.4': `GYC Canada est un ministère de soutien indépendant reconnu de
+        l'Église adventiste du septième jour du Canada. GYC Canada soutient
+        l'Église adventiste du septième jour et encourage les jeunes du
+        Canada à être des membres actifs de leurs églises locales.`,
+  'about.disclaimer': `Avis de non-responsabilité : GYC Canada n'accepte pas les dîmes.
+        Nous encourageons les donateurs à donner les dîmes à leurs églises
+        respectives.`,
+  'about.quote.1': `“Que personne ne méprise ta jeunesse, mais sois un modèle pour les
+          croyants en parole, en conduite, en amour, en foi et en pureté.” {{verse}}`,
+  'about.quote.1.verse': '1 Timothée 4:12',
+  'about.quote.2': `“Avec une telle armée de travailleurs que notre jeunesse, correctement
+          formée, pourrait fournir, comment le message d'un Sauveur crucifié,
+          ressuscité et bientôt à venir pourrait-il être porté à tout le monde!” {{source}}`,
+  'about.quote.2.source': 'Éducation, p. 271.2',
 };
 
 export const root = {
