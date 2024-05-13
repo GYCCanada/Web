@@ -422,4 +422,4 @@ const fr: Record<TranslationKey, string> = {
 export const root = serverOnly$({
   en,
   fr,
-} as const satisfies Record<Locale, Record<TranslationKey, string>>);
+} as const satisfies Record<Locale, Record<TranslationKey, string>>)!;
