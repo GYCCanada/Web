@@ -288,11 +288,11 @@ function DesktopSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
 function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
   const id = React.useId();
   const ref = React.useRef<HTMLDivElement>(null);
-  const { position, rotate } = useCardRotation(ref);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const isActive =
     searchParams.has('speaker') && searchParams.get('speaker') === id;
+  const { position, rotate } = useCardRotation(ref, isActive);
 
   function onPress() {
     if (isActive) {
@@ -425,7 +425,10 @@ const SpeakerCardVariants = {
   }),
 };
 
-function useCardRotation(ref: React.RefObject<HTMLDivElement>) {
+function useCardRotation(
+  ref: React.RefObject<HTMLDivElement>,
+  isActive?: boolean,
+) {
   const position = useMotionValue(20);
   const rotate = useMotionValue(0);
   React.useEffect(() => {
@@ -482,7 +485,7 @@ function useCardRotation(ref: React.RefObject<HTMLDivElement>) {
       observer.disconnect();
       scrollContainer.removeEventListener('scroll', onScroll);
     };
-  }, [position, rotate, ref]);
+  }, [position, rotate, ref, isActive]);
 
   return {
     position,
