@@ -1,3 +1,5 @@
+import { serverOnly$ } from 'vite-env-only';
+
 import { Locale } from './localization';
 
 const en = {
@@ -417,7 +419,7 @@ const fr: Record<TranslationKey, string> = {
   'faq.question.3.answer.2': `Toutes les ventes de billets sont définitives.`,
 };
 
-export const root = {
+export const root = serverOnly$({
   en,
   fr,
-} as const satisfies Record<Locale, Record<TranslationKey, string>>;
+} as const satisfies Record<Locale, Record<TranslationKey, string>>);
