@@ -139,6 +139,7 @@ const en = {
     'See you on August 21 at the Rutland SDA church in Kelowna, British Columbia. Sign up before June 22nd to secure earlybird pricing.',
   'registration.register.button': 'Register Now',
   'about.title': 'Our Story',
+
   'about.1': `GYC Canada (Generation Youth Christ) is a youth-initiated and led
         movement of Seventh-day Adventists from diverse, united in a common
         commitment to serious Bible study, intense prayer, uncompromising
@@ -162,6 +163,43 @@ const en = {
           furnish, how soon the message of a crucified, risen, and soon-coming
           Saviour might be carried to the whole world!” {{source}}`,
   'about.quote.2.source': 'Education, p. 271.2',
+
+  'faq.title': 'Frequently Asked Questions',
+  'faq.question.1.title': 'Exhibitor Booths',
+  'faq.question.1.answer.1': `GYC Canada reserves the right to refuse any exhibitor that does not
+          uphold the Spirit of GYC as documented in the About Us section of our
+          website. Email us with any questions at {{email}}.`,
+  'faq.question.1.answer.2': `A single-table exhibitor booth can be purchased for $30, and a
+          two-table exhibitor booth for $40. An exhibitor booth does not include
+          registration(s) for the person(s) running the booth. The Exhibit
+          manager(s) must first register as attendees for the full conference.`,
+  'faq.question.1.answer.3': `{{before}} registering, please email {{email}} to get approval for your booth. This can avoid issues with your booth,
+          and can help avoid refund issues if we decide you’re not a fit for our
+          conference. GYC Canada reserves the right to refuse any exhibitor that
+          does not uphold the Spirit of GYC as documented in the About Us
+          section of our website.`,
+  'faq.question.1.answer.3.before': 'BEFORE',
+  'faq.question.2.title': 'Cancellation and Refunds',
+  'faq.question.2.answer.1': `Conference registration fees are strictly NOT refundable*. You may
+          transfer your registration to another person as long as they qualify
+          for the same type of registration. You will notify GYC Canada of this
+          change by emailing us at {{email}}.`,
+  'faq.question.2.answer.2': `* The ONLY exception is government imposed restrictions that may
+            inhibit in-person events`,
+  'faq.question.3.title': 'Letter of Invitation',
+  'faq.question.3.answer.1': `GYC Canada does not and will not provide you with a letter of
+          invitation for any purpose. Everyone is welcome to attend our
+          conference, but you as an attendee are fully responsible for ensuring
+          you can attend and arranging your transport. We will have livestreams
+          available for those who are not able to attend in person or would like
+          to go back and review what was covered. Livestreams DO NOT cover
+          Workshops or Breakouts, they are only available for those who attend
+          in person. Livestreams will be available via our YouTube, Facebook and
+          Website ({{website}}). If
+          you purchase a ticket and need an invitation, you are not viable for a
+          refund.`,
+  'faq.question.3.answer.1.website': 'gyccanada.org',
+  'faq.question.3.answer.2': `All ticket sales are final.`,
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -337,6 +375,46 @@ const fr: Record<TranslationKey, string> = {
           formée, pourrait fournir, comment le message d'un Sauveur crucifié,
           ressuscité et bientôt à venir pourrait-il être porté à tout le monde!” {{source}}`,
   'about.quote.2.source': 'Éducation, p. 271.2',
+
+  'faq.title': 'Questions fréquemment posées',
+  'faq.question.1.title': 'Stands d’exposants',
+  'faq.question.1.answer.1': `GYC Canada se réserve le droit de refuser tout exposant qui ne
+          respecte pas l’esprit de GYC tel que documenté dans la section À
+          propos de nous de notre site Web. Envoyez-nous vos questions à
+          {{email}}.`,
+
+  'faq.question.1.answer.2': `Un stand d’exposant d’une table peut être acheté pour 30 $, et un
+          stand d’exposant de deux tables pour 40 $. Un stand d’exposant ne
+          comprend pas l’inscription des personnes qui tiennent le stand. Les
+          responsables de l’exposition doivent d’abord s’inscrire en tant que
+          participants à la conférence complète.`,
+
+  'faq.question.1.answer.3': `{{before}} de vous inscrire, veuillez envoyer un courriel à {{email}} pour obtenir l’approbation de votre stand. Cela peut éviter des problèmes avec votre stand, et peut aider à éviter des problèmes de remboursement si nous décidons que vous n’êtes pas adapté pour notre conférence. GYC Canada se réserve le droit de refuser tout exposant qui ne respecte pas l’esprit de GYC tel que documenté dans la section À propos de nous de notre site Web.`,
+
+  'faq.question.1.answer.3.before': 'AVANT',
+
+  'faq.question.2.title': 'Annulation et remboursements',
+  'faq.question.2.answer.1': `Les frais d’inscription à la conférence ne sont strictement PAS
+          remboursables*. Vous pouvez transférer votre inscription à une autre
+          personne tant qu’elle est admissible pour le même type d’inscription.
+          Vous informerez GYC Canada de ce changement en nous envoyant un courriel à {{email}}.`,
+
+  'faq.question.2.answer.2': `* La SEULE exception est les restrictions imposées par le gouvernement
+          qui peuvent empêcher les événements en personne`,
+
+  'faq.question.3.title': 'Lettre d’invitation',
+  'faq.question.3.answer.1': `GYC Canada ne vous fournira pas et ne vous fournira pas une lettre
+          d’invitation pour quelque raison que ce soit. Tout le monde est le
+          bienvenu à notre conférence, mais vous en tant que participant êtes
+          entièrement responsable de vous assurer que vous pouvez y assister et
+          d’organiser votre transport. Nous aurons des diffusions en direct
+          disponibles pour ceux qui ne peuvent pas assister en personne ou
+          aimeraient revenir sur ce qui a été couvert. Les diffusions en direct
+          NE couvrent PAS les ateliers ou les séances de travail, elles ne sont
+          disponibles que pour ceux qui assistent en personne. Les diffusions en
+          direct seront disponibles via notre YouTube, Facebook et Site Web ({{website}}). Si vous achetez un billet et avez besoin d’une invitation, vous n’êtes pas admissible à un remboursement.`,
+  'faq.question.3.answer.1.website': 'gyccanada.org',
+  'faq.question.3.answer.2': `Toutes les ventes de billets sont définitives.`,
 };
 
 export const root = {

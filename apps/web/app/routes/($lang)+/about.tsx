@@ -1,11 +1,20 @@
 import type { MetaFunction } from '@remix-run/node';
 import { useTranslate } from '~/lib/localization/context';
+import { getLocale } from '~/lib/localization/localization.server';
 import { Main } from '~/ui/main';
 
-export const meta: MetaFunction = () => {
+export const meta: MetaFunction = ({ params }) => {
+  const lang = getLocale(params);
+  if (lang === 'en') {
+    return [
+      { title: 'About Us | GYCC' },
+      { name: 'description', content: 'More about us' },
+    ];
+  }
+
   return [
-    { title: 'About Us | GYCC' },
-    { name: 'description', content: 'More about us' },
+    { title: 'À propos de nous | GYCC' },
+    { name: 'description', content: 'Plus sur nous' },
   ];
 };
 

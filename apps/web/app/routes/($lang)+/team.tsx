@@ -1,10 +1,18 @@
 import type { MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { useTranslate } from '~/lib/localization/context';
+import { getLocale } from '~/lib/localization/localization.server';
 import { TranslationKey } from '~/lib/localization/translations';
 import { Main } from '~/ui/main';
 
-export const meta: MetaFunction = () => {
+export const meta: MetaFunction = ({ params }) => {
+  const lang = getLocale(params);
+  if (lang === 'fr') {
+    return [
+      { title: "L'équipe | GYCC" },
+      { name: 'description', content: "Rencontrez l'équipe derrière GYCC" },
+    ];
+  }
   return [
     { title: 'The Team | GYCC' },
     { name: 'description', content: 'Meet the team behind GYCC' },

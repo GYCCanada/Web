@@ -1,9 +1,17 @@
 import type { MetaFunction } from '@remix-run/node';
 import { useTranslate } from '~/lib/localization/context';
+import { getLocale } from '~/lib/localization/localization.server';
 import { buttonStyle } from '~/ui/button';
 import { Main } from '~/ui/main';
 
-export const meta: MetaFunction = () => {
+export const meta: MetaFunction = ({ params }) => {
+  const locale = getLocale(params);
+  if (locale === 'fr') {
+    return [
+      { title: 'Donner | GYCC' },
+      { name: 'description', content: 'Soutenez le mouvement GYC Canada.' },
+    ];
+  }
   return [
     { title: 'Give | GYCC' },
     { name: 'description', content: 'Support the GYC Canada movement.' },

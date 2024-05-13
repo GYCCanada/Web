@@ -3,6 +3,7 @@ import { parseWithZod } from '@conform-to/zod';
 import type { ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, redirect, useActionData } from '@remix-run/react';
 import { useTranslate } from '~/lib/localization/context';
+import { getLocale } from '~/lib/localization/localization.server';
 import { sendMail } from '~/lib/mailer.server';
 import { Button } from '~/ui/button';
 import { ExternalLink } from '~/ui/external-link';
@@ -75,7 +76,19 @@ export const schema = z.discriminatedUnion('method', [
   }),
 ]);
 
-export const meta: MetaFunction = () => {
+export const meta: MetaFunction = ({ params }) => {
+  const locale = getLocale(params);
+
+  if (locale === 'fr') {
+    return [
+      { title: 'Contactez-nous | GYCC' },
+      {
+        name: 'description',
+        content: "Contactez-nous pour plus d'informations",
+      },
+    ];
+  }
+
   return [
     { title: 'Contact Us | GYCC' },
     { name: 'description', content: 'Contact us for more information' },

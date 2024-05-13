@@ -23,12 +23,16 @@ import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
-export const meta: MetaFunction = () => {
+export const meta: MetaFunction<typeof loader> = ({ data, params }) => {
+  const locale = getLocale(params);
   return [
-    { title: 'While It Is Day | GYCC' },
+    { title: `${data?.conference.title} | GYCC` },
     {
       name: 'description',
-      content: `${new Date().getFullYear()} Conference details`,
+      content:
+        locale === 'fr'
+          ? `Détails de la conférence ${new Date().getFullYear()}`
+          : `${new Date().getFullYear()} Conference details`,
     },
   ];
 };

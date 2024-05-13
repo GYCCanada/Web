@@ -22,9 +22,18 @@ import * as React from 'react';
 import { useButton } from 'react-aria';
 import { match } from 'ts-pattern';
 
-export const meta: MetaFunction = () => {
+export const meta: MetaFunction = ({ params }) => {
+  const locale = getLocale(params);
+
+  if (locale === 'fr') {
+    return [
+      { title: `${new Date().getFullYear()} Inscription | GYCC` },
+      { name: 'description', content: 'Inscrivez-vous à la conférence 2024.' },
+    ];
+  }
+
   return [
-    { title: '2024 Registration | GYCC' },
+    { title: `${new Date().getFullYear()} Registration | GYCC` },
     { name: 'description', content: 'Register for the 2024 conference.' },
   ];
 };
