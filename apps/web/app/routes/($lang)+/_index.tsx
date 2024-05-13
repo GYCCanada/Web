@@ -10,7 +10,7 @@ import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
 import { useTranslate } from '~/lib/localization/context';
-import { getLocale } from '~/lib/localization/localization.server';
+import { getLocale } from '~/lib/localization/localization';
 import { Button, buttonStyle } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
 import { LocalizedImage } from '~/ui/image';

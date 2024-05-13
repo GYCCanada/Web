@@ -8,8 +8,7 @@ import {
 import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { useTranslate } from '~/lib/localization/context';
-import { Locale } from '~/lib/localization/localization';
-import { getTranslation } from '~/lib/localization/localization.server';
+import { getTranslation, Locale } from '~/lib/localization/localization';
 import { LocalizationProvider } from '~/lib/localization/provider';
 import { root } from '~/lib/localization/translations';
 import { ExternalLink, linkStyle } from '~/ui/external-link';

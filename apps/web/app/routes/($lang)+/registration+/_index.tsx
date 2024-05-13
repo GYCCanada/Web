@@ -4,7 +4,7 @@ import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
 import { useLocale, useTranslate } from '~/lib/localization/context';
-import { getLocale } from '~/lib/localization/localization.server';
+import { getLocale } from '~/lib/localization/localization';
 import { buttonStyle } from '~/ui/button';
 import { LocalizedImage } from '~/ui/image';
 import { Link } from '~/ui/link';

@@ -1,5 +1,5 @@
 import { LocalizationContext } from './context';
-import { Translation } from './localization.server';
+import { Translation } from './localization';
 
 export function LocalizationProvider({
   translation,

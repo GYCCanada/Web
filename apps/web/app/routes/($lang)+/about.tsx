@@ -1,6 +1,6 @@
 import type { MetaFunction } from '@remix-run/node';
 import { useTranslate } from '~/lib/localization/context';
-import { getLocale } from '~/lib/localization/localization.server';
+import { getLocale } from '~/lib/localization/localization';
 import { Main } from '~/ui/main';
 
 export const meta: MetaFunction = ({ params }) => {

@@ -8,7 +8,7 @@ import { parseWithZod } from '@conform-to/zod';
 import type { ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, redirect, useActionData, useLoaderData } from '@remix-run/react';
 import { useTranslate } from '~/lib/localization/context';
-import { getLocale } from '~/lib/localization/localization.server';
+import { getLocale } from '~/lib/localization/localization';
 import { sendMail } from '~/lib/mailer.server';
 import { Button } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';

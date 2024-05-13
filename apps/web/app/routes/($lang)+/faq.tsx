@@ -1,6 +1,6 @@
 import { MetaFunction } from '@remix-run/react';
 import { useTranslate } from '~/lib/localization/context';
-import { getLocale } from '~/lib/localization/localization.server';
+import { getLocale } from '~/lib/localization/localization';
 import { ExternalLink } from '~/ui/external-link';
 import { Main } from '~/ui/main';
 

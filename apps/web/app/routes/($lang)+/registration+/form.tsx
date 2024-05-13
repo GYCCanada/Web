@@ -1,5 +1,5 @@
 import { MetaFunction } from '@remix-run/react';
-import { getLocale } from '~/lib/localization/localization.server';
+import { getLocale } from '~/lib/localization/localization';
 import { Main } from '~/ui/main';
 
 export const meta: MetaFunction = ({ params }) => {

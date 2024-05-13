@@ -3,8 +3,7 @@
 import { useParams } from '@remix-run/react';
 import * as React from 'react';
 
-import { Locale } from './localization';
-import { Translation } from './localization.server';
+import { Locale, Translation } from './localization';
 import { TranslationKey } from './translations';
 
 export const LocalizationContext = React.createContext<Translation | undefined>(

@@ -1,8 +1,7 @@
 import dedent from 'dedent';
 
 import { dayjs } from './dayjs';
-import { Locale } from './localization/localization';
-import { assertValidLocale } from './localization/localization.server';
+import { assertValidLocale, Locale } from './localization/localization';
 
 export type Conference = {
   title: string;

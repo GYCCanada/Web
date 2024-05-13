@@ -1,7 +1,7 @@
 import type { MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { useTranslate } from '~/lib/localization/context';
-import { getLocale } from '~/lib/localization/localization.server';
+import { getLocale } from '~/lib/localization/localization';
 import { TranslationKey } from '~/lib/localization/translations';
 import { Main } from '~/ui/main';
 
