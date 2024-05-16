@@ -79,7 +79,7 @@ function TopNav() {
             className="size-[44px]"
           />
         </Link>
-        <NavItem to="/">
+        <NavItem to="/registration">
           {translate('nav.home', {
             year: new Date().getFullYear(),
           })}
@@ -155,7 +155,7 @@ function PopupNav() {
                     onClick={() => {
                       setOpen(false);
                     }}
-                    to="/"
+                    to="/registration"
                   >
                     {translate('nav.home', {
                       year: new Date().getFullYear(),
