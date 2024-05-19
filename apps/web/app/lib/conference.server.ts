@@ -6,7 +6,11 @@ import { assertValidLocale, Locale } from './localization/localization';
 export type Conference = {
   title: string;
   dates: [start: number, end: number];
-  registration: [start: number, end: number];
+  registration: {
+    early: [start: number, end: number];
+    regular: [start: number, end: number];
+    late: [start: number, end: number];
+  };
   location: string;
   tagline: string;
   bible: {
@@ -43,10 +47,20 @@ const conference: Record<Locale, Conference> = {
       dayjs('2024-08-21').utcOffset(0).startOf('day').valueOf(),
       dayjs('2024-08-25').utcOffset(0).endOf('day').valueOf(),
     ],
-    registration: [
-      dayjs('2024-05-17').utcOffset(0).endOf('day').valueOf(),
-      dayjs('2024-08-21').utcOffset(0).endOf('day').valueOf(),
-    ],
+    registration: {
+      early: [
+        dayjs('2024-05-19').utcOffset(0).startOf('day').valueOf(),
+        dayjs('2024-06-22').utcOffset(0).endOf('day').valueOf(),
+      ],
+      regular: [
+        dayjs('2024-06-23').utcOffset(0).startOf('day').valueOf(),
+        dayjs('2024-07-20').utcOffset(0).endOf('day').valueOf(),
+      ],
+      late: [
+        dayjs('2024-07-21').utcOffset(0).startOf('day').valueOf(),
+        dayjs('2024-08-25').utcOffset(0).endOf('day').valueOf(),
+      ],
+    },
 
     location: 'Kelowna, British Columbia',
     tagline:
@@ -131,10 +145,20 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       dayjs('2024-08-21').utcOffset(0).startOf('day').valueOf(),
       dayjs('2024-08-25').utcOffset(0).endOf('day').valueOf(),
     ],
-    registration: [
-      dayjs('2024-05-01').utcOffset(0).startOf('day').valueOf(),
-      dayjs('2024-08-21').utcOffset(0).endOf('day').valueOf(),
-    ],
+    registration: {
+      early: [
+        dayjs('2024-05-19').utcOffset(0).startOf('day').valueOf(),
+        dayjs('2024-06-22').utcOffset(0).endOf('day').valueOf(),
+      ],
+      regular: [
+        dayjs('2024-06-23').utcOffset(0).startOf('day').valueOf(),
+        dayjs('2024-07-20').utcOffset(0).endOf('day').valueOf(),
+      ],
+      late: [
+        dayjs('2024-07-21').utcOffset(0).startOf('day').valueOf(),
+        dayjs('2024-08-25').utcOffset(0).endOf('day').valueOf(),
+      ],
+    },
     location: 'Kelowna, Colombie-Britannique',
     tagline:
       '“Il faut que je fasse, tandis qu’il est jour, les œuvres de celui qui m’a envoyé; la nuit vient, où personne ne peut travailler.”',

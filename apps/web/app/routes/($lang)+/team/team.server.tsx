@@ -11,22 +11,22 @@ export const team: TeamMember[] = [
   {
     name: 'Virginia Polihronova',
     position: 'team.position.president',
-    image: '/team/virginia.png',
+    image: '/team/virginia.jpg',
   },
   {
     name: 'Elijah Duffy',
     position: 'team.position.vice-president',
-    image: '/team/elijah.png',
+    image: '/team/elijah.jpg',
   },
   {
     name: 'Nahi Kim',
     position: 'team.position.vp-logistics',
-    image: '/team/nahi.png',
+    image: '/team/nahi.jpg',
   },
   {
     name: 'Sebastian Elias',
     position: 'team.position.vp-communications',
-    image: '/team/sebastian.png',
+    image: '/team/sebastian.jpg',
   },
   {
     name: 'Eunice Schendel',
@@ -36,12 +36,12 @@ export const team: TeamMember[] = [
   {
     name: 'Dita Gasperz',
     position: 'team.position.vp-missions',
-    image: '/team/dita.png',
+    image: '/team/dita.jpg',
   },
   {
     name: 'Lillian Wheeler',
     position: 'team.position.secretary',
-    image: '/team/lillian.png',
+    image: '/team/lillian.jpg',
   },
 ];
 export const board: BoardMembers = [
