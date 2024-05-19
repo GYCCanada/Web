@@ -5,6 +5,14 @@ import {
   useLoaderData,
   useLocation,
 } from '@remix-run/react';
+import dayjs from 'dayjs';
+import { AnimatePresence, motion } from 'framer-motion';
+import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
+import * as React from 'react';
+import { Button } from 'react-aria-components';
+import { ClientOnly } from 'remix-utils/client-only';
+import { match } from 'ts-pattern';
+
 import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { useTranslate } from '~/lib/localization/context';
@@ -15,13 +23,6 @@ import { ExternalLink, linkStyle } from '~/ui/external-link';
 import { CloseIcon, LanguageIcon, MenuIcon } from '~/ui/icon';
 import { Link } from '~/ui/link';
 import { Portal } from '~/ui/portal';
-import dayjs from 'dayjs';
-import { AnimatePresence, motion } from 'framer-motion';
-import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
-import * as React from 'react';
-import { Button } from 'react-aria-components';
-import { ClientOnly } from 'remix-utils/client-only';
-import { match } from 'ts-pattern';
 
 export const loader = ({ params }: LoaderFunctionArgs) => {
   const translation = getTranslation(params, root);
@@ -100,15 +101,16 @@ function PopupNav() {
   const toggle = () => setOpen((prev) => !prev);
   const translate = useTranslate();
 
+  const location = useLocation();
+
+  React.useEffect(() => {
+    setOpen(false);
+  }, [location.pathname]);
+
   return (
     <header className="bg-background text-foreground w-full">
       <nav className="mx-auto flex h-[60px] w-[--width] items-center justify-between gap-4 px-3 py-2">
-        <Link
-          to="/"
-          onClick={() => {
-            setOpen(false);
-          }}
-        >
+        <Link to="/">
           <img
             src="/logo/gycc-logo-small-red.png"
             alt="GYCC Logo"
@@ -151,54 +153,16 @@ function PopupNav() {
                   transition={{ duration: 0.2 }}
                   className="bg-background text-foreground fixed inset-x-0 top-[60px] flex h-[calc(100%_-_60px)] flex-1 flex-col justify-center gap-10 p-4"
                 >
-                  <NavItem
-                    onClick={() => {
-                      setOpen(false);
-                    }}
-                    to="/registration"
-                  >
+                  <NavItem to="/registration">
                     {translate('nav.home', {
                       year: new Date().getFullYear(),
                     })}
                   </NavItem>
-                  <NavItem
-                    onClick={() => {
-                      setOpen(false);
-                    }}
-                    to="/about"
-                  >
-                    {translate('nav.about')}
-                  </NavItem>
-                  <NavItem
-                    onClick={() => {
-                      setOpen(false);
-                    }}
-                    to="/team"
-                  >
-                    {translate('nav.team')}
-                  </NavItem>
-                  <NavItem
-                    onClick={() => {
-                      setOpen(false);
-                    }}
-                    to="/contact"
-                  >
-                    {translate('nav.contact')}
-                  </NavItem>
-                  <NavItem
-                    onClick={() => {
-                      setOpen(false);
-                    }}
-                    to="/give"
-                  >
-                    {translate('nav.give')}
-                  </NavItem>
-                  <NavItem
-                    onClick={() => {
-                      setOpen(false);
-                    }}
-                    to="/volunteer"
-                  >
+                  <NavItem to="/about">{translate('nav.about')}</NavItem>
+                  <NavItem to="/team">{translate('nav.team')}</NavItem>
+                  <NavItem to="/contact">{translate('nav.contact')}</NavItem>
+                  <NavItem to="/give">{translate('nav.give')}</NavItem>
+                  <NavItem to="/volunteer">
                     {translate('nav.volunteer')}
                   </NavItem>
                 </motion.div>
