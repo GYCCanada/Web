@@ -59,15 +59,25 @@ const conference: Record<Locale, Conference> = {
 
     speakers: [
       {
-        name: 'Matt Para',
+        name: 'Matt Parra',
         activity: 'Morning Plenary',
-        img: '/2024/speakers/matt.jpg',
-        bio: 'Matt Para is a pastor and speaker from the United States.',
+        img: '/2024/speakers/matt.png',
+        bio: dedent`Matt Parra is the lead Pastor of the Chehalis Seventh day Adentist
+Church in the Washington Conference. He has spent 10 years in Australia
+where he served as Personal Ministries, Evangelism, and Sabbath School
+Director for the North NSW Conference. A main focus of Matt's ministry
+for the past 20 years has been providing environments for young people
+where they can grow in their walk with Christ and witness for Him. He
+served as DIrector for Arise Australia with its accompanying
+discipleship streams such as Local Missions Training, and Arise for
+Life. Matt is married to Sherise Parra and they have three sons and one
+girl. Matt enjoys reading, snowboarding with his boys, hiking with his
+family, getting old, and teaching scripture.`,
       },
       {
         name: 'Alex Niculaescu',
         activity: 'Evening Plenary',
-        img: '/2024/speakers/alex.jpg',
+        img: '/2024/speakers/alex.jpeg',
         bio: dedent(`Alex has worked in various mission fields over the past 13 years and
 was introduced to the reality of modern forms of exploitation and
 slavery while living in East Africa in 2009. Since then he has worked
@@ -84,20 +94,11 @@ lives in Michigan with his wife and daughter where he works as a pastor.
     ],
     seminars: [
       {
-        title: 'Mental Health Seminar',
-        speaker: {
-          name: 'Opal Virgo',
-          img: '/2024/speakers/opal.jpg',
-          bio: 'John Doe is a pastor and speaker from Canada.',
-        },
-        description: 'Seminar Description',
-      },
-      {
         title: 'Apologetics Seminar',
         speaker: {
           name: 'Andrew Bikichky',
           img: '/2024/speakers/andrew.jpg',
-          bio: 'John Doe is a pastor and speaker from Canada.',
+          bio: dedent`Andrew Bikichky was raised a 5th generation Seventh-day Adventist. At the age of 16 he left the church to pursue worldly ambitions in the entertainment industry. After spending 25 years as a Hollywood cameraman, he was drawn back by the Holy Spirit to the faith of his childhood, and started working as a Bible Worker, accepting speaking invitations in churches. After living almost 3 decades in the world, the profound truths Andrew rediscovered in the Word of God and the testimony of Jesus Christ captivated his whole being, becoming a burning fire in his heart. Of particular interest in his focus on the great light we've been given about the ministry of Christ in the heavenly sanctuary, and how He is right now seeking to prepare a people to meet Him face to face.`,
         },
         description: 'Seminar Description',
       },
@@ -105,7 +106,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         title: 'Personal Study Workshop',
         speaker: {
           name: 'James Niyomugabo',
-          img: '/2024/speakers/james.jpg',
+          img: '/2024/speakers/james.png',
           bio: dedent(
             `James Niyomugabo is a dedicated creator coach and entrepreneur aiming to empower 1 million Christian creators, companies, and churches with the Genesis blueprint for creation and operation. He has been an elder at Westminster SDA Church for over three years and serves as a Bible worker at Grace Church Company. James is spearheading a digital evangelism initiative, "This Gospel Must Go Viral," to spread the Gospel globally. He is also the author of “How to Create Like God Does - God’s Success Blueprint for Creators, Companies, and Churches” and leads the "Journal through the Bible in a Year" challenge to inspire deeper engagement with Scripture.`,
           ),
@@ -117,7 +118,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         speaker: {
           name: 'Dave Fielder',
           img: '/2024/speakers/dave.jpg',
-          bio: 'John Doe is a pastor and speaker from Canada.',
+          bio: dedent`Dave Fiedler has bucked logs, farmed carrots, tomato seed, and hay, run a print shop, been an editor, a classroom teacher (elementary to college), a boys’ dean, a school principal, a vegan restaurant manager, and written five books. His goal and privilege, in print and in person, is to share a vision of Christ’s own approach to the gospel that heals bodies and souls, and will—as surely as it is practiced—end the conflict. Currently, he supports this addiction to teaching, preaching, and writing, by providing IT Services to dentists in “Beautiful British Columbia” where he lives with his wife, Clarissa.`,
         },
         description: 'Seminar Description',
       },
@@ -147,7 +148,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         name: 'Matt Para',
         activity: 'Plénière du matin',
         img: '/2024/speakers/matt.jpg',
-        bio: `Matt Para c'est un pasteur et orateur des États-Unis.`,
+        bio: `Matt Parra est le pasteur principal de l'église adventiste du septième jour de Chehalis dans la Conférence de Washington. Il a passé 10 ans en Australie où il a été directeur des ministères personnels, de l'évangélisation et de l'école du sabbat pour la Conférence du Nord de la Nouvelle-Galles du Sud. Un des principaux objectifs du ministère de Matt au cours des 20 dernières années a été de fournir des environnements pour les jeunes où ils peuvent grandir dans leur marche avec Christ et témoigner pour Lui. Il a été directeur d'Arise Australia avec ses flux de discipleship accompagnants tels que la formation aux missions locales et Arise for Life. Matt est marié à Sherise Parra et ils ont trois fils et une fille. Matt aime lire, faire du snowboard avec ses garçons, faire de la randonnée avec sa famille, vieillir et enseigner l'écriture.`,
       },
       {
         name: 'Alex Niculaescu',
@@ -158,20 +159,11 @@ lives in Michigan with his wife and daughter where he works as a pastor.
     ],
     seminars: [
       {
-        title: 'Séminaire sur la santé mentale',
-        speaker: {
-          name: 'Opal Virgo',
-          img: '/2024/speakers/opal.jpg',
-          bio: '',
-        },
-        description: 'Seminar Description',
-      },
-      {
         title: 'Séminaire d’apologétique',
         speaker: {
           name: 'Andrew Bikichky',
           img: '/2024/speakers/andrew.jpg',
-          bio: '',
+          bio: `Andrew Bikichky a été élevé adventiste du septième jour de la cinquième génération. À l'âge de 16 ans, il a quitté l'église pour poursuivre des ambitions mondaines dans l'industrie du divertissement. Après avoir passé 25 ans comme caméraman à Hollywood`,
         },
         description: 'Seminar Description',
       },
@@ -180,7 +172,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         speaker: {
           name: 'James Niyomugabo',
           img: '/2024/speakers/james.jpg',
-          bio: '',
+          bio: `James Niyomugabo est un coach et entrepreneur créatif dévoué qui vise à autonomiser 1 million de créateurs chrétiens, d'entreprises et d'églises avec le plan de Dieu pour la création et le fonctionnement. Il est ancien de l'église adventiste de Westminster depuis plus de trois ans et sert de travailleur biblique à la Grace Church Company. James est à l'origine d'une initiative d'évangélisation numérique, "This Gospel Must Go Viral", pour diffuser l'Évangile à l'échelle mondiale. Il est également l'auteur de “How to Create Like God Does - God’s Success Blueprint for Creators, Companies, and Churches” et dirige le défi "Journal through the Bible in a Year" pour inspirer un engagement plus profond avec l'Écriture.`,
         },
         description: 'Seminar Description',
       },
@@ -189,7 +181,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         speaker: {
           name: 'Dave Fielder',
           img: '/2024/speakers/dave.jpg',
-          bio: '',
+          bio: `Dave Fiedler a déplacé des journaux, cultivé des carottes, des graines de tomates et du foin, dirigé une imprimerie, été rédacteur en chef, enseignant en classe (de l'élémentaire à l'université), doyen des garçons, directeur d'école, gérant de restaurant végétalien et écrit cinq livres. Son objectif et son privilège, dans l'impression et en personne, est de partager une vision de l'approche du Christ à l'Évangile qui guérit les corps et les âmes, et qui mettra fin au conflit. Actuellement, il soutient cette addiction à l'enseignement, à la prédication et à l'écriture, en fournissant des services informatiques aux dentistes dans la "belle Colombie-Britannique" où il vit avec sa femme, Clarissa.`,
         },
         description: 'Seminar Description',
       },

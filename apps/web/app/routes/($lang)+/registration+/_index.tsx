@@ -1,14 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useSearchParams } from '@remix-run/react';
-import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
-import { getCurrentConference } from '~/lib/conference.server';
-import { dayjs } from '~/lib/dayjs';
-import { useLocale, useTranslate } from '~/lib/localization/context';
-import { getLocale } from '~/lib/localization/localization';
-import { buttonStyle } from '~/ui/button';
-import { LocalizedImage } from '~/ui/image';
-import { Link } from '~/ui/link';
-import { Main } from '~/ui/main';
 import clsx from 'clsx';
 import {
   AnimatePresence,
@@ -21,6 +12,16 @@ import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react';
 import * as React from 'react';
 import { useButton } from 'react-aria';
 import { match } from 'ts-pattern';
+
+import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
+import { getCurrentConference } from '~/lib/conference.server';
+import { dayjs } from '~/lib/dayjs';
+import { useLocale, useTranslate } from '~/lib/localization/context';
+import { getLocale } from '~/lib/localization/localization';
+import { buttonStyle } from '~/ui/button';
+import { LocalizedImage } from '~/ui/image';
+import { Link } from '~/ui/link';
+import { Main } from '~/ui/main';
 
 export const meta: MetaFunction = ({ params }) => {
   const locale = getLocale(params);
@@ -261,7 +262,11 @@ function DesktopSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
         </motion.div>
 
         <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
-          <img className="size-full" src={img} alt={`${name}, ${activity}`} />
+          <img
+            className="size-full object-cover"
+            src={img}
+            alt={`${name}, ${activity}`}
+          />
           <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4 text-white">
             <div className="flex items-center gap-2">
               <motion.h3 className="text-3xl font-bold leading-5 text-white">
@@ -385,7 +390,7 @@ function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
 
                 <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
                   <img
-                    className="size-full"
+                    className="size-full object-cover"
                     src={img}
                     alt={`${name}, ${activity}`}
                   />
