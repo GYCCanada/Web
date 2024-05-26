@@ -101,12 +101,12 @@ function MobileHero() {
             fr: '/2024/fr/hero-mobile.jpg',
           }}
         />
-        <Link
+        <a
           className={clsx(buttonStyle, 'absolute -bottom-6 left-4')}
-          to="/registration/form"
+          href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"
         >
           {translate('registration.register')}
-        </Link>
+        </a>
       </div>
       <div className="flex flex-col gap-4 px-4">
         <div className="flex flex-col gap-2 text-4xl">
@@ -178,9 +178,12 @@ function DesktopHero() {
               <h3 className="text-5xl">{conference.location}</h3>
             </div>
             <div>
-              <Link className={buttonStyle} to="/registration/form">
+              <a
+                className={buttonStyle}
+                href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"
+              >
                 {translate('registration.register')}
-              </Link>
+              </a>
             </div>
           </div>
         </div>
@@ -509,13 +512,13 @@ function RegistrationSection() {
       <p>{translate('registration.register.subtitle')}</p>
 
       <div>
-        <Link
-          to="/registration/form"
+        <a
+          href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"
           className={buttonStyle}
           data-variant="accent"
         >
           {translate('registration.register.button')}
-        </Link>
+        </a>
       </div>
     </section>
   );
