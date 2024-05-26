@@ -140,8 +140,122 @@ const en = {
   'registration.register.subtitle':
     'See you on August 21 at the Rutland SDA church in Kelowna, British Columbia. Sign up before June 22nd to secure earlybird pricing.',
   'registration.register.button': 'Register Now',
-  'about.title': 'Our Story',
+  'registration.form.title': 'Register for GYC Canada {{year}}',
+  'registration.form.attendee': 'Attendee',
+  'registration.form.exhibitor': 'Exhibitor',
+  'registration.form.name.label': 'Full Name',
+  'registration.form.name.placeholder': 'Enter your full name here',
+  'registration.form.name.required': 'Please enter your name',
+  'registration.form.email.label': 'Email',
+  'registration.form.email.placeholder': 'Enter your email here',
+  'registration.form.email.required': 'Please enter your email',
+  'registration.form.email.error': 'Please enter a valid email',
+  'registration.form.phone.label': 'Phone Number',
+  'registration.form.phone.placeholder': 'Enter your phone number here',
+  'registration.form.phone.required': 'Please enter your phone number',
+  'registration.form.phone.error': 'Please enter a valid phone number',
+  'registration.form.gender.label': 'Gender',
+  'registration.form.gender.male': 'Male',
+  'registration.form.gender.female': 'Female',
+  'registration.form.date-of-birth.label': 'Date of Birth',
+  'registration.form.date-of-birth.placeholder': 'Enter your date of birth',
+  'registration.form.date-of-birth.required': 'Please enter your date of birth',
+  'registration.form.date-of-birth.error': 'Please enter a valid date of birth',
+  'registration.form.parent.label': 'Parent/Guardian Name',
+  'registration.form.parent.placeholder': 'Enter your parent/guardian name',
+  'registration.form.parent.required': 'Please enter your parent/guardian name',
+  'registration.form.parent.error': 'Please enter a valid parent/guardian name',
+  'registration.form.parent-email.label': 'Parent/Guardian Email',
+  'registration.form.parent-email.placeholder':
+    'Enter your parent/guardian email',
+  'registration.form.parent-email.required':
+    'Please enter your parent/guardian email',
+  'registration.form.parent-email.error':
+    'Please enter a valid parent/guardian email',
+  'registration.form.parent-phone.label': 'Parent/Guardian Phone',
+  'registration.form.parent-phone.placeholder':
+    'Enter your parent/guardian phone',
+  'registration.form.parent-phone.required':
+    'Please enter your parent/guardian phone',
+  'registration.form.parent-phone.error':
+    'Please enter a valid parent/guardian phone',
+  'registration.form.meals.title': 'Meals',
+  'registration.form.meals.disclaimer':
+    'Please Note, we may not be able to accommodate all allergies/sensitivities, but will do our best to accomodate you',
+  'registration.form.meals.label': 'Meals',
+  'registration.form.meals.description':
+    'Please select your meal preference. Meals are only available for attendees. Exhibitors must make their own arrangements.',
+  'registration.form.meals.yes': 'Weekend Meals (5 Meals) ($60.00)',
+  'registration.form.meals.no': 'No Meals',
+  'registration.form.meals.required': 'Please select your meal preference',
+  'registration.form.meals.error': 'Please select a meal preference',
+  'registration.form.dietary-restrictions.label': 'Dietary Restrictions',
+  'registration.form.dietary-restrictions.placeholder':
+    'Enter any dietary restrictions here',
+  'registration.form.outreach.label': 'Outreach',
+  'registration.form.outreach.description': `What's your preference in terms of which outreach project you'd like to take part in? Outreach will happen Sabbath, August 19th after lunch. Transportation will be provided. Please note, picking one over another doesn't guarantee that you will be able to join in that specific outreach project, but there is a very large chance you will be able to. Please keep in mind that projects like these are very fluid and are subject to change.`,
+  'registration.form.outreach.laws-of-health': '8 Laws of Health Fair',
+  'registration.form.outreach.homeless-carepacks':
+    'Summer Care Packs for the Homeless',
+  'registration.form.outreach.back-to-school': 'Back to School Shoes Giveaway',
+  'registration.form.outreach.not-sure': `I'm not sure`,
+  'registration.form.how-did-you-hear.label': 'How did you hear about us?',
+  'registration.form.how-did-you-hear.placeholder':
+    'Enter how you heard about us here',
+  'registration.form.why-are-you-attending.label': 'Why are you attending?',
+  'registration.form.why-are-you-attending.placeholder':
+    'Enter why you are attending here',
+  'registration.form.what-are-you-excited-about.label': `What are you most excited for this conference?`,
+  'registration.form.what-are-you-excited-about.placeholder': `Enter what you're excited about here`,
+  'registration.form.first-time-attending.label': 'First Time Attending?',
+  'registration.form.first-time-attending.yes': 'Yes',
+  'registration.form.first-time-attending.no': 'No',
+  'registration.form.first-time-attending.required':
+    'Please select if this is your first time attending',
+  'registration.form.first-time-attending.error':
+    'Please select if this is your first time attending',
+  'registration.form.church.label': 'Do you attend a church? If so, which one?',
+  'registration.form.church.placeholder': 'Enter your church here',
+  'registration.form.merch.label': 'Merchandise',
+  'registration.form.merch.t-shirt': 'T-Shirt',
+  'registration.form.merch.hoodie': 'Hoodie',
+  'registration.form.merch.shirt': 'Long Sleeve Shirt',
+  'registration.form.merch.none': `Merch isn't for me`,
+  'registration.form.other.label': 'Other',
+  'registration.form.other.placeholder': 'Enter any other notes here',
+  'registration.form.tos.label': 'Terms of Service',
+  'registration.form.tos.required': 'Please accept the terms of service',
+  'registration.form.tos.error': 'Please accept the terms of service',
+  'registration.form.tos.agree': 'I agree to the terms of service',
+  'registration.form.song-leader.label': 'Song Service Leader',
+  'registration.form.musician.label': 'Song Service Musician',
+  'registration.form.instrument.label': 'Instrument',
+  'registration.form.instrument.placeholder': 'Enter your instrument here',
+  'registration.form.special-music.label': 'Special Music',
+  'registration.form.hospitality.label': 'Hospitality',
+  'registration.form.hospitality.description': 'Food prep, etc!',
+  'registration.form.registration-station.label': 'Registration Station',
+  'registration.form.usher.label': 'Usher',
+  'registration.form.usher.description': 'Parking, tents, and meals',
+  'registration.form.outreach-leader.label': 'Outreach Leader',
+  'registration.form.small-group-leader.label': 'Small Group Leader',
+  'registration.form.seminar-room-host.label': 'Seminar Room Host',
+  'registration.form.camera-operator.label': 'Camera Operator',
+  'registration.form.photographer.label': 'Photographer',
+  'registration.form.roaming-mic.label': 'Roaming Mic',
+  'registration.form.company.label': 'Company',
+  'registration.form.company.placeholder': 'Enter your company here',
+  'registration.form.company.required': 'Please enter your company',
+  'registration.form.synopsis.label': 'Synopsis',
+  'registration.form.synopsis.placeholder': 'Enter your synopsis here',
+  'registration.form.synopsis.required': 'Please enter your synopsis',
+  'registration.form.website.label': 'Website',
+  'registration.form.website.placeholder': 'Enter your website here',
+  'registration.form.website.required': 'Please enter your website',
 
+  'registration.form.submit': 'Submit',
+
+  'about.title': 'Our Story',
   'about.1': `GYC Canada (Generation Youth Christ) is a youth-initiated and led
         movement of Seventh-day Adventists from diverse, united in a common
         commitment to serious Bible study, intense prayer, uncompromising
@@ -349,6 +463,137 @@ const fr: Record<TranslationKey, string> = {
   'registration.register.subtitle':
     'Rendez-vous le 21 août à l’église adventiste de Rutland à Kelowna, en Colombie-Britannique. Inscrivez-vous avant le 22 juin pour bénéficier des tarifs de lancement.',
   'registration.register.button': "S'inscrire",
+  'registration.form.title': 'Inscrivez-vous à GYC Canada {{year}}',
+  'registration.form.attendee': 'Participant',
+  'registration.form.exhibitor': 'Exposant',
+  'registration.form.name.label': 'Nom complet',
+  'registration.form.name.placeholder': 'Entrez votre nom complet ici',
+  'registration.form.name.required': 'Veuillez entrer votre nom',
+  'registration.form.email.label': 'Courriel',
+  'registration.form.email.placeholder': 'Entrez votre courriel ici',
+  'registration.form.email.required': 'Veuillez entrer votre courriel',
+  'registration.form.email.error':
+    'Veuillez entrer une adresse courriel valide',
+  'registration.form.phone.label': 'Numéro de téléphone',
+  'registration.form.phone.placeholder': 'Entrez votre numéro de téléphone ici',
+  'registration.form.phone.required':
+    'Veuillez entrer votre numéro de téléphone',
+  'registration.form.phone.error':
+    'Veuillez entrer un numéro de téléphone valide',
+  'registration.form.gender.label': 'Sexe',
+  'registration.form.gender.male': 'Homme',
+  'registration.form.gender.female': 'Femme',
+  'registration.form.date-of-birth.label': 'Date de naissance',
+  'registration.form.date-of-birth.placeholder':
+    'Entrez votre date de naissance',
+  'registration.form.date-of-birth.required':
+    'Veuillez entrer votre date de naissance',
+  'registration.form.date-of-birth.error':
+    'Veuillez entrer une date de naissance valide',
+  'registration.form.parent.label': 'Nom du parent/tuteur',
+  'registration.form.parent.placeholder':
+    'Entrez le nom de votre parent/tuteur',
+  'registration.form.parent.required':
+    'Veuillez entrer le nom de votre parent/tuteur',
+  'registration.form.parent.error':
+    'Veuillez entrer un nom de parent/tuteur valide',
+  'registration.form.parent-email.label': 'Courriel du parent/tuteur',
+  'registration.form.parent-email.placeholder':
+    'Entrez le courriel de votre parent/tuteur',
+  'registration.form.parent-email.required':
+    'Veuillez entrer le courriel de votre parent/tuteur',
+  'registration.form.parent-email.error':
+    'Veuillez entrer un courriel de parent/tuteur valide',
+  'registration.form.parent-phone.label': 'Téléphone du parent/tuteur',
+  'registration.form.parent-phone.placeholder':
+    'Entrez le téléphone de votre parent/tuteur',
+  'registration.form.parent-phone.required':
+    'Veuillez entrer le téléphone de votre parent/tuteur',
+  'registration.form.parent-phone.error':
+    'Veuillez entrer un téléphone de parent/tuteur valide',
+  'registration.form.meals.title': 'Repas',
+  'registration.form.meals.disclaimer':
+    'Veuillez noter que nous ne pourrons pas accommoder toutes les allergies/sensibilités, mais ferons de notre mieux pour vous accommoder',
+  'registration.form.meals.label': 'Repas',
+  'registration.form.meals.description':
+    'Veuillez sélectionner votre préférence de repas. Les repas ne sont disponibles que pour les participants. Les exposants doivent faire leurs propres arrangements.',
+  'registration.form.meals.yes': 'Repas du week-end (5 repas) (60,00 $)',
+  'registration.form.meals.no': 'Pas de repas',
+  'registration.form.meals.required':
+    'Veuillez sélectionner votre préférence de repas',
+  'registration.form.meals.error':
+    'Veuillez sélectionner une préférence de repas',
+  'registration.form.dietary-restrictions.label': 'Restrictions alimentaires',
+  'registration.form.dietary-restrictions.placeholder':
+    'Entrez toutes les restrictions alimentaires ici',
+  'registration.form.outreach.label': 'Rayonnement',
+  'registration.form.outreach.description': `Quelle est votre préférence en termes de projet de rayonnement auquel vous aimeriez participer? Le rayonnement aura lieu le sabbat 19 août après le déjeuner. Le transport sera fourni. Veuillez noter que choisir un projet plutôt qu’un autre ne garantit pas que vous pourrez participer à ce projet de rayonnement spécifique, mais il y a une très grande chance que vous puissiez le faire. Veuillez garder à l’esprit que des projets comme ceux-ci sont très fluides et peuvent changer.`,
+  'registration.form.outreach.laws-of-health': 'Salon des 8 lois de la santé',
+  'registration.form.outreach.homeless-carepacks':
+    'Paquets de soins d’été pour les sans-abri',
+  'registration.form.outreach.back-to-school':
+    'Distribution de chaussures pour la rentrée scolaire',
+  'registration.form.outreach.not-sure': `Je ne suis pas sûr`,
+  'registration.form.how-did-you-hear.label':
+    'Comment avez-vous entendu parler de nous?',
+  'registration.form.how-did-you-hear.placeholder':
+    'Entrez comment vous avez entendu parler de nous ici',
+  'registration.form.why-are-you-attending.label': 'Pourquoi assistez-vous?',
+  'registration.form.why-are-you-attending.placeholder':
+    'Entrez pourquoi vous assistez ici',
+  'registration.form.what-are-you-excited-about.label': `Qu’est-ce qui vous excite le plus pour cette conférence?`,
+  'registration.form.what-are-you-excited-about.placeholder': `Entrez ce qui vous excite ici`,
+  'registration.form.first-time-attending.label':
+    'Première fois que vous assistez?',
+  'registration.form.first-time-attending.yes': 'Oui',
+  'registration.form.first-time-attending.no': 'Non',
+  'registration.form.first-time-attending.required':
+    'Veuillez sélectionner si c’est votre première fois que vous assistez',
+  'registration.form.first-time-attending.error':
+    'Veuillez sélectionner si c’est votre première fois que vous assistez',
+  'registration.form.church.label':
+    'Fréquentez-vous une église? Si oui, laquelle?',
+  'registration.form.church.placeholder': 'Entrez votre église ici',
+  'registration.form.merch.label': 'Marchandise',
+  'registration.form.merch.t-shirt': 'T-Shirt',
+  'registration.form.merch.hoodie': 'Chandail à capuchon',
+  'registration.form.merch.shirt': 'Chandail à manches longues',
+  'registration.form.merch.none': `La marchandise n’est pas pour moi`,
+  'registration.form.other.label': 'Autre',
+  'registration.form.other.placeholder': 'Entrez toutes autres notes ici',
+  'registration.form.tos.label': 'Conditions d’utilisation',
+  'registration.form.tos.required':
+    'Veuillez accepter les conditions d’utilisation',
+  'registration.form.tos.error':
+    'Veuillez accepter les conditions d’utilisation',
+  'registration.form.tos.agree': 'J’accepte les conditions d’utilisation',
+  'registration.form.song-leader.label': 'Chef du service de chant',
+  'registration.form.musician.label': 'Musicien du service de chant',
+  'registration.form.instrument.label': 'Instrument',
+  'registration.form.instrument.placeholder': 'Entrez votre instrument ici',
+  'registration.form.special-music.label': 'Musique spéciale',
+  'registration.form.hospitality.label': 'Hospitalité',
+  'registration.form.hospitality.description': 'Préparation des repas, etc!',
+  'registration.form.registration-station.label': 'Station d’inscription',
+  'registration.form.usher.label': 'Usher',
+  'registration.form.usher.description': 'Stationnement, tentes et repas',
+  'registration.form.outreach-leader.label': 'Chef du rayonnement',
+  'registration.form.small-group-leader.label': 'Chef de petit groupe',
+  'registration.form.seminar-room-host.label':
+    'Animateur de salle de séminaire',
+  'registration.form.camera-operator.label': 'Opérateur de caméra',
+  'registration.form.photographer.label': 'Photographe',
+  'registration.form.roaming-mic.label': 'Microphone ambulant',
+  'registration.form.company.label': 'Entreprise',
+  'registration.form.company.placeholder': 'Entrez votre entreprise ici',
+  'registration.form.company.required': 'Veuillez entrer votre entreprise',
+  'registration.form.synopsis.label': 'Synopsis',
+  'registration.form.synopsis.placeholder': 'Entrez votre synopsis ici',
+  'registration.form.synopsis.required': 'Veuillez entrer votre synopsis',
+  'registration.form.website.label': 'Site Web',
+  'registration.form.website.placeholder': 'Entrez votre site Web ici',
+  'registration.form.website.required': 'Veuillez entrer votre site Web',
+  'registration.form.submit': 'Soumettre',
 
   'about.title': 'Notre histoire',
   'about.1': `GYC Canada (Generation Youth Christ) est un mouvement de jeunes

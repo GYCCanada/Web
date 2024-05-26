@@ -9,6 +9,7 @@ import {
 } from 'react-aria-components';
 
 import { InputVariant } from './input';
+import { TextFieldContext } from './text-field';
 
 const _RadioGroup = React.forwardRef<
   HTMLDivElement,
@@ -21,28 +22,37 @@ const _RadioGroup = React.forwardRef<
 ) {
   const [meta] = useField(props.name ?? '');
   const control = useInputControl(meta as any);
+
   return (
-    <RadioGroup
-      ref={ref}
-      className={(values) =>
-        clsx(
-          'group grid gap-2.5',
-          typeof className === 'function' ? className(values) : className,
-        )
-      }
-      style={{
-        gridTemplateAreas: '"label"\n"radio"',
+    <TextFieldContext.Provider
+      value={{
+        variant,
+        meta,
+        control,
       }}
-      data-variant={variant}
-      orientation={orientation ? orientation : 'horizontal'}
-      {...props}
-      name={meta.name}
-      value={(control.value as any) ?? props.defaultValue ?? props.value}
-      onChange={control.change}
-      onBlur={control.blur}
-      isInvalid={meta.errors && meta.errors.length > 0}
-      isRequired={meta.required}
-    />
+    >
+      <RadioGroup
+        ref={ref}
+        className={(values) =>
+          clsx(
+            'group grid gap-2.5',
+            typeof className === 'function' ? className(values) : className,
+          )
+        }
+        style={{
+          gridTemplateAreas: '"label"\n"radio"',
+        }}
+        data-variant={variant}
+        orientation={orientation ? orientation : 'horizontal'}
+        {...props}
+        name={meta.name}
+        value={(control.value as any) ?? props.defaultValue ?? props.value}
+        onChange={control.change}
+        onBlur={control.blur}
+        isInvalid={meta.errors && meta.errors.length > 0}
+        isRequired={meta.required}
+      />
+    </TextFieldContext.Provider>
   );
 });
 _RadioGroup.displayName = 'RadioGroup';

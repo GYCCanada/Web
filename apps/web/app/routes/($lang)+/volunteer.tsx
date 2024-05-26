@@ -7,6 +7,10 @@ import {
 import { parseWithZod } from '@conform-to/zod';
 import type { ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, redirect, useActionData, useLoaderData } from '@remix-run/react';
+import { InfoIcon } from 'lucide-react';
+import { match } from 'ts-pattern';
+import { z } from 'zod';
+
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import { sendMail } from '~/lib/mailer.server';
@@ -16,9 +20,6 @@ import { Label } from '~/ui/label';
 import { Main } from '~/ui/main';
 import { Radio, RadioGroup, Radios } from '~/ui/radio';
 import { TextField } from '~/ui/text-field';
-import { InfoIcon } from 'lucide-react';
-import { match } from 'ts-pattern';
-import { z } from 'zod';
 
 const schema = z.discriminatedUnion('method', [
   z.object({
@@ -269,7 +270,7 @@ export default function Index() {
                 translate('volunteer.form.name.placeholder') as string
               }
             />
-            <FieldErrors errors={fields.name.errors} />
+            <FieldErrors />
           </TextField>
 
           <RadioGroup name={fields.method.name}>
@@ -285,7 +286,7 @@ export default function Index() {
                 {translate('volunteer.form.method.both')}
               </Radio>
             </Radios>
-            <FieldErrors errors={fields.method.errors} />
+            <FieldErrors />
           </RadioGroup>
           {method === 'email' || method === 'both' ? (
             <TextField name={fields.email.name}>
@@ -296,7 +297,7 @@ export default function Index() {
                   translate('volunteer.form.email.placeholder') as string
                 }
               />
-              <FieldErrors errors={fields.email.errors} />
+              <FieldErrors />
             </TextField>
           ) : null}
           {method === 'phone' || method === 'both' ? (
@@ -308,7 +309,7 @@ export default function Index() {
                   translate('volunteer.form.phone.placeholder') as string
                 }
               />
-              <FieldErrors errors={fields.phone.errors} />
+              <FieldErrors />
             </TextField>
           ) : null}
           <TextField name={fields.age.name}>
@@ -319,7 +320,7 @@ export default function Index() {
                 translate('volunteer.form.age.placeholder') as string
               }
             />
-            <FieldErrors errors={fields.age.errors} />
+            <FieldErrors />
           </TextField>
           <TextField name={fields.location.name}>
             <Label>{translate('volunteer.form.location.label')}</Label>
@@ -329,7 +330,7 @@ export default function Index() {
                 translate('volunteer.form.location.placeholder') as string
               }
             />
-            <FieldErrors errors={fields.location.errors} />
+            <FieldErrors />
           </TextField>
           <TextField name={fields.background.name}>
             <Label>{translate('volunteer.form.background.label')}</Label>
@@ -339,7 +340,7 @@ export default function Index() {
                 translate('volunteer.form.background.placeholder') as string
               }
             />
-            <FieldErrors errors={fields.background.errors} />
+            <FieldErrors />
           </TextField>
           <TextField name={fields.why.name}>
             <Label>{translate('volunteer.form.why.label')}</Label>
@@ -349,7 +350,7 @@ export default function Index() {
                 translate('volunteer.form.why.placeholder') as string
               }
             />
-            <FieldErrors errors={fields.why.errors} />
+            <FieldErrors />
           </TextField>
           <div>
             <Button variant="accent" type="submit">

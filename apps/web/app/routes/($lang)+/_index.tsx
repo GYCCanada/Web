@@ -6,6 +6,11 @@ import type {
   MetaFunction,
 } from '@remix-run/node';
 import { Form, redirect, useActionData, useLoaderData } from '@remix-run/react';
+import clsx from 'clsx';
+import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
+import { match } from 'ts-pattern';
+import { z } from 'zod';
+
 import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
@@ -18,10 +23,6 @@ import { Label } from '~/ui/label';
 import { Link } from '~/ui/link';
 import { Main } from '~/ui/main';
 import { TextField } from '~/ui/text-field';
-import clsx from 'clsx';
-import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
-import { match } from 'ts-pattern';
-import { z } from 'zod';
 
 export const meta: MetaFunction<typeof loader> = ({ data, params }) => {
   const locale = getLocale(params);
@@ -355,7 +356,7 @@ function NewsletterForm() {
                     translate('main.newsletter.name.placeholder') as string
                   }
                 />
-                <FieldErrors errors={fields.name.errors} />
+                <FieldErrors />
               </TextField>
               <TextField name={fields.email.name}>
                 <Label>{translate('main.newsletter.email.label')}</Label>
@@ -365,7 +366,7 @@ function NewsletterForm() {
                     translate('main.newsletter.email.placeholder') as string
                   }
                 />
-                <FieldErrors errors={fields.email.errors} />
+                <FieldErrors />
               </TextField>
 
               <div>

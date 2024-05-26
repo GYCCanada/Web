@@ -2,6 +2,9 @@ import { FormProvider, FormStateInput, useForm } from '@conform-to/react';
 import { parseWithZod } from '@conform-to/zod';
 import type { ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, redirect, useActionData } from '@remix-run/react';
+import { match } from 'ts-pattern';
+import { z } from 'zod';
+
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import { sendMail } from '~/lib/mailer.server';
@@ -12,8 +15,6 @@ import { Label } from '~/ui/label';
 import { Main } from '~/ui/main';
 import { Radio, RadioGroup, Radios } from '~/ui/radio';
 import { TextField } from '~/ui/text-field';
-import { match } from 'ts-pattern';
-import { z } from 'zod';
 
 export const schema = z.discriminatedUnion('method', [
   z.object({
@@ -177,7 +178,7 @@ export default function Index() {
             <TextField.Input
               placeholder={translate('contact.form.name.placeholder') as string}
             />
-            <FieldErrors errors={fields.name.errors} />
+            <FieldErrors />
           </TextField>
 
           <RadioGroup name={fields.method.name} defaultValue="both">
@@ -193,7 +194,7 @@ export default function Index() {
                 {translate('contact.form.contact-method.both')}
               </Radio>
             </Radios>
-            <FieldErrors errors={fields.method.errors} />
+            <FieldErrors />
           </RadioGroup>
 
           {method === 'email' || method === 'both' ? (
@@ -205,7 +206,7 @@ export default function Index() {
                   translate('contact.form.email.placeholder') as string
                 }
               />
-              <FieldErrors errors={fields.email.errors} />
+              <FieldErrors />
             </TextField>
           ) : null}
 
@@ -218,7 +219,7 @@ export default function Index() {
                   translate('contact.form.phone.placeholder') as string
                 }
               />
-              <FieldErrors errors={fields.phone.errors} />
+              <FieldErrors />
             </TextField>
           ) : null}
 
@@ -230,7 +231,7 @@ export default function Index() {
                 translate('contact.form.message.placeholder') as string
               }
             />
-            <FieldErrors errors={fields.message.errors} />
+            <FieldErrors />
           </TextField>
 
           <div>
