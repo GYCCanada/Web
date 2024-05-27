@@ -1,7 +1,8 @@
+import * as React from 'react';
+
 import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
 import { useLocale } from '~/lib/localization/context';
 import { Locale } from '~/lib/localization/localization';
-import * as React from 'react';
 
 function findNearestBreakpointSrc(
   images: Partial<Record<Breakpoint, string>>,

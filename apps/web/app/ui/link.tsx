@@ -3,8 +3,9 @@ import {
   LinkProps,
   useLocation,
 } from '@remix-run/react';
-import { Locale } from '~/lib/localization/localization';
 import * as React from 'react';
+
+import { Locale } from '~/lib/localization/localization';
 
 export const Link = React.forwardRef<HTMLAnchorElement, LinkProps>(
   function Link({ to, ...props }, ref) {

@@ -9,9 +9,10 @@ import {
 } from '@epic-web/client-hints/color-scheme';
 import { clientHint as timeZoneHint } from '@epic-web/client-hints/time-zone';
 import { useRevalidator, useRouteLoaderData } from '@remix-run/react';
-import { type loader as rootLoader } from '~/root';
 import * as React from 'react';
 import invariant from 'tiny-invariant';
+
+import { type loader as rootLoader } from '~/root';
 
 export const Breakpoint = {
   Sm: 0,
