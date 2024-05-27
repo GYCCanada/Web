@@ -285,8 +285,8 @@ const en = {
   'faq.question.1.answer.1': `GYC Canada reserves the right to refuse any exhibitor that does not
           uphold the Spirit of GYC as documented in the About Us section of our
           website. Email us with any questions at {{email}}.`,
-  'faq.question.1.answer.2': `A single-table exhibitor booth can be purchased for $30, and a
-          two-table exhibitor booth for $40. An exhibitor booth does not include
+  'faq.question.1.answer.2': `A single-table exhibitor booth can be purchased for $100, and a
+          two-table exhibitor booth for $50. An exhibitor booth does not include
           registration(s) for the person(s) running the booth. The Exhibit
           manager(s) must first register as attendees for the full conference.`,
   'faq.question.1.answer.3': `{{before}} registering, please email {{email}} to get approval for your booth. This can avoid issues with your booth,
@@ -630,8 +630,8 @@ const fr: Record<TranslationKey, string> = {
           propos de nous de notre site Web. Envoyez-nous vos questions à
           {{email}}.`,
 
-  'faq.question.1.answer.2': `Un stand d’exposant d’une table peut être acheté pour 30 $, et un
-          stand d’exposant de deux tables pour 40 $. Un stand d’exposant ne
+  'faq.question.1.answer.2': `Un stand d’exposant d’une table peut être acheté pour 100 $, et un
+          stand d’exposant de deux tables pour 50 $. Un stand d’exposant ne
           comprend pas l’inscription des personnes qui tiennent le stand. Les
           responsables de l’exposition doivent d’abord s’inscrire en tant que
           participants à la conférence complète.`,
