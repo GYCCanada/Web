@@ -1,16 +1,13 @@
 import { FormProvider, useForm } from '@conform-to/react';
 import { parseWithZod } from '@conform-to/zod';
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from '@remix-run/node';
-import { Form, redirect, useActionData, useLoaderData } from '@remix-run/react';
+import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Form, useActionData, useLoaderData } from '@remix-run/react';
 import clsx from 'clsx';
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
+import { action } from '../newsletter';
 import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
@@ -43,19 +40,6 @@ export const loader = ({ params }: LoaderFunctionArgs) => {
   return {
     conference: getCurrentConference(locale),
   };
-};
-
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const formData = await request.formData();
-  const submission = parseWithZod(formData, { schema });
-
-  if (submission.status !== 'success') {
-    return submission.reply();
-  }
-
-  // const data = submission.payload;
-
-  return redirect(new URL(request.url).pathname);
 };
 
 export default function Index() {
@@ -346,7 +330,12 @@ function NewsletterForm() {
 
           <p>{translate('main.newsletter.subtitle')}</p>
           <FormProvider context={form.context}>
-            <Form method="POST" className="flex flex-col gap-4" id={form.id}>
+            <Form
+              method="POST"
+              action="/newsletter"
+              className="flex flex-col gap-4"
+              id={form.id}
+            >
               <TextField name={fields.name.name}>
                 <Label>{translate('main.newsletter.name.label')}</Label>
 

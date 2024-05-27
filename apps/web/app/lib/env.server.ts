@@ -3,6 +3,14 @@ import { z } from 'zod';
 const schema = z.discriminatedUnion('NODE_ENV', [
   z.object({
     NODE_ENV: z.enum(['development', 'test']),
+    MAIL_HOST: z.string().optional(),
+    MAIL_PORT: z.coerce.number().optional(),
+    MAIL_USER: z.string().optional(),
+    MAIL_PASS: z.string().optional(),
+    MAIL_FROM: z.string().optional(),
+    MAIL_TO: z.string().optional(),
+    MAILCHIMP_API_KEY: z.string().optional(),
+    MAILCHIMP_LIST_ID: z.string().optional(),
   }),
   z.object({
     NODE_ENV: z.literal('production'),
@@ -12,9 +20,10 @@ const schema = z.discriminatedUnion('NODE_ENV', [
     MAIL_PASS: z.string(),
     MAIL_FROM: z.string(),
     MAIL_TO: z.string(),
+    MAILCHIMP_API_KEY: z.string(),
+    MAILCHIMP_LIST_ID: z.string(),
   }),
 ]);
-
 const parsed = schema.safeParse(process.env);
 
 if (parsed.success === false) {
