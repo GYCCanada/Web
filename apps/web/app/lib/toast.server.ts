@@ -22,7 +22,7 @@ export const toastSessionStorage = createCookieSessionStorage({
     sameSite: 'lax',
     path: '/',
     httpOnly: true,
-    secrets: [],
+    secrets: ['secret-key'],
     secure: process.env.NODE_ENV === 'production',
   },
 });

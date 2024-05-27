@@ -14,8 +14,8 @@ import { Main } from './ui/main';
 import './tailwind.css';
 
 import { combineHeaders } from './lib/misc';
-import { useToast } from './lib/toast.client';
 import { getToast } from './lib/toast.server';
+import { Toaster } from './ui/toaster';
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { toast, headers: toastHeaders } = await getToast(request);
@@ -56,9 +56,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const data = useLoaderData<typeof loader>();
-  useToast(data.toast);
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <Toaster closeButton position="bottom-right" />
+    </>
+  );
 }
 
 export function ErrorBoundary() {

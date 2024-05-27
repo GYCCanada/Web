@@ -19,6 +19,8 @@ import { useTranslate } from '~/lib/localization/context';
 import { getTranslation, Locale } from '~/lib/localization/localization';
 import { LocalizationProvider } from '~/lib/localization/provider';
 import { root } from '~/lib/localization/translations';
+import { useRootLoader } from '~/lib/root-loader';
+import { useToast } from '~/lib/toast';
 import { ExternalLink, linkStyle } from '~/ui/external-link';
 import { CloseIcon, LanguageIcon, MenuIcon } from '~/ui/icon';
 import { Link } from '~/ui/link';
@@ -52,8 +54,15 @@ export default function Layout() {
         <Outlet />
         <Footer />
       </div>
+      <Toast />
     </LocalizationProvider>
   );
+}
+
+function Toast() {
+  const data = useRootLoader();
+  useToast(data?.toast);
+  return null;
 }
 
 function Nav() {
