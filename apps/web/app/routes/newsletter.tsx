@@ -1,9 +1,11 @@
 import { parseWithZod } from '@conform-to/zod';
 import mailchimp from '@mailchimp/mailchimp_marketing';
-import { ActionFunctionArgs, redirect } from '@remix-run/node';
+import { ActionFunctionArgs } from '@remix-run/node';
 import { z } from 'zod';
 
 import { env } from '~/lib/env.server';
+import { TranslationKey } from '~/lib/localization/translations';
+import { redirectWithToast } from '~/lib/toast.server';
 
 mailchimp.setConfig({
   apiKey: env.MAILCHIMP_API_KEY,
@@ -38,5 +40,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  return redirect(new URL(request.url).pathname);
+  return redirectWithToast(new URL(request.url).pathname, {
+    type: 'success',
+    title: 'main.newsletter.success.title' satisfies TranslationKey,
+    description: 'main.newsletter.success.description' satisfies TranslationKey,
+  });
 };

@@ -1,13 +1,15 @@
 import { FormProvider, FormStateInput, useForm } from '@conform-to/react';
 import { parseWithZod } from '@conform-to/zod';
 import type { ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Form, redirect, useActionData } from '@remix-run/react';
+import { Form, useActionData } from '@remix-run/react';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
+import { TranslationKey } from '~/lib/localization/translations';
 import { sendMail } from '~/lib/mailer.server';
+import { redirectWithToast } from '~/lib/toast.server';
 import { Button } from '~/ui/button';
 import { ExternalLink } from '~/ui/external-link';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
@@ -104,19 +106,22 @@ export async function action({ request }: ActionFunctionArgs) {
     return submission.reply();
   }
 
-  const data = submission.payload;
+  const data = submission.value;
 
   try {
     await sendMail({
       subject: `[!] Contact Inquiry from ${data.name}`,
-      content: `Name: ${data.name}\n${match(
-        data.method as 'email' | 'phone' | 'both',
-      )
-        .with('email', () => `Email: ${data.email}`)
-        .with('phone', () => `Phone: ${data.phone}`)
+      content: `Name: ${data.name}\n${match(data)
         .with(
-          'both',
-          () => `Email: ${data.email}\nPhone: ${data.phone}`,
+          {
+            method: 'email',
+          },
+          (d) => `Email: ${d.email}`,
+        )
+        .with({ method: 'phone' }, (d) => `Phone: ${d.phone}`)
+        .with(
+          { method: 'both' },
+          (d) => `Email: ${d.email}\nPhone: ${d.phone}`,
         )}\nMessage: ${data.message}`,
     });
   } catch (error) {
@@ -126,7 +131,11 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
-  return redirect(new URL(request.url).pathname);
+  return redirectWithToast(new URL(request.url).pathname, {
+    description: 'contact.form.success.description' satisfies TranslationKey,
+    title: 'contact.form.success.title' satisfies TranslationKey,
+    type: 'success',
+  });
 }
 
 export default function Index() {

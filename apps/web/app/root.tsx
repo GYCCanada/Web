@@ -1,18 +1,36 @@
 import { LoaderFunctionArgs } from '@remix-run/node';
-import { Links, Meta, Outlet, Scripts, useLoaderData } from '@remix-run/react';
+import {
+  json,
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  useLoaderData,
+} from '@remix-run/react';
 
 import { ClientHintCheck, getHints } from './lib/client-hints';
 import { Main } from './ui/main';
 
 import './tailwind.css';
 
-export const loader = ({ request }: LoaderFunctionArgs) => {
-  return {
-    requestInfo: {
-      hints: getHints(request),
-      path: new URL(request.url).pathname,
+import { combineHeaders } from './lib/misc';
+import { useToast } from './lib/toast.client';
+import { getToast } from './lib/toast.server';
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { toast, headers: toastHeaders } = await getToast(request);
+  return json(
+    {
+      requestInfo: {
+        hints: getHints(request),
+        path: new URL(request.url).pathname,
+      },
+      toast,
     },
-  };
+    {
+      headers: combineHeaders(toastHeaders),
+    },
+  );
 };
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -38,6 +56,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const data = useLoaderData<typeof loader>();
+  useToast(data.toast);
   return <Outlet />;
 }
 

@@ -22,7 +22,9 @@ const en = {
   'main.newsletter.submit': 'Sign up',
   'main.newsletter.error':
     'An error occurred while signing you up. Please try again later.',
-  'main.newsletter.success': 'You have been signed up successfully!',
+  'main.newsletter.success.description':
+    'You have been signed up successfully!',
+  'main.newsletter.success.title': 'Thank you for signing up!',
   'main.socials.title':
     'Don’t forget to follow us on social media to get to know our team and stay even more up-to-date!',
   'main.join.title': 'Join the Movement',
@@ -65,6 +67,9 @@ const en = {
   'contact.form.submit': 'Send it',
   'contact.form.error':
     'An error occurred while sending your message. Please try again later.',
+  'contact.form.success.title': 'Thank you for your message!',
+  'contact.form.success.description':
+    'Your message has been sent successfully!',
   'give.title': 'Support the {{movement}}.',
   'give.movement': 'movement',
   'give.reason':
@@ -127,6 +132,9 @@ const en = {
   'volunteer.form.submit': 'Submit',
   'volunteer.form.error':
     'An error occurred while sending your message. Please try again later.',
+  'volunteer.form.success.description':
+    'Your message has been sent successfully!',
+  'volunteer.form.success.title': 'Thank you for your interest!',
   'registration.watch-promo': 'Watch promo',
   'registration.register': 'Register',
   'registration.speakers.title': 'Speakers',
@@ -342,7 +350,9 @@ const fr: Record<TranslationKey, string> = {
   'main.newsletter.submit': "S'inscrire",
   'main.newsletter.error':
     "Une erreur s'est produite lors de votre inscription. Veuillez réessayer plus tard.",
-  'main.newsletter.success': 'Vous avez été inscrit avec succès!',
+  'main.newsletter.success.title': 'Vous avez été inscrit avec succès!',
+  'main.newsletter.success.description': 'Merci de vous être inscrit!',
+
   'main.socials.title':
     'N’oubliez pas de nous suivre sur les réseaux sociaux pour mieux connaître notre équipe et rester encore plus à jour!',
   'main.join.title': 'Rejoignez le mouvement',
@@ -385,6 +395,8 @@ const fr: Record<TranslationKey, string> = {
   'contact.form.submit': 'Envoyer',
   'contact.form.error':
     "Une erreur s'est produite lors de l'envoi de votre message. Veuillez réessayer plus tard.",
+  'contact.form.success.title': 'Merci pour votre message!',
+  'contact.form.success.description': 'Votre message a été envoyé avec succès!',
   'give.title': 'Soutenez le {{movement}}.',
   'give.movement': 'mouvement',
   'give.reason':
@@ -449,6 +461,10 @@ const fr: Record<TranslationKey, string> = {
   'volunteer.form.submit': 'Soumettre',
   'volunteer.form.error':
     "Une erreur s'est produite lors de l'envoi de votre message. Veuillez réessayer plus tard.",
+  'volunteer.form.success.description':
+    'Votre message a été envoyé avec succès!',
+  'volunteer.form.success.title': 'Merci pour votre intérêt!',
+
   'registration.watch-promo': 'Regardez la promo',
   'registration.register': 'Inscrivez-vous',
   'registration.speakers.title': 'Conférenciers',
