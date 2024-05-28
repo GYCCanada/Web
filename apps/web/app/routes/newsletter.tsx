@@ -22,7 +22,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const submission = parseWithZod(formData, { schema });
 
   if (submission.status !== 'success') {
-    return submission.reply();
+    return submission.reply({
+      formErrors: ['main.newsletter.error' satisfies TranslationKey],
+    });
   }
 
   const data = submission.value;
@@ -36,7 +38,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
     if (res.status !== 200) {
-      return submission.reply();
+      return submission.reply({
+        formErrors: ['main.newsletter.error' satisfies TranslationKey],
+      });
     }
   }
 
