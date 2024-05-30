@@ -1,16 +1,10 @@
 import { parseWithZod } from '@conform-to/zod';
-import mailchimp from '@mailchimp/mailchimp_marketing';
 import { ActionFunctionArgs } from '@remix-run/node';
 import { z } from 'zod';
 
-import { env } from '~/lib/env.server';
 import { TranslationKey } from '~/lib/localization/translations';
+import { subscribeToNewsletter } from '~/lib/mailchimp.server';
 import { redirectWithToast } from '~/lib/toast.server';
-
-mailchimp.setConfig({
-  apiKey: env.MAILCHIMP_API_KEY,
-  server: 'us10',
-});
 
 const schema = z.object({
   email: z.string().email(),
@@ -29,19 +23,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const data = submission.value;
 
-  if (env.NODE_ENV === 'production') {
-    const res = await mailchimp.lists.addListMember(env.MAILCHIMP_LIST_ID!, {
-      email_address: data.email,
-      status: 'subscribed',
-      merge_fields: {
-        FNAME: data.name,
-      },
+  const res = await subscribeToNewsletter(data.email, data.name);
+  if (res.status !== 200) {
+    return submission.reply({
+      formErrors: ['main.newsletter.error' satisfies TranslationKey],
     });
-    if (res.status !== 200) {
-      return submission.reply({
-        formErrors: ['main.newsletter.error' satisfies TranslationKey],
-      });
-    }
   }
 
   return redirectWithToast(new URL(request.url).pathname, {
