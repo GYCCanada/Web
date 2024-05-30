@@ -162,10 +162,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       content: `Name: ${data.name}\n${match(data)
         .with({ method: 'email' }, (d) => `Email: ${d.email}`)
         .with({ method: 'phone' }, (d) => `Phone: ${d.phone}`)
-        .with(
-          { method: 'both' },
-          (d) => `Email: ${d.email}\nPhone: ${d.phone}`,
-        )}
+        .with({ method: 'both' }, (d) => `Email: ${d.email}\nPhone: ${d.phone}`)
+        .exhaustive()}
         \nMessage: ${data.why}
         \nBackground: ${data.background}
         \nAge: ${data.age}

@@ -119,10 +119,8 @@ export async function action({ request }: ActionFunctionArgs) {
           (d) => `Email: ${d.email}`,
         )
         .with({ method: 'phone' }, (d) => `Phone: ${d.phone}`)
-        .with(
-          { method: 'both' },
-          (d) => `Email: ${d.email}\nPhone: ${d.phone}`,
-        )}\nMessage: ${data.message}`,
+        .with({ method: 'both' }, (d) => `Email: ${d.email}\nPhone: ${d.phone}`)
+        .exhaustive()}\nMessage: ${data.message}`,
     });
   } catch (error) {
     console.error('Error sending email', error);
