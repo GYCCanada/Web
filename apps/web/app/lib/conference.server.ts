@@ -171,13 +171,13 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       {
         name: 'Matt Para',
         activity: 'Plénière du matin',
-        img: '/2024/speakers/matt.jpg',
+        img: '/2024/speakers/matt.png',
         bio: `Matt Parra est le pasteur principal de l'église adventiste du septième jour de Chehalis dans la Conférence de Washington. Il a passé 10 ans en Australie où il a été directeur des ministères personnels, de l'évangélisation et de l'école du sabbat pour la Conférence du Nord de la Nouvelle-Galles du Sud. Un des principaux objectifs du ministère de Matt au cours des 20 dernières années a été de fournir des environnements pour les jeunes où ils peuvent grandir dans leur marche avec Christ et témoigner pour Lui. Il a été directeur d'Arise Australia avec ses flux de discipleship accompagnants tels que la formation aux missions locales et Arise for Life. Matt est marié à Sherise Parra et ils ont trois fils et une fille. Matt aime lire, faire du snowboard avec ses garçons, faire de la randonnée avec sa famille, vieillir et enseigner l'écriture.`,
       },
       {
         name: 'Alex Niculaescu',
         activity: 'Plénière du soir',
-        img: '/2024/speakers/alex.jpg',
+        img: '/2024/speakers/alex.jpeg',
         bio: `Alex a travaillé dans divers champs missionnaires au cours des 13 dernières années et a été introduit à la réalité des formes modernes d'exploitation et d'esclavage en vivant en Afrique de l'Est en 2009. Depuis lors, il a travaillé pour diverses organisations à but non lucratif et ONG et aux côtés de divers organismes gouvernementaux et des forces de l'ordre afin de lutter contre le problème croissant de l'esclavage moderne. Il a depuis ce temps vu de plus en plus le côté spirituel de la question et le déroulement de la grande controverse de manière très réelle et tangible. Il s'est dédié à aider les autres à comprendre la réalité d'une guerre qui passe souvent inaperçue, surtout par ceux qui devraient être les plus engagés dans cette guerre. Il vit actuellement au Michigan avec sa femme et sa fille où il travaille comme pasteur.`,
       },
     ],
