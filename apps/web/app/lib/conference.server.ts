@@ -4,6 +4,7 @@ import { dayjs } from './dayjs';
 import { assertValidLocale, Locale } from './localization/localization';
 
 export type Conference = {
+  slug: string;
   title: string;
   dates: [start: number, end: number];
   registration: {
@@ -42,6 +43,7 @@ type Seminar = {
 
 const conference: Record<Locale, Conference> = {
   en: {
+    slug: '/2024',
     title: 'While It Is Day',
     dates: [
       dayjs('2024-08-21').utcOffset(0).startOf('day').valueOf(),
@@ -140,6 +142,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
     promos: [],
   },
   fr: {
+    slug: '/2024',
     title: "Tant qu'il fait jour",
     dates: [
       dayjs('2024-08-21').utcOffset(0).startOf('day').valueOf(),

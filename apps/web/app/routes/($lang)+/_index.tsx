@@ -171,7 +171,7 @@ function MobileHero() {
           className="aspect-auto w-full"
         />
         <Link
-          to="/registration"
+          to={conference.slug}
           className={clsx(buttonStyle, 'absolute -bottom-6 right-4')}
           data-variant="accent"
         >
@@ -239,7 +239,7 @@ function DesktopHero() {
             </div>
             <div>
               <Link
-                to="/registration"
+                to={conference.slug}
                 className={clsx(buttonStyle)}
                 data-variant="accent"
               >

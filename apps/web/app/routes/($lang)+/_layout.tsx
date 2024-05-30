@@ -89,7 +89,7 @@ function TopNav() {
             className="size-[44px]"
           />
         </Link>
-        <NavItem to="/registration">
+        <NavItem to={`/${new Date().getFullYear()}`}>
           {translate('nav.home', {
             year: new Date().getFullYear(),
           })}
@@ -162,7 +162,7 @@ function PopupNav() {
                   transition={{ duration: 0.2 }}
                   className="bg-background text-foreground fixed inset-x-0 top-[60px] flex h-[calc(100%_-_60px)] flex-1 flex-col justify-center gap-10 p-4"
                 >
-                  <NavItem to="/registration">
+                  <NavItem to={`/${new Date().getFullYear()}`}>
                     {translate('nav.home', {
                       year: new Date().getFullYear(),
                     })}
