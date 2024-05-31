@@ -50,6 +50,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <body>
         {children}
         <Scripts />
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "if (window.location.host !== 'gyccanada.org');window.goatcounter = {no_onload: true}",
+          }}
+        />
+        <script
+          data-goatcounter="https://gyccanada.goatcounter.com/count"
+          async
+          src="//gc.zgo.at/count.js"
+        />
       </body>
     </html>
   );
