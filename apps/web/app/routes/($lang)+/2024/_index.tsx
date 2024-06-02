@@ -272,7 +272,7 @@ function DesktopSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
           />
           <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4 text-white">
             <div className="flex items-center gap-2">
-              <motion.h3 className="text-3xl font-bold leading-5 text-white">
+              <motion.h3 className="shrink text-3xl font-bold leading-8 text-white">
                 {name}
               </motion.h3>
             </div>
