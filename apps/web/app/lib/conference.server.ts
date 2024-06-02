@@ -198,7 +198,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         title: 'Atelier d’étude personnelle',
         speaker: {
           name: 'James Niyomugabo',
-          img: '/2024/speakers/james.jpg',
+          img: '/2024/speakers/james.png',
           bio: `James Niyomugabo est un coach et entrepreneur créatif dévoué qui vise à autonomiser 1 million de créateurs chrétiens, d'entreprises et d'églises avec le plan de Dieu pour la création et le fonctionnement. Il est ancien de l'église adventiste de Westminster depuis plus de trois ans et sert de travailleur biblique à la Grace Church Company. James est à l'origine d'une initiative d'évangélisation numérique, "This Gospel Must Go Viral", pour diffuser l'Évangile à l'échelle mondiale. Il est également l'auteur de “How to Create Like God Does - God’s Success Blueprint for Creators, Companies, and Churches” et dirige le défi "Journal through the Bible in a Year" pour inspirer un engagement plus profond avec l'Écriture.`,
         },
         description: 'Seminar Description',
