@@ -14,6 +14,7 @@ export function FieldErrors() {
   const translate = useTranslate();
   const { meta } = useTextField();
   const errors = meta.errors;
+
   if (!errors || errors.length === 0) return null;
   return (
     <div className="flex flex-col gap-1">

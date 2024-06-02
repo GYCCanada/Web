@@ -636,10 +636,8 @@ const fr: Record<TranslationKey, string> = {
   'about.quote.1': `“Que personne ne méprise ta jeunesse, mais sois un modèle pour les
           croyants en parole, en conduite, en amour, en foi et en pureté.” {{verse}}`,
   'about.quote.1.verse': '1 Timothée 4:12',
-  'about.quote.2': `“Avec une telle armée de travailleurs que notre jeunesse, correctement
-          formée, pourrait fournir, comment le message d'un Sauveur crucifié,
-          ressuscité et bientôt à venir pourrait-il être porté à tout le monde!” {{source}}`,
-  'about.quote.2.source': 'Éducation, p. 271.2',
+  'about.quote.2': `“Avec l'armée que formeraient nos jeunes, bien préparés, la bonne nouvelle de notre Sauveur crucifié, ressuscité, prêt à revenir, serait vite portée au monde entier.” {{source}}`,
+  'about.quote.2.source': 'Éducation, p. 304.2',
 
   'faq.title': 'Questions fréquemment posées',
   'faq.question.1.title': 'Stands d’exposants',

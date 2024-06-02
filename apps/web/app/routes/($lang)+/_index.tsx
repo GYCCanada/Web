@@ -7,12 +7,14 @@ import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
-import { action } from '../newsletter';
 import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
+import { TranslationKey } from '~/lib/localization/translations';
+import { subscribeToNewsletter } from '~/lib/mailchimp.server';
+import { redirectWithToast } from '~/lib/toast.server';
 import { Button, buttonStyle } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
 import { LocalizedImage } from '~/ui/image';
@@ -40,6 +42,34 @@ export const loader = ({ params }: LoaderFunctionArgs) => {
   return {
     conference: getCurrentConference(locale),
   };
+};
+
+export const action = async ({ request }: LoaderFunctionArgs) => {
+  const formData = await request.formData();
+  const submission = parseWithZod(formData, { schema });
+
+  if (submission.status !== 'success') {
+    return submission.reply({
+      formErrors: ['main.newsletter.error' satisfies TranslationKey],
+    });
+  }
+
+  const data = submission.value;
+
+  const res = await subscribeToNewsletter(data.email, data.name).catch(() => {
+    return { status: 500 };
+  });
+  if (res.status !== 200) {
+    return submission.reply({
+      formErrors: ['main.newsletter.error' satisfies TranslationKey],
+    });
+  }
+
+  return redirectWithToast(new URL(request.url).pathname, {
+    type: 'success',
+    title: 'main.newsletter.success.title' satisfies TranslationKey,
+    description: 'main.newsletter.success.description' satisfies TranslationKey,
+  });
 };
 
 export default function Index() {
@@ -106,7 +136,7 @@ export default function Index() {
       <section className="flex flex-col gap-6 overflow-hidden p-3 md:h-[800px] md:flex-row-reverse md:py-32">
         <img
           src="/topography.svg"
-          className="absolute top-0 h-full w-full object-cover opacity-20 max-md:right-0 md:left-1/2"
+          className="absolute top-0 h-full w-full object-cover opacity-10 max-md:right-0 md:left-1/2"
           alt=""
         />
         <div className="flex flex-col gap-6 md:flex-1">
@@ -295,7 +325,7 @@ function GradientLine({
 }
 
 const schema = z.object({
-  email: z.string(),
+  email: z.string().email(),
   name: z.string(),
 });
 
@@ -314,11 +344,12 @@ function NewsletterForm() {
       return parseWithZod(formData, { schema });
     },
   });
+
   return (
     <section className="flex flex-col gap-4 overflow-hidden px-3 py-16 md:h-[800px] md:py-32">
       <img
         src="/topography.svg"
-        className="absolute top-0 h-full w-full object-cover opacity-20 max-md:right-0 md:left-1/2"
+        className="absolute top-0 h-full w-full object-cover opacity-10 max-md:right-0 md:left-1/2"
         alt=""
       />
       <div className="flex flex-col gap-4 md:flex-row-reverse">
@@ -330,12 +361,7 @@ function NewsletterForm() {
 
           <p>{translate('main.newsletter.subtitle')}</p>
           <FormProvider context={form.context}>
-            <Form
-              method="POST"
-              action="/newsletter"
-              className="flex flex-col gap-4"
-              id={form.id}
-            >
+            <Form method="POST" className="flex flex-col gap-4" id={form.id}>
               <TextField name={fields.name.name}>
                 <Label>{translate('main.newsletter.name.label')}</Label>
 
@@ -358,13 +384,13 @@ function NewsletterForm() {
                 <FieldErrors />
               </TextField>
 
-              <div>
+              <div className="flex flex-col gap-4">
                 <Button type="submit" variant="accent">
                   {translate('main.newsletter.submit')}
                 </Button>
                 {form.errors && form.errors.length > 0 ? (
                   <p className={fieldErrorStyle}>
-                    {translate('volunteer.form.error')}
+                    {translate('main.newsletter.error')}
                   </p>
                 ) : null}
               </div>
