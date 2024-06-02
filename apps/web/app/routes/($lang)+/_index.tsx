@@ -56,7 +56,8 @@ export const action = async ({ request }: LoaderFunctionArgs) => {
 
   const data = submission.value;
 
-  const res = await subscribeToNewsletter(data.email, data.name).catch(() => {
+  const res = await subscribeToNewsletter(data.email, data.name).catch((e) => {
+    console.error(e);
     return { status: 500 };
   });
   if (res.status !== 200) {
