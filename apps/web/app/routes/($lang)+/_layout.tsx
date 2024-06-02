@@ -316,6 +316,9 @@ function Footer() {
             <Link to="/give" className={linkStyle}>
               {translate('nav.give')}
             </Link>
+            <Link to="/faq" className={linkStyle}>
+              {translate('nav.faq')}
+            </Link>
           </div>
         </div>
 
