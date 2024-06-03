@@ -1,12 +1,7 @@
 import { FormProvider, useForm } from '@conform-to/react';
 import { parseWithZod } from '@conform-to/zod';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import {
-  Form,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-} from '@remix-run/react';
+import { Form, useActionData, useLoaderData } from '@remix-run/react';
 import clsx from 'clsx';
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import * as React from 'react';
@@ -61,6 +56,8 @@ export const action = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const data = submission.value;
+
+  console.log({ data });
 
   try {
     await subscribeToNewsletter(data.email, data.name);
@@ -350,17 +347,6 @@ function NewsletterForm() {
       return parseWithZod(formData, { schema });
     },
   });
-
-  const navigation = useNavigation();
-
-  React.useEffect(
-    function resetFormOnSuccess() {
-      if (navigation.state === 'idle') {
-        form.reset();
-      }
-    },
-    [navigation.state, form],
-  );
 
   return (
     <section className="flex flex-col gap-4 overflow-hidden px-3 py-16 md:h-[800px] md:py-32">
