@@ -132,7 +132,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       {
         title: 'Medical Missionary Seminar',
         speaker: {
-          name: 'Dave Fielder',
+          name: 'Dave Fiedler',
           img: '/2024/speakers/dave.jpg',
           bio: dedent`Dave Fiedler has bucked logs, farmed carrots, tomato seed, and hay, run a print shop, been an editor, a classroom teacher (elementary to college), a boys’ dean, a school principal, a vegan restaurant manager, and written five books. His goal and privilege, in print and in person, is to share a vision of Christ’s own approach to the gospel that heals bodies and souls, and will—as surely as it is practiced—end the conflict. Currently, he supports this addiction to teaching, preaching, and writing, by providing IT Services to dentists in “Beautiful British Columbia” where he lives with his wife, Clarissa.`,
         },
@@ -206,7 +206,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       {
         title: 'Séminaire de mission médicale',
         speaker: {
-          name: 'Dave Fielder',
+          name: 'Dave Fiedler',
           img: '/2024/speakers/dave.jpg',
           bio: `Dave Fiedler a déplacé des journaux, cultivé des carottes, des graines de tomates et du foin, dirigé une imprimerie, été rédacteur en chef, enseignant en classe (de l'élémentaire à l'université), doyen des garçons, directeur d'école, gérant de restaurant végétalien et écrit cinq livres. Son objectif et son privilège, dans l'impression et en personne, est de partager une vision de l'approche du Christ à l'Évangile qui guérit les corps et les âmes, et qui mettra fin au conflit. Actuellement, il soutient cette addiction à l'enseignement, à la prédication et à l'écriture, en fournissant des services informatiques aux dentistes dans la "belle Colombie-Britannique" où il vit avec sa femme, Clarissa.`,
         },
