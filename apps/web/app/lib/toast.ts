@@ -13,6 +13,14 @@ export function useToast(toast?: Toast | null) {
           id: toast.id,
           description: translate(toast.description as any),
         });
+        if (toast.form) {
+          const form = document.getElementById(
+            toast.form,
+          ) as HTMLFormElement | null;
+          if (form) {
+            form.reset();
+          }
+        }
       }, 0);
     }
   }, [toast, translate]);

@@ -11,6 +11,7 @@ const ToastSchema = z.object({
   id: z.string().default(() => nanoid()),
   title: z.string().optional(),
   type: z.enum(['message', 'success', 'error']).default('message'),
+  form: z.string().optional(),
 });
 
 export type Toast = z.infer<typeof ToastSchema>;

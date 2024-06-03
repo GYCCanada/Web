@@ -336,6 +336,7 @@ function NewsletterForm() {
   const translate = useTranslate();
   const lastResult = useActionData<typeof action>();
   const [form, fields] = useForm({
+    id: 'newsletter-form',
     shouldValidate: 'onSubmit',
     shouldRevalidate: 'onInput',
     defaultValue: {
