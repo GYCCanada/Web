@@ -66,6 +66,7 @@ export const action = async ({ request }: LoaderFunctionArgs) => {
       title: 'main.newsletter.success.title' satisfies TranslationKey,
       description:
         'main.newsletter.success.description' satisfies TranslationKey,
+      form: 'newsletter-form',
     });
   } catch (e) {
     console.error(e);
