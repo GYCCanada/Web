@@ -133,6 +133,7 @@ export async function action({ request }: ActionFunctionArgs) {
     description: 'contact.form.success.description' satisfies TranslationKey,
     title: 'contact.form.success.title' satisfies TranslationKey,
     type: 'success',
+    form: 'contact',
   });
 }
 
@@ -140,6 +141,7 @@ export default function Index() {
   const translate = useTranslate();
   const lastResult = useActionData<typeof action>();
   const [f, fields] = useForm({
+    id: 'contact',
     shouldValidate: 'onSubmit',
     shouldRevalidate: 'onInput',
     lastResult,

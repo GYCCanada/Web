@@ -182,6 +182,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     description: 'volunteer.form.success.description' satisfies TranslationKey,
     title: 'volunteer.form.success.title' satisfies TranslationKey,
     type: 'success',
+    form: 'volunteer',
   });
 };
 
@@ -190,6 +191,7 @@ export default function Index() {
   const data = useLoaderData<typeof loader>();
   const lastResult = useActionData<typeof action>();
   const [form, fields] = useForm({
+    id: 'volunteer',
     shouldValidate: 'onSubmit',
     shouldRevalidate: 'onInput',
     defaultValue: {
