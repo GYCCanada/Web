@@ -56,21 +56,20 @@ export const action = async ({ request }: LoaderFunctionArgs) => {
 
   const data = submission.value;
 
-  const res = await subscribeToNewsletter(data.email, data.name).catch((e) => {
+  try {
+    await subscribeToNewsletter(data.email, data.name);
+    return redirectWithToast(new URL(request.url).pathname, {
+      type: 'success',
+      title: 'main.newsletter.success.title' satisfies TranslationKey,
+      description:
+        'main.newsletter.success.description' satisfies TranslationKey,
+    });
+  } catch (e) {
     console.error(e);
-    return { status: 500 };
-  });
-  if (res.status !== 200) {
     return submission.reply({
       formErrors: ['main.newsletter.error' satisfies TranslationKey],
     });
   }
-
-  return redirectWithToast(new URL(request.url).pathname, {
-    type: 'success',
-    title: 'main.newsletter.success.title' satisfies TranslationKey,
-    description: 'main.newsletter.success.description' satisfies TranslationKey,
-  });
 };
 
 export default function Index() {
