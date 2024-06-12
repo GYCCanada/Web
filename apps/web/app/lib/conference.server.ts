@@ -41,26 +41,28 @@ type Seminar = {
   description: string;
 };
 
+const PST_OFFSET = -8;
+
 const conference: Record<Locale, Conference> = {
   en: {
     slug: '/2024',
     title: 'While It Is Day',
     dates: [
-      dayjs('2024-08-21').utcOffset(0).startOf('day').valueOf(),
-      dayjs('2024-08-25').utcOffset(0).endOf('day').valueOf(),
+      dayjs('2024-08-21').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+      dayjs('2024-08-25').utcOffset(PST_OFFSET).endOf('day').valueOf(),
     ],
     registration: {
       early: [
-        dayjs('2024-05-19').utcOffset(0).startOf('day').valueOf(),
-        dayjs('2024-06-22').utcOffset(0).endOf('day').valueOf(),
+        dayjs('2024-05-19').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+        dayjs('2024-06-22').utcOffset(PST_OFFSET).endOf('day').valueOf(),
       ],
       regular: [
-        dayjs('2024-06-23').utcOffset(0).startOf('day').valueOf(),
-        dayjs('2024-07-20').utcOffset(0).endOf('day').valueOf(),
+        dayjs('2024-06-23').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+        dayjs('2024-07-20').utcOffset(PST_OFFSET).endOf('day').valueOf(),
       ],
       late: [
-        dayjs('2024-07-21').utcOffset(0).startOf('day').valueOf(),
-        dayjs('2024-08-25').utcOffset(0).endOf('day').valueOf(),
+        dayjs('2024-07-21').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+        dayjs('2024-08-25').utcOffset(PST_OFFSET).endOf('day').valueOf(),
       ],
     },
 
@@ -145,21 +147,21 @@ lives in Michigan with his wife and daughter where he works as a pastor.
     slug: '/2024',
     title: "Tant qu'il fait jour",
     dates: [
-      dayjs('2024-08-21').utcOffset(0).startOf('day').valueOf(),
-      dayjs('2024-08-25').utcOffset(0).endOf('day').valueOf(),
+      dayjs('2024-08-21').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+      dayjs('2024-08-25').utcOffset(PST_OFFSET).endOf('day').valueOf(),
     ],
     registration: {
       early: [
-        dayjs('2024-05-19').utcOffset(0).startOf('day').valueOf(),
-        dayjs('2024-06-22').utcOffset(0).endOf('day').valueOf(),
+        dayjs('2024-05-19').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+        dayjs('2024-06-22').utcOffset(PST_OFFSET).endOf('day').valueOf(),
       ],
       regular: [
-        dayjs('2024-06-23').utcOffset(0).startOf('day').valueOf(),
-        dayjs('2024-07-20').utcOffset(0).endOf('day').valueOf(),
+        dayjs('2024-06-23').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+        dayjs('2024-07-20').utcOffset(PST_OFFSET).endOf('day').valueOf(),
       ],
       late: [
-        dayjs('2024-07-21').utcOffset(0).startOf('day').valueOf(),
-        dayjs('2024-08-25').utcOffset(0).endOf('day').valueOf(),
+        dayjs('2024-07-21').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+        dayjs('2024-08-25').utcOffset(PST_OFFSET).endOf('day').valueOf(),
       ],
     },
     location: 'Kelowna, Colombie-Britannique',
