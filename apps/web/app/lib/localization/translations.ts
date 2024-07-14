@@ -145,10 +145,13 @@ const en = {
     'More detailed conference information won’t be available until registration opens. You may also contact us if you need to get in touch, or check our FAQ for quick answers.',
   'registration.faq.contact': 'Get in touch',
   'registration.faq.view': 'View FAQ',
-  'registration.register.title': 'Register now with early-bird rates!',
+  'registration.register.title': 'Register Now!',
   'registration.register.subtitle':
     'See you on August 21 at the Rutland SDA church in Kelowna, British Columbia. Sign up before June 22nd to secure earlybird pricing.',
   'registration.register.button': 'Register Now',
+  'registration.hotels.description': `There are quite a few hotels in Kelowna, BC which can make it daunting to find the right ones. We've listed the closest Hotels to the Venue below. Please keep in mind that you may be able to save considerable amounts of money by getting rooms with friends, using Airbnb or by using our {{facebook}}`,
+  'registration.hotels.description.facebook':
+    'Facebook Rides & Roommates Group',
   'registration.form.title': 'Register for GYC Canada {{year}}',
   'registration.form.attendee': 'Attendee',
   'registration.form.exhibitor': 'Exhibitor',
@@ -476,11 +479,14 @@ const fr: Record<TranslationKey, string> = {
     "Des informations plus détaillées sur la conférence ne seront pas disponibles avant l'ouverture des inscriptions. Vous pouvez également nous contacter si vous avez besoin de nous joindre, ou consulter notre FAQ pour des réponses rapides.",
   'registration.faq.contact': 'Entrer en contact',
   'registration.faq.view': 'Voir FAQ',
-  'registration.register.title':
-    'Inscrivez-vous dès maintenant avec des tarifs de lancement!',
+  'registration.register.title': 'Inscrivez-vous!',
   'registration.register.subtitle':
     'Rendez-vous le 21 août à l’église adventiste de Rutland à Kelowna, en Colombie-Britannique. Inscrivez-vous avant le 22 juin pour bénéficier des tarifs de lancement.',
   'registration.register.button': "S'inscrire",
+  'registration.hotels.description': `Il y a plusieurs hôtels à Kelowna, en Colombie-Britannique, ce qui peut rendre difficile de trouver les bons. Nous avons répertorié les hôtels les plus proches du lieu ci-dessous. Veuillez noter que vous pourriez économiser des sommes considérables en partageant des chambres avec des amis, en utilisant Airbnb ou en utilisant notre {{facebook}}`,
+  'registration.hotels.description.facebook':
+    'Groupe Facebook Rides & Roommates',
+
   'registration.form.title': 'Inscrivez-vous à GYC Canada {{year}}',
   'registration.form.attendee': 'Participant',
   'registration.form.exhibitor': 'Exposant',

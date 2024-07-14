@@ -1,3 +1,4 @@
+/* eslint-disable react/no-unescaped-entities */
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useSearchParams } from '@remix-run/react';
 import clsx from 'clsx';
@@ -19,6 +20,7 @@ import { dayjs } from '~/lib/dayjs';
 import { useLocale, useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import { buttonStyle } from '~/ui/button';
+import { ExternalLink } from '~/ui/external-link';
 import { LocalizedImage } from '~/ui/image';
 import { Link } from '~/ui/link';
 import { Main } from '~/ui/main';
@@ -45,33 +47,17 @@ export const loader = ({ params }: LoaderFunctionArgs) => {
 };
 
 export default function Registration() {
-  const translate = useTranslate();
-
   return (
     <Main>
       <Hero />
+
+      <MapSection />
+
       <SpeakersAndSeminars />
 
       <RegistrationSection />
 
-      <section className="flex flex-col gap-6 p-4 md:py-32">
-        <h2 className="text-accent-600 text-4xl font-bold">
-          {translate('registration.faq.title')}
-        </h2>
-        <p>{translate('registration.faq.subtitle')}</p>
-        <div className="flex flex-col gap-4">
-          <div>
-            <Link to="/contact" className={buttonStyle} data-variant="accent">
-              {translate('registration.faq.contact')}
-            </Link>
-          </div>
-          <div>
-            <Link to="/faq" className={buttonStyle} data-variant="default">
-              {translate('registration.faq.view')}
-            </Link>
-          </div>
-        </div>
-      </section>
+      <FaqSection />
     </Main>
   );
 }
@@ -187,6 +173,50 @@ function DesktopHero() {
             </div>
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+// 1. two column section with hotel info & map on right hand side (one column on mobile)
+// 2. change early bird to normal rates
+function MapSection() {
+  const translate = useTranslate();
+  return (
+    <section className="grid grid-cols-1 gap-10 p-4 pb-16 md:grid-cols-2">
+      <div className="flex flex-col gap-6">
+        <p>
+          {translate('registration.hotels.description', {
+            facebook: (
+              <ExternalLink href="https://www.facebook.com/groups/1741752369173171">
+                {translate('registration.hotels.description.facebook')}
+              </ExternalLink>
+            ),
+          })}
+        </p>
+        <ul>
+          <li>Super 8 by Wyndham Kelowna BC</li>
+          <li>
+            Fairfield Inn & Suites Kelowna Holiday Inn Express & Suites Kelowna
+            - "GYC Canada” or Group Code: “GYC" (call 778-484-2999 for discount)
+          </li>
+          <li>Microtel Inn & Suites by Wyndham Kelowna</li>
+          <li>Comfort Suites</li>
+          <li>Kelowna Days Inn by Wyndham Kelowna</li>
+        </ul>
+      </div>
+      <div className="aspect-video">
+        <iframe
+          src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2570.54720532797!2d-119.4124495876084!3d49.888529227544645!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x537d8d28862f4bfd%3A0xd41402dfff0455f4!2s130%20Gerstmar%20Rd%2C%20Kelowna%2C%20BC%20V1X%204A7!5e0!3m2!1sen!2sca!4v1720988332743!5m2!1sen!2sca"
+          style={{
+            border: 0,
+          }}
+          className="h-full w-full"
+          allowFullScreen
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+          title="Map"
+        ></iframe>
       </div>
     </section>
   );
@@ -519,6 +549,30 @@ function RegistrationSection() {
         >
           {translate('registration.register.button')}
         </a>
+      </div>
+    </section>
+  );
+}
+
+function FaqSection() {
+  const translate = useTranslate();
+  return (
+    <section className="flex flex-col gap-6 p-4 md:py-32">
+      <h2 className="text-accent-600 text-4xl font-bold">
+        {translate('registration.faq.title')}
+      </h2>
+      <p>{translate('registration.faq.subtitle')}</p>
+      <div className="flex flex-col gap-4">
+        <div>
+          <Link to="/contact" className={buttonStyle} data-variant="accent">
+            {translate('registration.faq.contact')}
+          </Link>
+        </div>
+        <div>
+          <Link to="/faq" className={buttonStyle} data-variant="default">
+            {translate('registration.faq.view')}
+          </Link>
+        </div>
       </div>
     </section>
   );
