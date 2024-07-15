@@ -58,7 +58,7 @@ const _Checkbox = ({ className, children, ...props }: CheckboxProps) => (
   <RACCheckbox
     className={(values) =>
       clsx(
-        'group flex items-center gap-x-2  data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 ',
+        'group flex items-center gap-x-2 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50',
         labelStyles,
         typeof className === 'function' ? className(values) : className,
       )
@@ -71,7 +71,7 @@ const _Checkbox = ({ className, children, ...props }: CheckboxProps) => (
           className={clsx(
             'border-input ring-offset-background group-data-[focus-visible]:ring-ring inline-flex size-8 shrink-0 items-center justify-center rounded-sm border group-data-[focus-visible]:outline-none group-data-[focus-visible]:ring-2 group-data-[focus-visible]:ring-offset-2',
             'group-data-[indeterminate]:bg-primary group-data-[indeterminate]:text-primary-foreground',
-            'group-data-[selected]:bg-primary  group-data-[selected]:text-primary-foreground',
+            'group-data-[selected]:bg-primary group-data-[selected]:text-primary-foreground',
           )}
         >
           {values.isIndeterminate ? (

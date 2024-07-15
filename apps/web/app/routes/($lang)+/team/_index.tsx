@@ -58,7 +58,7 @@ export default function Index() {
       <div className="flex flex-col gap-8 p-4">
         <p>{translate('team.subtitle')}</p>
 
-        <div className="grid grid-cols-2 gap-4 pb-20 sm:grid-cols-3  md:grid-cols-4 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-4 pb-20 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           {team.map((member) => (
             <div key={member.name} className="flex flex-col gap-1.5">
               <img
