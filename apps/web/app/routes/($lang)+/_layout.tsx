@@ -194,7 +194,7 @@ function Language() {
         className="flex items-center gap-2"
         to={getNextLocalePath(location.pathname, Locale.Fr)}
       >
-        English <LanguageIcon />
+        Français <LanguageIcon />
       </RLink>
     ))
     .with('fr', () => (
@@ -202,7 +202,7 @@ function Language() {
         className="flex items-center gap-2"
         to={getNextLocalePath(location.pathname, Locale.En)}
       >
-        Français <LanguageIcon />
+        English <LanguageIcon />
       </RLink>
     ))
     .exhaustive();
