@@ -44,7 +44,7 @@ const en = {
   'footer.affiliation': 'A {{gyc}} affiliate ministry.',
   'footer.links': 'Quick Links',
   'contact.title': 'Get in touch with us!',
-  'contact.directions':'',
+  'contact.directions': '',
   'contact.form.name': 'What is your name?',
   'contact.form.name.placeholder': 'Type your full name here',
   'contact.form.name.required': 'Please enter your name',
@@ -73,7 +73,7 @@ const en = {
   'give.title': 'Support the {{movement}}.',
   'give.movement': 'movement',
   'give.reason':
-  "Our call to mission, is to be the light of the world. Our Savior calls us to a worldwide mission of spreading the gospel of Christ's love in this world filled with darkness. This light should not be hidden in a corner, covered by the humdrum of life, but out in the open, where all can see and hear. GYC Canada wants to magnify that light, to bring it to all of Canada and the world.",
+    "Our call to mission, is to be the light of the world. Our Savior calls us to a worldwide mission of spreading the gospel of Christ's love in this world filled with darkness. This light should not be hidden, covered by the humdrum of life, but out in the open, where all can see and hear. GYC Canada wants to magnify that light, to bring it to all of Canada and the world.",
   'give.directions': "Here's how you can give:",
   'give.directions.1': "Enter the amount you'd like to give.",
   'give.directions.2': 'Choose your preferred payment method.',
@@ -123,7 +123,8 @@ const en = {
   'volunteer.form.location.label': 'Where are you located?',
   'volunteer.form.location.placeholder': 'Enter your location here',
   'volunteer.form.location.required': 'Please enter your location',
-  'volunteer.form.background.label': 'Please tell us more about yourself and your background.',
+  'volunteer.form.background.label':
+    'Please tell us more about yourself and your background.',
   'volunteer.form.background.placeholder': 'Enter your background here',
   'volunteer.form.background.required': 'Please enter your background',
   'volunteer.form.why.label': 'What motivates you to volunteer with us?',
@@ -148,7 +149,8 @@ const en = {
   'registration.register.subtitle':
     'See you on August 21 at the Rutland SDA church in Kelowna, British Columbia. Sign up before June 22nd to secure earlybird pricing.',
   'registration.register.button': 'Register Now',
-  'registration.hotels.description': "There are quite a few hotels in Kelowna, BC which can make it daunting to find the right one. We've listed the closest hotels to the Venue below. Please keep in mind that you may be able to save a considerable amount of money by getting a room with friends, using Airbnb or by using our {{facebook}}",
+  'registration.hotels.description':
+    "There are quite a few hotels in Kelowna, BC which can make it daunting to find the right one. We've listed the closest hotels to the Venue below. Please keep in mind that you may be able to save a considerable amount of money by getting a room with friends, using Airbnb or by using our {{facebook}}",
   'registration.hotels.description.facebook':
     'Facebook Rides & Roommates Group',
   'registration.form.title': 'Register for GYC Canada {{year}}',
@@ -371,7 +373,7 @@ const fr: Record<TranslationKey, string> = {
   'footer.affiliation': 'Un ministère affilié à {{gyc}}.',
   'footer.links': 'Liens rapides',
   'contact.title': 'Entrez en contact avec nous!',
-  'contact.directions':'',
+  'contact.directions': '',
   'contact.form.name': 'Quel est votre nom?',
   'contact.form.name.placeholder': 'Entrez votre nom complet ici',
   'contact.form.name.required': 'Veuillez entrer votre nom',
@@ -396,7 +398,8 @@ const fr: Record<TranslationKey, string> = {
   'contact.form.error':
     "Une erreur s'est produite lors de l'envoi de votre message. Veuillez réessayer plus tard.",
   'contact.form.success.title': 'Merci de nous avoir contacté!',
-  'contact.form.success.description': 'Votre message a été envoyé avec succès! Nous en prendrons connaissance et vous répondrons dès que possible.',
+  'contact.form.success.description':
+    'Votre message a été envoyé avec succès! Nous en prendrons connaissance et vous répondrons dès que possible.',
   'give.title': 'Soutenez le {{movement}}.',
   'give.movement': 'mouvement',
   'give.reason':
@@ -451,7 +454,8 @@ const fr: Record<TranslationKey, string> = {
   'volunteer.form.location.label': 'Où êtes-vous situé?',
   'volunteer.form.location.placeholder': 'Entrez votre emplacement ici',
   'volunteer.form.location.required': 'Veuillez entrer votre emplacement',
-  'volunteer.form.background.label': "S'il-vous-plait, dites-nous en davantage sur vous et votre parcours?",
+  'volunteer.form.background.label':
+    "S'il-vous-plait, dites-nous en davantage sur vous et votre parcours?",
   'volunteer.form.background.placeholder': 'Entrez votre parcours ici',
   'volunteer.form.background.required': 'Veuillez entrer votre parcours',
   'volunteer.form.why.label':
