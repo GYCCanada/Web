@@ -73,12 +73,12 @@ const en = {
   'give.title': 'Support the {{movement}}.',
   'give.movement': 'movement',
   'give.reason':
-    'Our call to mission, is to be as bright light in this world filled with darkness. Not a light hidden in the corner, covered by the humdrum of life, but in the open, where all can see. GYC Canada wants to magnify that light, to bring it to all of Canada.',
+  "Our call to mission, is to be the light of the world. Our Savior calls us to a worldwide mission of spreading the gospel of Christ's love in this world filled with darkness. This light should not be hidden in a corner, covered by the humdrum of life, but out in the open, where all can see and hear. GYC Canada wants to magnify that light, to bring it to all of Canada and the world.",
   'give.directions': "Here's how you can give:",
   'give.directions.1': "Enter the amount you'd like to give.",
   'give.directions.2': 'Choose your preferred payment method.',
   'give.directions.3':
-    'Tap on "Make this a monthly donation" if you want to give monthly.',
+    'If you want to give monthly, tap on "Make this a monthly donation".',
   'give.directions.4':
     'If there\'s a specific purpose for your gift, let us know in the "Add a note" section.',
   'give.contine': 'Continue',
@@ -87,7 +87,7 @@ const en = {
   'team.image.alt': 'A group of young people smiling and standing together.',
   'team.logo.alt': 'GYC Canada Logo',
   'team.subtitle':
-    'We are GYC Canada. Young people dedicated to spreading the Gospel, and living the lives that God has planned for us. We are fulfilling his purpose for us, ambassadors to the world. We go boldly where Christ leads.',
+    'We are GYC Canada, young people dedicated to spreading the Gospel and living the lives that God has planned for us. As ambassadors of Christ in this world, we are fulfilling His purpose for us and go boldly where our Savior leads.',
   'team.board': 'Board of Directors',
   'team.position.president': 'President',
   'team.position.vice-president': 'Vice President',
@@ -403,12 +403,12 @@ const fr: Record<TranslationKey, string> = {
   'give.title': 'Soutenez le {{movement}}.',
   'give.movement': 'mouvement',
   'give.reason':
-    "Notre appel à la mission est d'être la lumière du monde. Pas une lumière cachée dans un coin, couverte par la routine de la vie, mais à découvert, où tout le monde peut la voir. GYC Canada veut magnifier cette lumière, la porter à tout le Canada.",
+    "Notre appel à la mission est d'être la lumière du monde. Notre Seigneur nous appelle à répandre la bonne nouvelle de l'amour de Christ dans un monde rempli de ténébres. Cette lumière ne devrait pas être cachée ou couverte par la routine de la vie, mais bien en vue, afin que tout le monde puisse la voir et l'entendre. GYC Canada veut amplifier cette lumière, la faire briller partout au Canada et dans le monde.",
   'give.directions': 'Voici comment vous pouvez donner :',
   'give.directions.1': 'Entrez le montant que vous souhaitez donner.',
   'give.directions.2': 'Choisissez votre mode de paiement préféré.',
   'give.directions.3':
-    'Cliquez sur "Faire un don mensuel" si vous souhaitez donner mensuellement.',
+    'Si vous souhaitez donner mensuellement, cliquez sur "Faire un don mensuel".',
   'give.directions.4':
     'Si votre don a un but spécifique, veuillez nous en informer dans la section "Ajouter une note".',
   'give.contine': 'Continuer',
@@ -417,7 +417,7 @@ const fr: Record<TranslationKey, string> = {
   'team.image.alt': 'Un groupe de jeunes souriants et debout ensemble.',
   'team.logo.alt': 'Logo GYC Canada',
   'team.subtitle':
-    "Nous sommes GYC Canada. Des jeunes dédiés à la diffusion de l'Évangile et à vivre les vies que Dieu a prévues pour nous. Nous accomplissons son dessein pour nous, ambassadeurs dans le monde. Nous allons hardiment là où Christ nous conduit.",
+    "Nous sommes GYC Canada, des jeunes dédiés à faire connaitre l'Évangile et à vivre les vies que Dieu a prévues pour nous. En tant qu'ambassadeurs de Christ dans ce monde, nous accomplissons Sa volonté pour nous et allons avec courage là où notre Seigneur nous conduit.",
   'team.board': 'Conseil d’administration',
   'team.position.president': 'Président',
   'team.position.vice-president': 'Vice-président',
