@@ -48,7 +48,7 @@ export default function Index() {
 					className={buttonStyle}
 					href="https://www.paypal.com/donate/?hosted_button_id=FBZXG43LWD232&fbclid=IwAR027jskxadQlC1PFallSB0btxLH0bB0kd-xDM8UQ76ASneG0hXqsnTbJu8"
 				>
-					{translate('give.contine')}
+					{translate('give.continue')}
 				</a>
 			</div>
 		</Main>
