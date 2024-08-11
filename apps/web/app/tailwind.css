@@ -5,125 +5,125 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    --width: min(80rem, 100%);
-    --color-accent-50: 255 241 241;
-    --color-accent-100: 255 228 228;
-    --color-accent-200: 253 206 208;
-    --color-accent-300: 252 165 169;
-    --color-accent-400: 249 115 123;
-    --color-accent-500: 241 66 82;
-    --color-accent-600: 223 33 59;
-    --color-accent-700: 187 21 47;
-    --color-accent-800: 157 20 47;
-    --color-accent-900: 134 21 47;
-    --color-accent-950: 75 6 19;
+	:root {
+		--width: min(80rem, 100%);
+		--color-accent-50: 255 241 241;
+		--color-accent-100: 255 228 228;
+		--color-accent-200: 253 206 208;
+		--color-accent-300: 252 165 169;
+		--color-accent-400: 249 115 123;
+		--color-accent-500: 241 66 82;
+		--color-accent-600: 223 33 59;
+		--color-accent-700: 187 21 47;
+		--color-accent-800: 157 20 47;
+		--color-accent-900: 134 21 47;
+		--color-accent-950: 75 6 19;
 
-    --color-link-50: 237 248 255;
-    --color-link-100: 214 238 255;
-    --color-link-200: 182 226 255;
-    --color-link-300: 131 210 255;
-    --color-link-400: 73 184 255;
-    --color-link-500: 31 149 255;
-    --color-link-600: 7 117 255;
-    --color-link-700: 1 92 242;
-    --color-link-800: 8 74 197;
-    --color-link-900: 14 66 154;
-    --color-link-950: 14 41 93;
+		--color-link-50: 237 248 255;
+		--color-link-100: 214 238 255;
+		--color-link-200: 182 226 255;
+		--color-link-300: 131 210 255;
+		--color-link-400: 73 184 255;
+		--color-link-500: 31 149 255;
+		--color-link-600: 7 117 255;
+		--color-link-700: 1 92 242;
+		--color-link-800: 8 74 197;
+		--color-link-900: 14 66 154;
+		--color-link-950: 14 41 93;
 
-    --color-wood-50: 249 247 243;
-    --color-wood-100: 241 237 227;
-    --color-wood-200: 226 216 198;
-    --color-wood-300: 207 190 162;
-    --color-wood-400: 187 159 124;
-    --color-wood-500: 173 137 98;
-    --color-wood-600: 160 119 86;
-    --color-wood-700: 133 97 73;
-    --color-wood-800: 109 80 63;
-    --color-wood-900: 89 66 53;
-    --color-wood-950: 47 33 27;
+		--color-wood-50: 249 247 243;
+		--color-wood-100: 241 237 227;
+		--color-wood-200: 226 216 198;
+		--color-wood-300: 207 190 162;
+		--color-wood-400: 187 159 124;
+		--color-wood-500: 173 137 98;
+		--color-wood-600: 160 119 86;
+		--color-wood-700: 133 97 73;
+		--color-wood-800: 109 80 63;
+		--color-wood-900: 89 66 53;
+		--color-wood-950: 47 33 27;
 
-    --color-neutral-50: 250 250 250;
-    --color-neutral-100: 250 250 250;
-    --color-neutral-200: 244 244 245;
-    --color-neutral-300: 228 228 231;
-    --color-neutral-400: 228 228 231;
-    --color-neutral-500: 228 228 231;
-    --color-neutral-600: 161 161 170;
-    --color-neutral-700: 113 113 122;
-    --color-neutral-800: 39 39 42;
-    --color-neutral-900: 24 24 27;
-    --color-neutral-950: 9 9 11;
+		--color-neutral-50: 250 250 250;
+		--color-neutral-100: 250 250 250;
+		--color-neutral-200: 244 244 245;
+		--color-neutral-300: 228 228 231;
+		--color-neutral-400: 228 228 231;
+		--color-neutral-500: 228 228 231;
+		--color-neutral-600: 161 161 170;
+		--color-neutral-700: 113 113 122;
+		--color-neutral-800: 39 39 42;
+		--color-neutral-900: 24 24 27;
+		--color-neutral-950: 9 9 11;
 
-    --color-background: 250 250 250;
-    --color-foreground: 9 9 11;
+		--color-background: 250 250 250;
+		--color-foreground: 9 9 11;
 
-    --color-button-background: var(--color-neutral-900);
-    --color-button-foreground: var(--color-neutral-50);
-    --color-button-background-hover: var(--color-neutral-800);
-    --color-button-background-active: var(--color-neutral-800);
+		--color-button-background: var(--color-neutral-900);
+		--color-button-foreground: var(--color-neutral-50);
+		--color-button-background-hover: var(--color-neutral-800);
+		--color-button-background-active: var(--color-neutral-800);
 
-    --color-input-background: var(--color-neutral-50);
-    --color-input-foreground: var(--color-neutral-950);
-    --color-input-placeholder: var(--color-neutral-600);
+		--color-input-background: var(--color-neutral-50);
+		--color-input-foreground: var(--color-neutral-950);
+		--color-input-placeholder: var(--color-neutral-600);
 
-    --color-radio-background: var(--color-neutral-50);
-    --color-radio-foreground: var(--color-neutral-950);
-    --color-radio-border: var(--color-neutral-950);
-  }
+		--color-radio-background: var(--color-neutral-50);
+		--color-radio-foreground: var(--color-neutral-950);
+		--color-radio-border: var(--color-neutral-950);
+	}
 
-  .dark {
-    --color-background: 9 9 11;
-    --color-foreground: 250 250 250;
+	.dark {
+		--color-background: 9 9 11;
+		--color-foreground: 250 250 250;
 
-    --color-button-background: var(--color-neutral-100);
-    --color-button-foreground: var(--color-neutral-900);
-    --color-button-background-hover: var(--color-neutral-300);
-    --color-button-background-active: var(--color-neutral-300);
+		--color-button-background: var(--color-neutral-100);
+		--color-button-foreground: var(--color-neutral-900);
+		--color-button-background-hover: var(--color-neutral-300);
+		--color-button-background-active: var(--color-neutral-300);
 
-    --color-input-background: var(--color-neutral-900);
-    --color-input-foreground: var(--color-neutral-50);
-    --color-input-placeholder: var(--color-neutral-600);
+		--color-input-background: var(--color-neutral-900);
+		--color-input-foreground: var(--color-neutral-50);
+		--color-input-placeholder: var(--color-neutral-600);
 
-    --color-radio-background: var(--color-neutral-900);
-    --color-radio-foreground: var(--color-neutral-50);
-    --color-radio-border: var(--color-neutral-50);
-  }
+		--color-radio-background: var(--color-neutral-900);
+		--color-radio-foreground: var(--color-neutral-50);
+		--color-radio-border: var(--color-neutral-50);
+	}
 }
 
 @layer base {
-  * {
-    position: relative;
-    flex-shrink: 0;
-    min-width: 0;
-    min-height: 0;
-  }
-  body {
-    display: flex;
-    flex-direction: column;
-    overflow-x: hidden;
-    overflow-y: auto;
-    @apply bg-background text-foreground;
-    font-feature-settings:
-      'rlig' 1,
-      'calt' 1;
-    font-family:
-      Work Sans,
-      -apple-system,
-      BlinkMacSystemFont,
-      'Segoe UI',
-      Roboto,
-      Oxygen,
-      Ubuntu,
-      Cantarell,
-      'Open Sans',
-      'Helvetica Neue',
-      sans-serif;
-  }
-  html,
-  body {
-    height: 100%;
-    width: 100%;
-    overflow-x: hidden;
-  }
+	* {
+		position: relative;
+		flex-shrink: 0;
+		min-width: 0;
+		min-height: 0;
+	}
+	body {
+		display: flex;
+		flex-direction: column;
+		overflow-x: hidden;
+		overflow-y: auto;
+		@apply bg-background text-foreground;
+		font-feature-settings:
+			'rlig' 1,
+			'calt' 1;
+		font-family:
+			Work Sans,
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			Roboto,
+			Oxygen,
+			Ubuntu,
+			Cantarell,
+			'Open Sans',
+			'Helvetica Neue',
+			sans-serif;
+	}
+	html,
+	body {
+		height: 100%;
+		width: 100%;
+		overflow-x: hidden;
+	}
 }

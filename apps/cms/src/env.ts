@@ -11,22 +11,22 @@ import { z } from 'zod';
  */
 
 const envSchema = z.object({
-  DATABASE_URL: z.string(),
-  PAYLOAD_SECRET: z.string(),
+	DATABASE_URL: z.string(),
+	PAYLOAD_SECRET: z.string(),
 });
 
 export type Env = z.infer<typeof envSchema>;
 
 declare global {
-  namespace NodeJS {
-    interface ProcessEnv extends Env {}
-  }
+	namespace NodeJS {
+		interface ProcessEnv extends Env {}
+	}
 }
 
 const res = envSchema.safeParse(process.env);
 if (!res.success) {
-  const errors = res.error.flatten().fieldErrors;
-  throw new Error(
-    `Invalid environment variables:\n${JSON.stringify(errors, null, 2)}`,
-  );
+	const errors = res.error.flatten().fieldErrors;
+	throw new Error(
+		`Invalid environment variables:\n${JSON.stringify(errors, null, 2)}`,
+	);
 }

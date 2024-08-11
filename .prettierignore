@@ -5,3 +5,8 @@ build
 .svelte-kit
 pnpm-lock.yaml
 pnpm-workspace.yaml
+__*
+.github
+.nx
+.vscode
+*.yml
