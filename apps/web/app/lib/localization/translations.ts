@@ -136,6 +136,8 @@ const en = {
   'volunteer.form.success.description':
     'Your message has been sent successfully!',
   'volunteer.form.success.title': 'Thank you for your interest!',
+
+  'registration.schedule': 'Schedule',
   'registration.watch-promo': 'Watch promo',
   'registration.register': 'Register',
   'registration.speakers.title': 'Speakers',
@@ -469,6 +471,7 @@ const fr: Record<TranslationKey, string> = {
     'Votre message a été envoyé avec succès!',
   'volunteer.form.success.title': 'Merci pour votre intérêt!',
 
+  'registration.schedule': 'Horaire',
   'registration.watch-promo': 'Regardez la promo',
   'registration.register': 'Inscrivez-vous',
   'registration.speakers.title': 'Conférenciers',

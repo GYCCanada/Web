@@ -86,12 +86,21 @@ function MobileHero() {
             fr: '/2024/fr/hero-mobile.jpg',
           }}
         />
-        <a
-          className={clsx(buttonStyle, 'absolute -bottom-6 left-4')}
-          href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"
-        >
-          {translate('registration.register')}
-        </a>
+        <div className="absolute -bottom-6 left-4 flex items-center gap-4">
+          <a
+            className={clsx(buttonStyle)}
+            href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"
+          >
+            {translate('registration.register')}
+          </a>
+          <a
+            className={clsx(buttonStyle)}
+            href="https://docs.google.com/document/d/1gNAOfdW2Yhgg7FABjUqQt2k2mXV_AdhARWUOyiVL9dA/pub"
+            target="_blank"
+          >
+            {translate('registration.schedule')}
+          </a>
+        </div>
       </div>
       <div className="flex flex-col gap-4 px-4">
         <div className="flex flex-col gap-2 text-4xl">
@@ -162,12 +171,19 @@ function DesktopHero() {
               </h2>
               <h3 className="text-5xl">{conference.location}</h3>
             </div>
-            <div>
+            <div className="flex items-center gap-4">
               <a
                 className={buttonStyle}
                 href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"
               >
                 {translate('registration.register')}
+              </a>
+              <a
+                className={clsx(buttonStyle)}
+                href="https://docs.google.com/document/d/1gNAOfdW2Yhgg7FABjUqQt2k2mXV_AdhARWUOyiVL9dA/pub"
+                target="_blank"
+              >
+                {translate('registration.schedule')}
               </a>
             </div>
           </div>
