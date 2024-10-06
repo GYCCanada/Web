@@ -33,5 +33,5 @@ export const board: BoardMembers = [
   'Daniel Cho',
   'Craig Cleveland',
   'Rudy Harnisch',
-  'Abubacar',
+  'Abubacar Camara',
 ];
