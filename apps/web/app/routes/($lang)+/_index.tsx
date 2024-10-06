@@ -18,7 +18,6 @@ import { subscribeToNewsletter } from '~/lib/mailchimp.server';
 import { redirectWithToast } from '~/lib/toast.server';
 import { Button, buttonStyle } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
-import { LocalizedImage } from '~/ui/image';
 import { Label } from '~/ui/label';
 import { Link } from '~/ui/link';
 import { Main } from '~/ui/main';
@@ -56,8 +55,6 @@ export const action = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const data = submission.value;
-
-  console.log({ data });
 
   try {
     await subscribeToNewsletter(data.email, data.name);
@@ -206,14 +203,18 @@ function MobileHero() {
   const hints = useHints();
   const translate = useTranslate();
   return (
-    <section className="flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
+    <section
+      style={
+        {
+          '--bg': conference.theme,
+        } as any
+      }
+      className="flex flex-col gap-10 bg-[--bg] p-3 pb-16 text-black"
+    >
       <div>
-        <LocalizedImage
-          srcs={{
-            en: '/2024/en/hero-mobile.jpg',
-            fr: '/2024/fr/hero-mobile.jpg',
-          }}
-          alt={conference.title}
+        <img
+          src={conference.hero.image.mobile}
+          alt={conference.hero.alt}
           className="aspect-auto w-full"
         />
         <Link
@@ -246,15 +247,19 @@ function DesktopHero() {
   const hints = useHints();
   const translate = useTranslate();
   return (
-    <section className="full-bleed flex flex-col gap-10 bg-[#FFD6BA] p-3 pb-16 text-black">
+    <section
+      style={
+        {
+          '--bg': conference.theme,
+        } as any
+      }
+      className="full-bleed flex flex-col gap-10 bg-[--bg] p-3 pb-16 text-black"
+    >
       <div className="mx-auto flex w-[--width] gap-10 py-16">
         <div className="flex flex-1 flex-col gap-10">
-          <LocalizedImage
-            srcs={{
-              en: '/2024/en/hero-desktop.jpg',
-              fr: '/2024/fr/hero-desktop.jpg',
-            }}
-            alt={conference.title}
+          <img
+            src={conference.hero.image.desktop}
+            alt={conference.hero.alt}
             className="aspect-auto w-full"
           />
           <p className="text-2xl italic">{conference.tagline}</p>
@@ -307,6 +312,10 @@ function TimeLeft() {
   const days = dayjs(conference.dates[0])
     .tz(hints.timeZone)
     .diff(dayjs().tz(hints.timeZone), 'days');
+
+  if (days < 0) {
+    return null;
+  }
 
   return (
     <section className="flex flex-col items-center justify-center gap-6 p-3 py-16 text-center text-4xl lg:h-screen lg:gap-12 lg:text-[64px]">
