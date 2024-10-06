@@ -44,7 +44,8 @@ const en = {
   'footer.affiliation': 'A {{gyc}} affiliate ministry.',
   'footer.links': 'Quick Links',
   'contact.title': 'Get in touch with us!',
-  'contact.directions': '',
+  'contact.directions':
+    'You can reach us anytime via email at {{email}}, or with the form below.',
   'contact.form.name': 'What is your name?',
   'contact.form.name.placeholder': 'Type your full name here',
   'contact.form.name.required': 'Please enter your name',
@@ -375,7 +376,8 @@ const fr: Record<TranslationKey, string> = {
   'footer.affiliation': 'Un ministère affilié à {{gyc}}.',
   'footer.links': 'Liens rapides',
   'contact.title': 'Entrez en contact avec nous!',
-  'contact.directions': '',
+  'contact.directions':
+    'Vous pouvez nous joindre à tout moment par courriel à {{email}}, ou avec le formulaire ci-dessous.',
   'contact.form.name': 'Quel est votre nom?',
   'contact.form.name.placeholder': 'Entrez votre nom complet ici',
   'contact.form.name.required': 'Veuillez entrer votre nom',
