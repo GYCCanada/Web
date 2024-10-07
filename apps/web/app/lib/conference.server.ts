@@ -315,3 +315,17 @@ export const getCurrentConference = (locale: Locale): Conference => {
   }
   return conferences[currentConferenceIndex][locale];
 };
+
+export const getConferenceByYear = (
+  locale: Locale,
+  year: number,
+): Conference => {
+  assertValidLocale(locale);
+  const conference = conferences.find(
+    (conference) => dayjs(conference[locale].dates[0]).year() === year,
+  );
+  if (!conference) {
+    throw new Error(`No conference found for year ${year}`);
+  }
+  return conference[locale];
+};

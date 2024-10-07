@@ -14,7 +14,7 @@ import { useButton } from 'react-aria';
 import { match } from 'ts-pattern';
 
 import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
-import { getCurrentConference } from '~/lib/conference.server';
+import { getConferenceByYear } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
 import { useLocale, useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
@@ -42,7 +42,7 @@ export const meta: MetaFunction = ({ params }) => {
 
 export const loader = ({ params }: LoaderFunctionArgs) => {
   const locale = getLocale(params);
-  return { conference: getCurrentConference(locale) };
+  return { conference: getConferenceByYear(locale, 2025) };
 };
 
 export default function Registration() {
