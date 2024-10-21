@@ -271,7 +271,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       tagline:
         '"And after the earthquake a fire, but the Lord was not in the fire; and after the fire a still small voice."',
       theme: '#FFD6BA',
-      title: 'The Still Small Voice',
+      title: 'A Still Small Voice',
     },
     fr: {
       bible: {
@@ -299,7 +299,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       tagline:
         '"Après le tremblement de terre, un feu; mais l’Éternel n’était pas dans le feu. Et après le feu, un murmure doux et léger."',
       theme: '#FFD6BA',
-      title: 'La Voix Douce et Légère',
+      title: 'Une Voix Douce et Légère',
     },
   },
 ];
