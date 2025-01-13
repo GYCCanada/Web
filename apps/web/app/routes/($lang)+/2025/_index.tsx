@@ -49,12 +49,12 @@ export default function Registration() {
   return (
     <Main>
       <Hero />
-
+      {/*
       <MapSection />
 
       <SpeakersAndSeminars />
 
-      <RegistrationSection />
+      <RegistrationSection /> */}
 
       <FaqSection />
     </Main>
@@ -80,26 +80,24 @@ function MobileHero() {
   return (
     <section className="flex flex-col gap-10 pb-16">
       <div>
-        <LocalizedImage
-          srcs={{
-            en: '/2024/en/hero-mobile.jpg',
-            fr: '/2024/fr/hero-mobile.jpg',
-          }}
+        <img
+          src={conference.hero.image.desktop}
+          alt={conference.hero.alt}
         />
         <div className="absolute -bottom-6 left-4 flex items-center gap-4">
-          <a
+          {/* <a
             className={clsx(buttonStyle)}
             href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"
           >
             {translate('registration.register')}
-          </a>
-          <a
+          </a> */}
+          {/* <a
             className={clsx(buttonStyle)}
             href="https://docs.google.com/document/d/1gNAOfdW2Yhgg7FABjUqQt2k2mXV_AdhARWUOyiVL9dA/pub"
             target="_blank"
           >
             {translate('registration.schedule')}
-          </a>
+          </a> */}
         </div>
       </div>
       <div className="flex flex-col gap-4 px-4">
@@ -134,16 +132,14 @@ function MobileHero() {
 function DesktopHero() {
   const { conference } = useLoaderData<typeof loader>();
   const hints = useHints();
-  const translate = useTranslate();
+
   return (
     <section className="full-bleed flex flex-col gap-10 p-4 pb-16">
       <div className="mx-auto flex w-[--width] gap-10 py-16">
         <div className="flex flex-1 flex-col gap-10">
-          <LocalizedImage
-            srcs={{
-              en: '/2024/en/hero-desktop.jpg',
-              fr: '/2024/fr/hero-desktop.jpg',
-            }}
+          <img
+            src={conference.hero.image.desktop}
+            alt={conference.hero.alt}
           />
           <p className="text-2xl italic">{conference.tagline}</p>
         </div>
@@ -172,7 +168,7 @@ function DesktopHero() {
               <h3 className="text-5xl">{conference.location}</h3>
             </div>
             <div className="flex items-center gap-4">
-              <a
+              {/* <a
                 className={buttonStyle}
                 href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"
               >
@@ -184,7 +180,7 @@ function DesktopHero() {
                 target="_blank"
               >
                 {translate('registration.schedule')}
-              </a>
+              </a> */}
             </div>
           </div>
         </div>

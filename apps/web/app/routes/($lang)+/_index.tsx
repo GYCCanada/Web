@@ -231,10 +231,10 @@ function MobileHero() {
           {conference.bible.verse}
         </h2>
         <h2>
-          {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
-          {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
-          {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
-          {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
+          {dayjs(conference.dates[0]).utc().format('MMM')}{' '}
+          {dayjs(conference.dates[0]).utc().format('D')}-
+          {dayjs(conference.dates[1]).utc().format('D')},{' '}
+          {dayjs(conference.dates[0]).utc().format('YYYY')}
         </h2>
         <h3>{conference.location}</h3>
       </div>
@@ -244,8 +244,8 @@ function MobileHero() {
 }
 function DesktopHero() {
   const { conference } = useLoaderData<typeof loader>();
-  const hints = useHints();
-  const translate = useTranslate();
+  // const hints = useHints();
+
   return (
     <section
       style={
@@ -281,21 +281,21 @@ function DesktopHero() {
           <div className="flex flex-col gap-10">
             <div className="flex flex-col gap-6">
               <h2 className="text-5xl">
-                {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
-                {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
-                {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
-                {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
+                {dayjs(conference.dates[0]).utc().format('MMM')}{' '}
+                {dayjs(conference.dates[0]).utc().format('D')}-
+                {dayjs(conference.dates[1]).utc().format('D')},{' '}
+                {dayjs(conference.dates[0]).utc().format('YYYY')}
               </h2>
               <h3 className="text-5xl">{conference.location}</h3>
             </div>
             <div>
-              <Link
+              {/* <Link
                 to={conference.slug}
                 className={clsx(buttonStyle)}
                 data-variant="accent"
               >
                 {translate('main.reserve')}
-              </Link>
+              </Link> */}
             </div>
           </div>
         </div>
@@ -305,13 +305,10 @@ function DesktopHero() {
 }
 
 function TimeLeft() {
-  const hints = useHints();
   const { conference } = useLoaderData<typeof loader>();
   const translate = useTranslate();
 
-  const days = dayjs(conference.dates[0])
-    .tz(hints.timeZone)
-    .diff(dayjs().tz(hints.timeZone), 'days');
+  const days = dayjs(conference.dates[0]).utc().diff(dayjs().utc(), 'days');
 
   if (days < 0) {
     return null;

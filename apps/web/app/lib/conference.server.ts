@@ -50,8 +50,8 @@ type Seminar = {
   description: string;
 };
 
-const PST_OFFSET = -8;
-const EST_OFFSET = -5;
+// const PST_OFFSET = -8;
+// const EST_OFFSET = -5;
 
 const conferences: Record<Locale, Conference>[] = [
   {
@@ -67,21 +67,21 @@ const conferences: Record<Locale, Conference>[] = [
         },
       },
       dates: [
-        dayjs('2024-08-21').utcOffset(PST_OFFSET).endOf('day').valueOf(),
-        dayjs('2024-08-25').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+        dayjs('2024-08-21').utc().endOf('day').valueOf(),
+        dayjs('2024-08-25').utc().endOf('day').valueOf(),
       ],
       registration: {
         early: [
-          dayjs('2024-05-19').utcOffset(PST_OFFSET).endOf('day').valueOf(),
-          dayjs('2024-06-22').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+          dayjs('2024-05-19').utc().endOf('day').valueOf(),
+          dayjs('2024-06-22').utc().endOf('day').valueOf(),
         ],
         regular: [
-          dayjs('2024-06-23').utcOffset(PST_OFFSET).endOf('day').valueOf(),
-          dayjs('2024-07-20').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+          dayjs('2024-06-23').utc().endOf('day').valueOf(),
+          dayjs('2024-07-20').utc().endOf('day').valueOf(),
         ],
         late: [
-          dayjs('2024-07-21').utcOffset(PST_OFFSET).endOf('day').valueOf(),
-          dayjs('2024-08-25').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+          dayjs('2024-07-21').utc().endOf('day').valueOf(),
+          dayjs('2024-08-25').utc().endOf('day').valueOf(),
         ],
       },
 
@@ -173,21 +173,21 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         },
       },
       dates: [
-        dayjs('2024-08-21').utcOffset(PST_OFFSET).endOf('day').valueOf(),
-        dayjs('2024-08-25').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+        dayjs('2024-08-21').utc().endOf('day').valueOf(),
+        dayjs('2024-08-25').utc().endOf('day').valueOf(),
       ],
       registration: {
         early: [
-          dayjs('2024-05-19').utcOffset(PST_OFFSET).endOf('day').valueOf(),
-          dayjs('2024-06-22').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+          dayjs('2024-05-19').utc().endOf('day').valueOf(),
+          dayjs('2024-06-22').utc().endOf('day').valueOf(),
         ],
         regular: [
-          dayjs('2024-06-23').utcOffset(PST_OFFSET).endOf('day').valueOf(),
-          dayjs('2024-07-20').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+          dayjs('2024-06-23').utc().endOf('day').valueOf(),
+          dayjs('2024-07-20').utc().endOf('day').valueOf(),
         ],
         late: [
-          dayjs('2024-07-21').utcOffset(PST_OFFSET).endOf('day').valueOf(),
-          dayjs('2024-08-25').utcOffset(PST_OFFSET).endOf('day').valueOf(),
+          dayjs('2024-07-21').utc().endOf('day').valueOf(),
+          dayjs('2024-08-25').utc().endOf('day').valueOf(),
         ],
       },
       location: '130 Gerstmar Rd, Kelowna, BC V1X 4A7',
@@ -259,8 +259,8 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         },
       },
       dates: [
-        dayjs('2025-08-20').utcOffset(EST_OFFSET).endOf('day').valueOf(),
-        dayjs('2025-08-24').utcOffset(EST_OFFSET).endOf('day').valueOf(),
+        dayjs('2025-08-20').utc().endOf('day').valueOf(),
+        dayjs('2025-08-24').utc().endOf('day').valueOf(),
       ],
       location: 'Montreal, QC',
       promos: [],
@@ -287,8 +287,8 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         },
       },
       dates: [
-        dayjs('2025-08-20').utcOffset(EST_OFFSET).endOf('day').valueOf(),
-        dayjs('2025-08-24').utcOffset(EST_OFFSET).endOf('day').valueOf(),
+        dayjs('2025-08-20').utc().endOf('day').valueOf(),
+        dayjs('2025-08-24').utc().endOf('day').valueOf(),
       ],
       location: 'Montréal, QC',
       promos: [],
