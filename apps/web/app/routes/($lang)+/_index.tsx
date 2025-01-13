@@ -8,7 +8,7 @@ import * as React from 'react';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
-import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
+import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
 import { useTranslate } from '~/lib/localization/context';
@@ -200,7 +200,6 @@ function Hero() {
 
 function MobileHero() {
   const { conference } = useLoaderData<typeof loader>();
-  const hints = useHints();
   const translate = useTranslate();
   return (
     <section
