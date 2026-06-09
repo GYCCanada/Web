@@ -65,15 +65,3 @@ const runWithContext = <A, E, R extends AppServices | ReactRouterContext>(
 export const makeRequestRuntime = (): RequestRuntime => ({
   run: runWithContext,
 });
-
-/**
- * Eagerly build the app layer graph (forcing {@link Env.layer}) so that in
- * `NODE_ENV=production` the required mail / mailchimp secrets are validated at
- * server startup rather than lazily on the first form submit (ADR 0004:
- * "prod still fails fast on missing mail/mailchimp secrets").
- *
- * Rejects with the underlying Config error if a required secret is missing.
- */
-export const buildAppRuntime = (): Promise<void> => AppRuntime.context().then(() => undefined);
-
-export const disposeAppRuntime = (): Promise<void> => AppRuntime.dispose();

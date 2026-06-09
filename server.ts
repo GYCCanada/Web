@@ -8,8 +8,8 @@ import {
 import { createRequestHandler, RouterContextProvider } from 'react-router';
 import type { ServerBuild } from 'react-router';
 
+import { Env } from './app/lib/env.server.ts';
 import {
-  buildAppRuntime,
   makeRequestRuntime,
   type RequestRuntime,
 } from './app/lib/effect/runtime.ts';
@@ -141,6 +141,14 @@ const stripQuery = (url: string): string => {
   return q === -1 ? url : url.slice(0, q);
 };
 
+// Readiness probe for Railway. Plain text, no app services — answering 200 here
+// means the process is up and the env layer (below) validated at boot.
+const HealthRoute = HttpRouter.add(
+  'GET',
+  '/healthz',
+  HttpServerResponse.text('ok', { contentType: 'text/plain; charset=utf-8' }),
+);
+
 const HashedAssetsRoute = HttpRouter.add('GET', '/assets/*', (request) => {
   const path = stripQuery(request.url);
   return fileResponse(
@@ -164,22 +172,24 @@ const FallbackRoute = HttpRouter.add('*', '*', () =>
     ),
 );
 
-const ProdRoutes = Layer.mergeAll(HashedAssetsRoute, FallbackRoute);
-const DevRoutes = FallbackRoute;
+const ProdRoutes = Layer.mergeAll(HealthRoute, HashedAssetsRoute, FallbackRoute);
+const DevRoutes = Layer.mergeAll(HealthRoute, FallbackRoute);
 
 const RoutesLive = isDev ? DevRoutes : ProdRoutes;
 
-const ServerLive = HttpRouter.serve(RoutesLive).pipe(
-  Layer.provide(BunHttpServer.layer({ port: PORT })),
+// Fail fast at boot: forcing `Env` here makes its layer validate the required
+// mail / mailchimp secrets (in `NODE_ENV=production`) when the server layer is
+// built, instead of lazily on the first Effect-wrapped form action
+// (ADR 0004:38-40). Providing `Env.layer` discharges the requirement, so a
+// missing secret fails `Layer.launch` and `BunRuntime.runMain` exits non-zero.
+// In dev / test the env vars are optional, so this is a cheap no-op.
+const StartupCheck = Layer.effectDiscard(Env.asEffect()).pipe(
+  Layer.provide(Env.layer),
 );
 
-// Fail fast at boot: build the app layer graph now so `NODE_ENV=production`
-// validates the required mail / mailchimp secrets immediately, instead of only
-// on the first Effect-wrapped form action (ADR 0004:38-40, plan P2). In dev /
-// test the env vars are optional, so this is a cheap no-op there.
-await buildAppRuntime().catch((error: unknown) => {
-  Bun.stderr.write(`[gycc] fatal: environment validation failed at startup\n${String(error)}\n`);
-  process.exit(1);
-});
+const ServerLive = HttpRouter.serve(RoutesLive).pipe(
+  Layer.provideMerge(StartupCheck),
+  Layer.provide(BunHttpServer.layer({ port: PORT })),
+);
 
 BunRuntime.runMain(Layer.launch(ServerLive));
