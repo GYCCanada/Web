@@ -136,3 +136,6 @@ dist
 # App build output (Remix client/server bundles)
 /build
 /.cache
+
+# Local workflow scripts (not part of the app)
+.claude/
