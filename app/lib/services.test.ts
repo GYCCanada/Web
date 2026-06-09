@@ -47,6 +47,7 @@ describe('Env config', () => {
         expect(env.isProduction).toBe(false);
         expect(Option.isNone(env.mail)).toBe(true);
         expect(Option.isNone(env.mailchimp)).toBe(true);
+        expect(Option.isNone(env.bucket)).toBe(true);
       }),
       envLayer({ NODE_ENV: 'development' }),
     ));
@@ -78,6 +79,108 @@ describe('Env config', () => {
     );
     expect(Exit.isFailure(exit)).toBe(true);
   });
+
+  it('leaves the bucket absent in production when its vars are unset', () =>
+    run(
+      Effect.gen(function* () {
+        const env = yield* Env;
+        expect(env.isProduction).toBe(true);
+        expect(Option.isNone(env.bucket)).toBe(true);
+      }),
+      envLayer(PROD_ENV),
+    ));
+
+  it('resolves the bucket, redacts the secret, and defaults region to auto', () =>
+    run(
+      Effect.gen(function* () {
+        const env = yield* Env;
+        expect(Option.isSome(env.bucket)).toBe(true);
+        if (Option.isSome(env.bucket)) {
+          expect(env.bucket.value.endpoint).toBe('https://s3.example.com');
+          expect(env.bucket.value.bucket).toBe('gycc-content');
+          expect(env.bucket.value.region).toBe('auto');
+          expect(Redacted.value(env.bucket.value.accessKeyId)).toBe('akid');
+          expect(Redacted.value(env.bucket.value.secretAccessKey)).toBe('secret-key');
+        }
+      }),
+      envLayer({
+        NODE_ENV: 'development',
+        BUCKET_ENDPOINT: 'https://s3.example.com',
+        BUCKET_ACCESS_KEY: 'akid',
+        BUCKET_SECRET_KEY: 'secret-key',
+        BUCKET_NAME: 'gycc-content',
+      }),
+    ));
+
+  it('treats present-but-blank bucket vars as absent (env.example placeholders)', () =>
+    run(
+      Effect.gen(function* () {
+        const env = yield* Env;
+        expect(Option.isNone(env.bucket)).toBe(true);
+      }),
+      // Mirrors a freshly-copied `.env.example`: the BUCKET_* keys are present
+      // but empty. These must collapse to `Option.none()` so the CMS falls back
+      // to its bundled defaults (D3), not a Some(...) of empty strings.
+      envLayer({
+        NODE_ENV: 'development',
+        BUCKET_ENDPOINT: '',
+        BUCKET_ACCESS_KEY: '',
+        BUCKET_SECRET_KEY: '',
+        BUCKET_NAME: '',
+        BUCKET_REGION: 'auto',
+      }),
+    ));
+
+  it('treats whitespace-only bucket vars as absent', () =>
+    run(
+      Effect.gen(function* () {
+        const env = yield* Env;
+        expect(Option.isNone(env.bucket)).toBe(true);
+      }),
+      envLayer({
+        NODE_ENV: 'development',
+        BUCKET_ENDPOINT: '   ',
+        BUCKET_ACCESS_KEY: '  ',
+        BUCKET_SECRET_KEY: '\t',
+        BUCKET_NAME: ' ',
+      }),
+    ));
+
+  it('treats a partially-blank bucket group as absent', () =>
+    run(
+      Effect.gen(function* () {
+        const env = yield* Env;
+        expect(Option.isNone(env.bucket)).toBe(true);
+      }),
+      // Endpoint set, but the rest left blank — not a usable bucket, so None.
+      envLayer({
+        NODE_ENV: 'development',
+        BUCKET_ENDPOINT: 'https://s3.example.com',
+        BUCKET_ACCESS_KEY: '',
+        BUCKET_SECRET_KEY: '',
+        BUCKET_NAME: '',
+      }),
+    ));
+
+  it('honours an explicit BUCKET_REGION', () =>
+    run(
+      Effect.gen(function* () {
+        const env = yield* Env;
+        if (Option.isSome(env.bucket)) {
+          expect(env.bucket.value.region).toBe('us-east-1');
+        } else {
+          throw new Error('expected bucket to be configured');
+        }
+      }),
+      envLayer({
+        NODE_ENV: 'development',
+        BUCKET_ENDPOINT: 'https://s3.example.com',
+        BUCKET_ACCESS_KEY: 'akid',
+        BUCKET_SECRET_KEY: 'secret-key',
+        BUCKET_NAME: 'gycc-content',
+        BUCKET_REGION: 'us-east-1',
+      }),
+    ));
 });
 
 describe('Mailer', () => {
