@@ -87,6 +87,15 @@ Concretely, when the feature is complete:
 - `Text = Schema.Struct({ en: NonEmptyString, fr: NonEmptyString })` — bilingual.
 - `ImageRef = { key: AssetKey, alt: Text }` (+ optional w/h). `AssetKey` validated:
   non-empty, no leading `/`, no scheme, no `..` (boundary-discipline).
+- **Hero art is per-locale.** The 2024/2025/2026 hero source files genuinely diverge by
+  locale on disk (`…/en/…` and `…/fr/…` are distinct files; the 2024 route already renders
+  them via a localized `<img>`). So each hero crop's key is a `LocalizedAssetKey`
+  (`{ en, fr }` of `AssetKey`), not a single `AssetKey` — a single key would silently drop
+  one locale's art (make-impossible-states-unrepresentable). The `alt` stays one bilingual
+  `Text` (it is locale text, not a path). The **C3 boundary** collapses this back to today's
+  per-locale `{ image: { desktop, mobile }, alt }` by selecting `hero.<crop>.key[locale]`
+  and `hero.<crop>.alt[locale]`, so each locale reproduces its exact rendered `src`
+  (derive-dont-sync).
 - `SiteContent = { conferences: Conference[], team: TeamMember[], translations:
   Translations, meta }`. `Conference` carries the **theme name** (`Text`) AND the
   **accent colour** as two distinct fields (CONTEXT.md flags today's `theme:string`
