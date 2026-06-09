@@ -302,6 +302,79 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       title: 'Une Voix Douce et Légère',
     },
   },
+  {
+    en: {
+      slug: '/2026',
+      title: 'Speak',
+      // Gold/amber accent sampled from the dark SPEAK hero art (warm
+      // light-beam / "SPEAK" glyph gold ~#deb37c–#eabf85); chosen a touch
+      // more saturated so it reads as a deliberate accent on the dark hero.
+      theme: '#D4A24E',
+      hero: {
+        alt: '',
+        image: {
+          // TODO(deferred): portrait mobile hero crop owed — mobile
+          // temporarily reuses the landscape desktop image.
+          mobile: '/2026/en/hero-desktop.png',
+          desktop: '/2026/en/hero-desktop.png',
+        },
+      },
+      dates: [
+        dayjs('2026-08-05').utc().endOf('day').valueOf(),
+        dayjs('2026-08-09').utc().endOf('day').valueOf(),
+      ],
+      // TODO(deferred): registration windows omitted — pricing not set yet.
+      location:
+        'Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB',
+      // Jeremiah 1:7 (NIV-style, per the 2026 overview).
+      tagline:
+        'But the Lord said to me, "Do not say, \'I am too young.\' You must go to everyone I send you to and say whatever I command you."',
+      bible: {
+        book: 'Jeremiah',
+        chapter: 1,
+        verse: 7,
+      },
+      // TODO(deferred): speakers/seminars TBD — empty by design, like 2025.
+      speakers: [],
+      seminars: [],
+      promos: [],
+    },
+    fr: {
+      slug: '/2026',
+      // FR theme name for "Speak" — natural French imperative.
+      // NOTE FOR REVIEW: "Parle" chosen (singular imperative, matches the
+      // intimate "God speaks to you" tone). Alternative: "Parlez" (formal/plural).
+      title: 'Parle',
+      theme: '#D4A24E',
+      hero: {
+        alt: '',
+        image: {
+          // TODO(deferred): portrait mobile hero crop owed — mobile
+          // temporarily reuses the landscape desktop image. Art is
+          // locale-neutral, so FR reuses the same hero file.
+          mobile: '/2026/fr/hero-desktop.png',
+          desktop: '/2026/fr/hero-desktop.png',
+        },
+      },
+      dates: [
+        dayjs('2026-08-05').utc().endOf('day').valueOf(),
+        dayjs('2026-08-09').utc().endOf('day').valueOf(),
+      ],
+      location:
+        'Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB',
+      // Jérémie 1:7 (Louis Segond).
+      tagline:
+        '“Et l’Éternel me dit: Ne dis pas: Je suis un enfant. Car tu iras vers tous ceux auprès de qui je t’enverrai, et tu diras tout ce que je t’ordonnerai.”',
+      bible: {
+        book: 'Jérémie',
+        chapter: 1,
+        verse: 7,
+      },
+      speakers: [],
+      seminars: [],
+      promos: [],
+    },
+  },
 ];
 
 export const getCurrentConference = (locale: Locale): Conference => {
