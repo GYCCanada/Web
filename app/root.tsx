@@ -17,13 +17,13 @@ import { combineHeaders } from './lib/misc';
 import { getToast } from './lib/toast.server';
 import { Toaster } from './ui/toaster';
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = async ({ request, url }: LoaderFunctionArgs) => {
   const { toast, headers: toastHeaders } = await getToast(request);
   return data(
     {
       requestInfo: {
         hints: getHints(request),
-        path: new URL(request.url).pathname,
+        path: url.pathname,
       },
       toast,
     },

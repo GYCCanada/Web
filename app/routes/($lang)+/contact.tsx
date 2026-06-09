@@ -101,7 +101,7 @@ export const meta: MetaFunction = ({ params }) => {
 };
 
 export const action = routeAction(function* () {
-  const { request } = yield* ReactRouterContext;
+  const { request, url } = yield* ReactRouterContext;
   const mailer = yield* Mailer;
 
   const formData = yield* Effect.promise(() => request.formData());
@@ -136,7 +136,7 @@ export const action = routeAction(function* () {
   }
 
   return yield* Effect.promise(() =>
-    redirectWithToast(new URL(request.url).pathname, {
+    redirectWithToast(url.pathname, {
       description: 'contact.form.success.description' satisfies TranslationKey,
       title: 'contact.form.success.title' satisfies TranslationKey,
       type: 'success',
