@@ -1,5 +1,6 @@
 import { Cause, Effect, Exit, Layer, ManagedRuntime } from 'effect';
 
+import { AdminDisabled, Auth, BadPassword, Unauthorized } from '~/lib/auth.server';
 import { Content } from '~/lib/content.server';
 import { Env } from '~/lib/env.server';
 import { Mailchimp, MailchimpDisabled, MailchimpError } from '~/lib/mailchimp.server';
@@ -8,12 +9,15 @@ import { Storage } from '~/lib/storage.server';
 
 import { ReactRouterContext, type RouteArgs } from './router-context';
 
-export type AppServices = Env | Mailer | Mailchimp | Content;
+export type AppServices = Env | Mailer | Mailchimp | Content | Auth;
 export type AppError =
   | Response
   | MailError
   | MailchimpError
-  | MailchimpDisabled;
+  | MailchimpDisabled
+  | AdminDisabled
+  | Unauthorized
+  | BadPassword;
 
 // `Content` reads through `Storage` and falls back to bundled defaults when no
 // bucket is configured (D3). `Storage.layerOptional` therefore never fails to
@@ -21,10 +25,14 @@ export type AppError =
 // `NotFound`, which `Content` recovers from — so the runtime boots identically
 // with or without a bucket. `Storage` is provided *into* `Content` and not
 // re-exported, so it is not an `AppServices` requirement routes must satisfy.
+//
+// `Auth` is likewise optional everywhere: with `ADMIN_PASSWORD` unset its layer
+// builds a disabled instance (admin 404s), so it never fails to build either.
 const AppLayer = Layer.mergeAll(
   Mailer.layer,
   Mailchimp.layer,
   Content.layer.pipe(Layer.provide(Storage.layerOptional)),
+  Auth.layer,
 ).pipe(Layer.provideMerge(Env.layer));
 const AppRuntime = ManagedRuntime.make(AppLayer);
 
