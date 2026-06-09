@@ -110,6 +110,16 @@
  * overrides live without re-listing the ramps.
  */
 @theme inline {
+  /*
+   * v4 changed the default radius scale: `--radius-sm` went from v3's
+   * 0.125rem (2px) to 0.25rem (4px). The old `tailwind.config.js` never
+   * customised `borderRadius`, so gyc relied on the v3 default — every
+   * `rounded-sm` surface (buttons, inputs, text areas, checkboxes, select
+   * items) rendered at 2px. Restore the v3 value so those primitives keep
+   * their original corner radius after the v3 → v4 migration.
+   */
+  --radius-sm: 0.125rem;
+
   --color-background: rgb(var(--ch-background));
   --color-foreground: rgb(var(--ch-foreground));
 
