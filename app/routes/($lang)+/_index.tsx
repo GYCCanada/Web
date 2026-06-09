@@ -53,7 +53,7 @@ export const loader = ({ params }: LoaderFunctionArgs) => {
 };
 
 export const action = routeAction(function* () {
-  const { request } = yield* ReactRouterContext;
+  const { request, url } = yield* ReactRouterContext;
   const mailchimp = yield* Mailchimp;
 
   const formData = yield* Effect.promise(() => request.formData());
@@ -76,7 +76,7 @@ export const action = routeAction(function* () {
   }
 
   return yield* Effect.promise(() =>
-    redirectWithToast(new URL(request.url).pathname, {
+    redirectWithToast(url.pathname, {
       type: 'success',
       title: 'main.newsletter.success.title' satisfies TranslationKey,
       description:
