@@ -1,7 +1,8 @@
+import { Input as BaseInput } from '@base-ui/react/input';
 import clsx from 'clsx';
 import * as React from 'react';
-import { Input as RACInput } from 'react-aria-components';
-import type { InputProps } from 'react-aria-components';
+
+import { useTextField } from './text-field';
 
 const variants = {
   positive: 'bg-neutral-50 text-neutral-950',
@@ -12,17 +13,28 @@ export type InputVariant = keyof typeof variants;
 
 const Input = React.forwardRef<
   HTMLInputElement,
-  InputProps & {
+  Omit<BaseInput.Props, 'value' | 'defaultValue' | 'onChange'> & {
     variant?: InputVariant;
   }
->(function Input({ className, variant = 'positive', ...props }, ref) {
+>(function Input({ className, variant, ...props }, ref) {
+  const { meta, control, variant: contextVariant, controlId } = useTextField();
+  const resolvedVariant = variant ?? contextVariant ?? 'positive';
+
   return (
-    <RACInput
+    <BaseInput
+      id={controlId}
       {...props}
       ref={ref}
+      name={meta.name}
+      value={(control.value as string) ?? ''}
+      onChange={(event) => control.change(event.target.value)}
+      onBlur={() => control.blur()}
+      onFocus={() => control.focus()}
+      aria-invalid={meta.errors && meta.errors.length > 0 ? true : undefined}
+      required={meta.required}
       className={clsx(
         'focus:border-b-accent-600 bg-input-background text-input-foreground placeholder-input-placeholder rounded-sm border-b-2 px-6 py-5 text-base outline-none duration-200',
-        variants[variant],
+        variants[resolvedVariant],
         className,
       )}
     />

@@ -1,7 +1,6 @@
+import { Button as BaseButton } from '@base-ui/react/button';
 import clsx from 'clsx';
 import * as React from 'react';
-import { Button as RACButton } from 'react-aria-components';
-import type { ButtonProps } from 'react-aria-components';
 
 export const buttonStyle =
   'text-base uppercase py-5 px-10 font-bold inline-flex items-center justify-center gap-2 border-2 border-transparent focus:outline-none focus:ring-2 focus:ring-offset-2 duration-200 rounded-sm focus:ring-accent-500 ring-offset-background bg-accent-600 text-accent-50 hover:bg-accent-700 data-[pressed]:bg-accent-500' +
@@ -14,26 +13,19 @@ export type ButtonVariant = 'accent' | 'default';
 
 const Button = React.forwardRef<
   HTMLButtonElement,
-  ButtonProps & {
+  BaseButton.Props & {
     variant?: ButtonVariant;
-    disabled?: boolean;
   }
->(
-  (
-    { variant = 'accent', className = '', disabled, isDisabled, ...props },
-    ref,
-  ) => {
-    return (
-      <RACButton
-        {...props}
-        ref={ref}
-        isDisabled={disabled || isDisabled}
-        className={clsx(buttonStyle, className)}
-        data-variant={variant}
-      />
-    );
-  },
-);
+>(({ variant = 'accent', className = '', ...props }, ref) => {
+  return (
+    <BaseButton
+      {...props}
+      ref={ref}
+      className={clsx(buttonStyle, className)}
+      data-variant={variant}
+    />
+  );
+});
 
 Button.displayName = 'Button';
 

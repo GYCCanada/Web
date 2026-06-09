@@ -14,7 +14,7 @@ import {
 } from 'framer-motion';
 import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react';
 import * as React from 'react';
-import { useButton } from 'react-aria';
+import { useButton } from '@base-ui/react/internals/use-button';
 import { match } from 'ts-pattern';
 
 import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
@@ -381,8 +381,8 @@ function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
 
   const bioRef = React.useRef<HTMLDivElement>(null);
 
-  const cardProps = useButton({ onPress, elementType: 'div' }, ref);
-  const bioProps = useButton({ onPress, elementType: 'div' }, bioRef);
+  const cardButton = useButton({ native: false });
+  const bioButton = useButton({ native: false });
 
   return (
     <MotionConfig transition={{ type: 'spring', duration: 0.3, bounce: 0 }}>
@@ -409,7 +409,7 @@ function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
                 exit="exit"
                 className="flex flex-col gap-8 p-4 outline-none"
                 ref={bioRef}
-                {...(bioProps.buttonProps as any)}
+                {...bioButton.getButtonProps({ onClick: onPress })}
               >
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
@@ -434,7 +434,7 @@ function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
                 initial="initial"
                 animate="enter"
                 exit="exit"
-                {...(cardProps.buttonProps as any)}
+                {...cardButton.getButtonProps({ onClick: onPress })}
               >
                 <motion.div
                   className="text-link-50 bg-link-600 rota size-[95%] h-[90%] overflow-hidden p-4"

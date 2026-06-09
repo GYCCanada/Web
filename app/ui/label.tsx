@@ -1,16 +1,21 @@
 import clsx from 'clsx';
-import { Label } from 'react-aria-components';
-import type { LabelProps } from 'react-aria-components';
+import * as React from 'react';
 
 import { useTextField } from './text-field';
 
 export const labelStyles =
   'text-foreground text-lg leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-70';
 
-const _Label = ({ className, children, ...props }: LabelProps) => {
-  const { meta } = useTextField();
+const _Label = ({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<'label'>) => {
+  const { meta, controlId, labelId } = useTextField();
   return (
-    <Label
+    <label
+      id={labelId}
+      htmlFor={controlId}
       className={clsx(labelStyles, className)}
       style={{
         gridArea: 'label',
@@ -19,7 +24,7 @@ const _Label = ({ className, children, ...props }: LabelProps) => {
     >
       {children}
       {meta.required && <span className="text-red-500">*</span>}
-    </Label>
+    </label>
   );
 };
 

@@ -671,7 +671,7 @@ export default function RegistrationForm() {
           <div>
             <Button
               type="button"
-              onPress={() => {
+              onClick={() => {
                 form.insert({ name: 'registrants' });
               }}
             >

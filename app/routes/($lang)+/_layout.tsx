@@ -9,7 +9,7 @@ import dayjs from 'dayjs';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import * as React from 'react';
-import { Button } from 'react-aria-components';
+import { Button } from '@base-ui/react/button';
 import { ClientOnly } from 'remix-utils/client-only';
 import { match } from 'ts-pattern';
 
@@ -130,8 +130,8 @@ function PopupNav() {
         <div className="flex items-center gap-6">
           <Language />
           <Button
-            className="text-accent-600 p-2 hover:bg-neutral-100 focus:outline-none data-[pressed]:bg-neutral-200 dark:hover:bg-neutral-800 dark:data-[pressed]:bg-neutral-700"
-            onPress={toggle}
+            className="text-accent-600 p-2 hover:bg-neutral-100 focus:outline-none active:bg-neutral-200 dark:hover:bg-neutral-800 dark:active:bg-neutral-700"
+            onClick={toggle}
           >
             {open ? <CloseIcon /> : <MenuIcon />}
           </Button>

@@ -1,23 +1,28 @@
+import { Radio as BaseRadio } from '@base-ui/react/radio';
+import { RadioGroup as BaseRadioGroup } from '@base-ui/react/radio-group';
 import { useField, useInputControl } from '@conform-to/react';
 import clsx from 'clsx';
 import * as React from 'react';
-import { Radio, RadioGroup } from 'react-aria-components';
-import type { RadioGroupProps, RadioProps } from 'react-aria-components';
 
 import type { InputVariant } from './input';
 import { TextFieldContext } from './text-field';
 
 const _RadioGroup = React.forwardRef<
   HTMLDivElement,
-  RadioGroupProps & {
+  Omit<BaseRadioGroup.Props, 'value' | 'defaultValue' | 'onValueChange'> & {
+    name?: string;
     variant?: InputVariant;
+    orientation?: 'horizontal' | 'vertical';
+    defaultValue?: string;
+    value?: string;
   }
 >(function _RadioGroup(
-  { className, variant = 'negative', orientation, ...props },
+  { className, variant = 'negative', orientation, defaultValue, value, ...props },
   ref,
 ) {
-  const [meta] = useField(props.name ?? '');
-  const control = useInputControl(meta as any);
+  const [meta] = useField<string | string[]>(props.name ?? '');
+  const control = useInputControl(meta);
+  const labelId = React.useId();
 
   return (
     <TextFieldContext.Provider
@@ -25,28 +30,24 @@ const _RadioGroup = React.forwardRef<
         variant,
         meta,
         control,
+        labelId,
       }}
     >
-      <RadioGroup
+      <BaseRadioGroup
         ref={ref}
-        className={(values) =>
-          clsx(
-            'group grid gap-2.5',
-            typeof className === 'function' ? className(values) : className,
-          )
-        }
+        className={clsx('group grid gap-2.5', className)}
         style={{
           gridTemplateAreas: '"label"\n"radio"',
         }}
         data-variant={variant}
-        orientation={orientation ? orientation : 'horizontal'}
+        aria-orientation={orientation ?? 'horizontal'}
+        aria-labelledby={labelId}
         {...props}
         name={meta.name}
-        value={(control.value as any) ?? props.defaultValue ?? props.value}
-        onChange={control.change}
-        onBlur={control.blur}
-        isInvalid={meta.errors && meta.errors.length > 0}
-        isRequired={meta.required}
+        value={(control.value as string) ?? defaultValue ?? value ?? ''}
+        onValueChange={(next) => control.change(next as string)}
+        onBlur={() => control.blur()}
+        required={meta.required}
       />
     </TextFieldContext.Provider>
   );
@@ -71,29 +72,27 @@ const Radios = React.forwardRef<HTMLDivElement, { children: React.ReactNode }>(
 
 Radios.displayName = 'Radios';
 
-const _Radio = React.forwardRef<HTMLLabelElement, RadioProps>(function _Radio(
-  { className, children, ...props },
-  ref,
-) {
+const _Radio = React.forwardRef<
+  HTMLButtonElement,
+  BaseRadio.Root.Props & { children?: React.ReactNode }
+>(function _Radio({ className, children, ...props }, ref) {
   return (
-    <Radio
+    <BaseRadio.Root
       ref={ref}
-      className={(values) =>
-        clsx(
-          'bg-radio-background text-radio-foreground border-radio-border flex cursor-pointer rounded-full border-2 px-3 py-1.5 outline-none duration-200',
-          'data-[selected]:!bg-accent-600 data-[selected]:!text-accent-50',
-          'hover:!bg-accent-500 hover:!text-accent-50',
-          'data-[pressed]:bg-accent-400 data-[pressed]:text-accent-50',
-          typeof className === 'function' ? className(values) : className,
-        )
-      }
+      className={clsx(
+        'bg-radio-background text-radio-foreground border-radio-border flex cursor-pointer rounded-full border-2 px-3 py-1.5 outline-none duration-200',
+        'data-[checked]:!bg-accent-600 data-[checked]:!text-accent-50',
+        'hover:!bg-accent-500 hover:!text-accent-50',
+        'active:bg-accent-400 active:text-accent-50',
+        className,
+      )}
       {...props}
     >
-      {(values) => (
-        <>{typeof children === 'function' ? children(values) : children}</>
-      )}
-    </Radio>
+      {children}
+    </BaseRadio.Root>
   );
 });
+
+_Radio.displayName = 'Radio';
 
 export { _RadioGroup as RadioGroup, _Radio as Radio, Radios };
