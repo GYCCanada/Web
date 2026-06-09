@@ -32,7 +32,7 @@ export default function Index() {
   const { team, board } = useLoaderData<typeof loader>();
   return (
     <Main className="gap-10">
-      <div className="mx-auto flex h-[700px] w-[--width] flex-col md:h-[478px] md:pt-0">
+      <div className="mx-auto flex h-[700px] w-(--width) flex-col md:h-[478px] md:pt-0">
         <img
           src="/team/group-van-2022.jpg"
           className="absolute inset-0 size-full object-cover md:object-top"

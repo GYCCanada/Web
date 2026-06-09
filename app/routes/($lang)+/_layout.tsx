@@ -81,7 +81,7 @@ function TopNav() {
 
   return (
     <header className="bg-background text-foreground w-full">
-      <nav className="mx-auto flex h-[60px] w-[--width] items-center justify-between gap-4 px-3 py-2">
+      <nav className="mx-auto flex h-[60px] w-(--width) items-center justify-between gap-4 px-3 py-2">
         <Link to="/">
           <img
             src="/logo/gycc-logo-small-red.png"
@@ -118,7 +118,7 @@ function PopupNav() {
 
   return (
     <header className="bg-background text-foreground w-full">
-      <nav className="mx-auto flex h-[60px] w-[--width] items-center justify-between gap-4 px-3 py-2">
+      <nav className="mx-auto flex h-[60px] w-(--width) items-center justify-between gap-4 px-3 py-2">
         <Link to="/">
           <img
             src="/logo/gycc-logo-small-red.png"
@@ -269,7 +269,7 @@ function Footer() {
   const { currentConference } = useLoaderData<typeof loader>();
   return (
     <footer className="bg-background text-foreground">
-      <div className="mx-auto flex w-[--width] flex-col gap-12 px-4 py-10">
+      <div className="mx-auto flex w-(--width) flex-col gap-12 px-4 py-10">
         <div className="flex flex-col gap-12 md:flex-row">
           <div className="flex flex-col gap-3 md:flex-1">
             <p>{translate('footer.copy')}</p>

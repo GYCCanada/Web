@@ -141,7 +141,7 @@ function DesktopHero() {
   const translate = useTranslate();
   return (
     <section className="full-bleed flex flex-col gap-10 p-4 pb-16">
-      <div className="mx-auto flex w-[--width] gap-10 py-16">
+      <div className="mx-auto flex w-(--width) gap-10 py-16">
         <div className="flex flex-1 flex-col gap-10">
           <LocalizedImage
             srcs={{

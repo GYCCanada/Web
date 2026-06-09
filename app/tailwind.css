@@ -1,102 +1,212 @@
 @import url('https://fonts.googleapis.com/css2?family=Work+Sans:ital,wght@0,100..900;1,100..900&display=swap');
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
+/* Preserve v3 `darkMode: 'class'` — the app toggles `.dark` on <html> (see root.tsx). */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * The custom palette is stored as raw `R G B` channel triples (`--ch-*`) so the
+ * `@theme` block below can wrap each in `rgb(...)` — this preserves the v3
+ * `rgb(var(--color-*) / <alpha-value>)` idiom, where v4 supplies the alpha
+ * channel automatically for opacity modifiers (e.g. `bg-accent-600/50`).
+ *
+ * Tokens whose value differs between light and dark (`background`, `foreground`,
+ * `button-*`, `input-*`, `radio-*`) are overridden under `.dark` here; the
+ * static palette ramps (`accent`, `link`, `wood`, `neutral`) do not change.
+ */
 @layer base {
   :root {
     --width: min(80rem, 100%);
-    --color-accent-50: 255 241 241;
-    --color-accent-100: 255 228 228;
-    --color-accent-200: 253 206 208;
-    --color-accent-300: 252 165 169;
-    --color-accent-400: 249 115 123;
-    --color-accent-500: 241 66 82;
-    --color-accent-600: 223 33 59;
-    --color-accent-700: 187 21 47;
-    --color-accent-800: 157 20 47;
-    --color-accent-900: 134 21 47;
-    --color-accent-950: 75 6 19;
 
-    --color-link-50: 237 248 255;
-    --color-link-100: 214 238 255;
-    --color-link-200: 182 226 255;
-    --color-link-300: 131 210 255;
-    --color-link-400: 73 184 255;
-    --color-link-500: 31 149 255;
-    --color-link-600: 7 117 255;
-    --color-link-700: 1 92 242;
-    --color-link-800: 8 74 197;
-    --color-link-900: 14 66 154;
-    --color-link-950: 14 41 93;
+    --ch-accent-50: 255 241 241;
+    --ch-accent-100: 255 228 228;
+    --ch-accent-200: 253 206 208;
+    --ch-accent-300: 252 165 169;
+    --ch-accent-400: 249 115 123;
+    --ch-accent-500: 241 66 82;
+    --ch-accent-600: 223 33 59;
+    --ch-accent-700: 187 21 47;
+    --ch-accent-800: 157 20 47;
+    --ch-accent-900: 134 21 47;
+    --ch-accent-950: 75 6 19;
 
-    --color-wood-50: 249 247 243;
-    --color-wood-100: 241 237 227;
-    --color-wood-200: 226 216 198;
-    --color-wood-300: 207 190 162;
-    --color-wood-400: 187 159 124;
-    --color-wood-500: 173 137 98;
-    --color-wood-600: 160 119 86;
-    --color-wood-700: 133 97 73;
-    --color-wood-800: 109 80 63;
-    --color-wood-900: 89 66 53;
-    --color-wood-950: 47 33 27;
+    --ch-link-50: 237 248 255;
+    --ch-link-100: 214 238 255;
+    --ch-link-200: 182 226 255;
+    --ch-link-300: 131 210 255;
+    --ch-link-400: 73 184 255;
+    --ch-link-500: 31 149 255;
+    --ch-link-600: 7 117 255;
+    --ch-link-700: 1 92 242;
+    --ch-link-800: 8 74 197;
+    --ch-link-900: 14 66 154;
+    --ch-link-950: 14 41 93;
 
-    --color-neutral-50: 250 250 250;
-    --color-neutral-100: 250 250 250;
-    --color-neutral-200: 244 244 245;
-    --color-neutral-300: 228 228 231;
-    --color-neutral-400: 228 228 231;
-    --color-neutral-500: 228 228 231;
-    --color-neutral-600: 161 161 170;
-    --color-neutral-700: 113 113 122;
-    --color-neutral-800: 39 39 42;
-    --color-neutral-900: 24 24 27;
-    --color-neutral-950: 9 9 11;
+    --ch-wood-50: 249 247 243;
+    --ch-wood-100: 241 237 227;
+    --ch-wood-200: 226 216 198;
+    --ch-wood-300: 207 190 162;
+    --ch-wood-400: 187 159 124;
+    --ch-wood-500: 173 137 98;
+    --ch-wood-600: 160 119 86;
+    --ch-wood-700: 133 97 73;
+    --ch-wood-800: 109 80 63;
+    --ch-wood-900: 89 66 53;
+    --ch-wood-950: 47 33 27;
 
-    --color-background: 250 250 250;
-    --color-foreground: 9 9 11;
+    --ch-neutral-50: 250 250 250;
+    --ch-neutral-100: 250 250 250;
+    --ch-neutral-200: 244 244 245;
+    --ch-neutral-300: 228 228 231;
+    --ch-neutral-400: 228 228 231;
+    --ch-neutral-500: 228 228 231;
+    --ch-neutral-600: 161 161 170;
+    --ch-neutral-700: 113 113 122;
+    --ch-neutral-800: 39 39 42;
+    --ch-neutral-900: 24 24 27;
+    --ch-neutral-950: 9 9 11;
 
-    --color-button-background: var(--color-neutral-900);
-    --color-button-foreground: var(--color-neutral-50);
-    --color-button-background-hover: var(--color-neutral-800);
-    --color-button-background-active: var(--color-neutral-800);
+    --ch-background: 250 250 250;
+    --ch-foreground: 9 9 11;
 
-    --color-input-background: var(--color-neutral-50);
-    --color-input-foreground: var(--color-neutral-950);
-    --color-input-placeholder: var(--color-neutral-600);
+    --ch-button-background: var(--ch-neutral-900);
+    --ch-button-foreground: var(--ch-neutral-50);
+    --ch-button-background-hover: var(--ch-neutral-800);
+    --ch-button-background-active: var(--ch-neutral-800);
 
-    --color-radio-background: var(--color-neutral-50);
-    --color-radio-foreground: var(--color-neutral-950);
-    --color-radio-border: var(--color-neutral-950);
+    --ch-input-background: var(--ch-neutral-50);
+    --ch-input-foreground: var(--ch-neutral-950);
+    --ch-input-placeholder: var(--ch-neutral-600);
+
+    --ch-radio-background: var(--ch-neutral-50);
+    --ch-radio-foreground: var(--ch-neutral-950);
+    --ch-radio-border: var(--ch-neutral-950);
   }
 
   .dark {
-    --color-background: 9 9 11;
-    --color-foreground: 250 250 250;
+    --ch-background: 9 9 11;
+    --ch-foreground: 250 250 250;
 
-    --color-button-background: var(--color-neutral-100);
-    --color-button-foreground: var(--color-neutral-900);
-    --color-button-background-hover: var(--color-neutral-300);
-    --color-button-background-active: var(--color-neutral-300);
+    --ch-button-background: var(--ch-neutral-100);
+    --ch-button-foreground: var(--ch-neutral-900);
+    --ch-button-background-hover: var(--ch-neutral-300);
+    --ch-button-background-active: var(--ch-neutral-300);
 
-    --color-input-background: var(--color-neutral-900);
-    --color-input-foreground: var(--color-neutral-50);
-    --color-input-placeholder: var(--color-neutral-600);
+    --ch-input-background: var(--ch-neutral-900);
+    --ch-input-foreground: var(--ch-neutral-50);
+    --ch-input-placeholder: var(--ch-neutral-600);
 
-    --color-radio-background: var(--color-neutral-900);
-    --color-radio-foreground: var(--color-neutral-50);
-    --color-radio-border: var(--color-neutral-50);
+    --ch-radio-background: var(--ch-neutral-900);
+    --ch-radio-foreground: var(--ch-neutral-50);
+    --ch-radio-border: var(--ch-neutral-50);
   }
 }
 
+/*
+ * Port of the v3 `tailwind.config.js` theme.extend.colors. `inline` makes the
+ * generated utilities substitute these definitions directly, so each colour
+ * resolves through the `--ch-*` channel triple above — keeping light/dark
+ * overrides live without re-listing the ramps.
+ */
+@theme inline {
+  --color-background: rgb(var(--ch-background));
+  --color-foreground: rgb(var(--ch-foreground));
+
+  --color-accent-50: rgb(var(--ch-accent-50));
+  --color-accent-100: rgb(var(--ch-accent-100));
+  --color-accent-200: rgb(var(--ch-accent-200));
+  --color-accent-300: rgb(var(--ch-accent-300));
+  --color-accent-400: rgb(var(--ch-accent-400));
+  --color-accent-500: rgb(var(--ch-accent-500));
+  --color-accent-600: rgb(var(--ch-accent-600));
+  --color-accent-700: rgb(var(--ch-accent-700));
+  --color-accent-800: rgb(var(--ch-accent-800));
+  --color-accent-900: rgb(var(--ch-accent-900));
+  --color-accent-950: rgb(var(--ch-accent-950));
+
+  --color-link-50: rgb(var(--ch-link-50));
+  --color-link-100: rgb(var(--ch-link-100));
+  --color-link-200: rgb(var(--ch-link-200));
+  --color-link-300: rgb(var(--ch-link-300));
+  --color-link-400: rgb(var(--ch-link-400));
+  --color-link-500: rgb(var(--ch-link-500));
+  --color-link-600: rgb(var(--ch-link-600));
+  --color-link-700: rgb(var(--ch-link-700));
+  --color-link-800: rgb(var(--ch-link-800));
+  --color-link-900: rgb(var(--ch-link-900));
+  --color-link-950: rgb(var(--ch-link-950));
+
+  --color-neutral-50: rgb(var(--ch-neutral-50));
+  --color-neutral-100: rgb(var(--ch-neutral-100));
+  --color-neutral-200: rgb(var(--ch-neutral-200));
+  --color-neutral-300: rgb(var(--ch-neutral-300));
+  --color-neutral-400: rgb(var(--ch-neutral-400));
+  --color-neutral-500: rgb(var(--ch-neutral-500));
+  --color-neutral-600: rgb(var(--ch-neutral-600));
+  --color-neutral-700: rgb(var(--ch-neutral-700));
+  --color-neutral-800: rgb(var(--ch-neutral-800));
+  --color-neutral-900: rgb(var(--ch-neutral-900));
+  --color-neutral-950: rgb(var(--ch-neutral-950));
+
+  --color-wood-50: rgb(var(--ch-wood-50));
+  --color-wood-100: rgb(var(--ch-wood-100));
+  --color-wood-200: rgb(var(--ch-wood-200));
+  --color-wood-300: rgb(var(--ch-wood-300));
+  --color-wood-400: rgb(var(--ch-wood-400));
+  --color-wood-500: rgb(var(--ch-wood-500));
+  --color-wood-600: rgb(var(--ch-wood-600));
+  --color-wood-700: rgb(var(--ch-wood-700));
+  --color-wood-800: rgb(var(--ch-wood-800));
+  --color-wood-900: rgb(var(--ch-wood-900));
+  --color-wood-950: rgb(var(--ch-wood-950));
+
+  --color-button-background: rgb(var(--ch-button-background));
+  --color-button-foreground: rgb(var(--ch-button-foreground));
+  --color-button-background-hover: rgb(var(--ch-button-background-hover));
+  --color-button-background-active: rgb(var(--ch-button-background-active));
+
+  --color-input-background: rgb(var(--ch-input-background));
+  --color-input-foreground: rgb(var(--ch-input-foreground));
+  --color-input-placeholder: rgb(var(--ch-input-placeholder));
+
+  --color-radio-background: rgb(var(--ch-radio-background));
+  --color-radio-foreground: rgb(var(--ch-radio-foreground));
+  --color-radio-border: rgb(var(--ch-radio-border));
+}
+
 @layer base {
+  /*
+   * v4 changed the default border/divide colour from `gray-200` to
+   * `currentColor`. Restore the v3 default so bare `border`/`divide` utilities
+   * render identically to before this migration.
+   */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+
+  /*
+   * v4 also changed the default focus-ring colour: the `ring-*` utilities now
+   * fall back to `currentColor` instead of v3's `rgb(59 130 246 / 0.5)`
+   * (blue-500/50). Primitives that reference an undefined `ring-ring` token
+   * (select trigger, checkbox — both copied from a shadcn template; gyc never
+   * defined a `ring` colour in v3) therefore lost their blue focus ring. The
+   * shadcn semantic tokens (`--color-ring`, `--color-input`, …) are introduced
+   * in P4 when those primitives are rebuilt on base-ui; until then, restore the
+   * v3 global default so `ring-ring` falls back to blue and the rendered look is
+   * unchanged. (`button.tsx`'s `focus:ring-accent-500` sets `--tw-ring-color`
+   * explicitly and is unaffected.)
+   */
   * {
     position: relative;
     flex-shrink: 0;
     min-width: 0;
     min-height: 0;
+    --tw-ring-color: rgb(59 130 246 / 0.5);
   }
   body {
     display: flex;

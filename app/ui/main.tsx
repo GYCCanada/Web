@@ -10,7 +10,7 @@ export function Main({
   return (
     <main
       className={clsx(
-        'bg-wood-50 flex flex-col overflow-y-auto pb-16 dark:bg-neutral-800 [&>*:not(.full-bleed)]:mx-auto [&>*:not(.full-bleed)]:w-[--width] md:[&>section]:px-16',
+        'bg-wood-50 flex flex-col overflow-y-auto pb-16 dark:bg-neutral-800 [&>*:not(.full-bleed)]:mx-auto [&>*:not(.full-bleed)]:w-(--width) md:[&>section]:px-16',
         className,
       )}
     >
