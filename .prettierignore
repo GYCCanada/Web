@@ -1,8 +1,0 @@
-coverage
-public
-dist
-build
-pnpm-lock.yaml
-.github
-.vscode
-*.yml

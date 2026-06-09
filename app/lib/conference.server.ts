@@ -313,7 +313,11 @@ export const getCurrentConference = (locale: Locale): Conference => {
   if (currentConferenceIndex === -1) {
     currentConferenceIndex = conferences.length - 1;
   }
-  return conferences[currentConferenceIndex][locale];
+  const conference = conferences[currentConferenceIndex];
+  if (!conference) {
+    throw new Error('No conferences are configured');
+  }
+  return conference[locale];
 };
 
 export const getConferenceByYear = (

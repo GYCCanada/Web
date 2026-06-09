@@ -1,5 +1,5 @@
-import { redirect } from '@remix-run/react';
-import type { Params } from '@remix-run/react';
+import { redirect } from 'react-router';
+import type { Params } from 'react-router';
 
 import { root } from './translations';
 
@@ -43,13 +43,13 @@ export const getTranslation = <T extends Translations>(
   lang: Locale;
   translation: T[Locale];
 } => {
-  const lang = (params.lang || Locale.En) as Locale;
+  const lang = (params['lang'] || Locale.En) as Locale;
   assertValidLocale(lang);
   return { lang, translation: translations[lang] };
 };
 
 export const getLocale = (params: Params): Locale => {
-  const lang = (params.lang || Locale.En) as Locale;
+  const lang = (params['lang'] || Locale.En) as Locale;
   assertValidLocale(lang);
   return lang;
 };

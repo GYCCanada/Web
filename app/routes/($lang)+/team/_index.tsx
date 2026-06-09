@@ -1,5 +1,4 @@
-import type { MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { type MetaFunction, useLoaderData } from 'react-router';
 
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';

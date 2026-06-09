@@ -5,16 +5,18 @@ import {
   useForm,
 } from '@conform-to/react';
 import { parseWithZod } from '@conform-to/zod';
-import type { ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Form, useActionData, useLoaderData } from '@remix-run/react';
+import { Effect } from 'effect';
 import { InfoIcon } from 'lucide-react';
+import { Form, type MetaFunction, useActionData, useLoaderData } from 'react-router';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
+import { ReactRouterContext } from '~/lib/effect/router-context';
+import { routeAction } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import type { TranslationKey } from '~/lib/localization/translations';
-import { sendMail } from '~/lib/mailer.server';
+import { Mailer } from '~/lib/mailer.server';
 import { redirectWithToast } from '~/lib/toast.server';
 import { Button } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
@@ -146,8 +148,11 @@ export const loader = () => {
   };
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const formData = await request.formData();
+export const action = routeAction(function* () {
+  const { request } = yield* ReactRouterContext;
+  const mailer = yield* Mailer;
+
+  const formData = yield* Effect.promise(() => request.formData());
   const submission = parseWithZod(formData, { schema });
 
   if (submission.status !== 'success') {
@@ -156,8 +161,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const data = submission.value;
 
-  try {
-    await sendMail({
+  const result = yield* Effect.exit(
+    mailer.send({
       subject: `[!] Volunteer Request from ${data.name}`,
       content: `Name: ${data.name}\n${match(data)
         .with({ method: 'email' }, (d) => `Email: ${d.email}`)
@@ -170,21 +175,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         \nLocation: ${data.location}
         \nPositions: ${data.positions.join(', ')}
         `,
-    });
-  } catch (error) {
-    console.error('Error sending email', error);
+    }),
+  );
+  if (result._tag === 'Failure') {
+    yield* Effect.logError('Error sending email', result.cause);
     return submission.reply({
       formErrors: ['contact.form.error'],
     });
   }
 
-  return redirectWithToast(new URL(request.url).pathname, {
-    description: 'volunteer.form.success.description' satisfies TranslationKey,
-    title: 'volunteer.form.success.title' satisfies TranslationKey,
-    type: 'success',
-    form: 'volunteer',
-  });
-};
+  return yield* Effect.promise(() =>
+    redirectWithToast(new URL(request.url).pathname, {
+      description: 'volunteer.form.success.description' satisfies TranslationKey,
+      title: 'volunteer.form.success.title' satisfies TranslationKey,
+      type: 'success',
+      form: 'volunteer',
+    }),
+  );
+});
 
 export default function Index() {
   const translate = useTranslate();
@@ -245,6 +253,7 @@ export default function Index() {
                   options: data.positions.map((p) => p.title),
                 }).map((props, i) => {
                   const position = data.positions[i];
+                  if (!position) return null;
                   return (
                     <div
                       key={position.title}

@@ -1,5 +1,5 @@
-import { Link as LinkComponent, useLocation } from '@remix-run/react';
-import type { LinkProps } from '@remix-run/react';
+import { Link as LinkComponent, useLocation } from 'react-router';
+import type { LinkProps } from 'react-router';
 import * as React from 'react';
 
 import { Locale } from '~/lib/localization/localization';

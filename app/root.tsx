@@ -1,12 +1,12 @@
-import type { LoaderFunctionArgs } from '@remix-run/node';
 import {
-  json,
+  data,
   Links,
+  type LoaderFunctionArgs,
   Meta,
   Outlet,
   Scripts,
   useLoaderData,
-} from '@remix-run/react';
+} from 'react-router';
 
 import { ClientHintCheck, getHints } from './lib/client-hints';
 import { Main } from './ui/main';
@@ -19,7 +19,7 @@ import { Toaster } from './ui/toaster';
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { toast, headers: toastHeaders } = await getToast(request);
-  return json(
+  return data(
     {
       requestInfo: {
         hints: getHints(request),

@@ -1,20 +1,28 @@
 import { FormProvider, useForm } from '@conform-to/react';
 import { parseWithZod } from '@conform-to/zod';
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Form, useActionData, useLoaderData } from '@remix-run/react';
+import { Effect } from 'effect';
 import clsx from 'clsx';
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import * as React from 'react';
+import {
+  Form,
+  type LoaderFunctionArgs,
+  type MetaFunction,
+  useActionData,
+  useLoaderData,
+} from 'react-router';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
 import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
+import { ReactRouterContext } from '~/lib/effect/router-context';
+import { routeAction } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import type { TranslationKey } from '~/lib/localization/translations';
-import { subscribeToNewsletter } from '~/lib/mailchimp.server';
+import { Mailchimp } from '~/lib/mailchimp.server';
 import { redirectWithToast } from '~/lib/toast.server';
 import { Button, buttonStyle } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
@@ -44,8 +52,11 @@ export const loader = ({ params }: LoaderFunctionArgs) => {
   };
 };
 
-export const action = async ({ request }: LoaderFunctionArgs) => {
-  const formData = await request.formData();
+export const action = routeAction(function* () {
+  const { request } = yield* ReactRouterContext;
+  const mailchimp = yield* Mailchimp;
+
+  const formData = yield* Effect.promise(() => request.formData());
   const submission = parseWithZod(formData, { schema });
 
   if (submission.status !== 'success') {
@@ -56,22 +67,24 @@ export const action = async ({ request }: LoaderFunctionArgs) => {
 
   const data = submission.value;
 
-  try {
-    await subscribeToNewsletter(data.email, data.name);
-    return redirectWithToast(new URL(request.url).pathname, {
+  const result = yield* Effect.exit(mailchimp.subscribe(data.email, data.name));
+  if (result._tag === 'Failure') {
+    yield* Effect.logError('newsletter subscribe failed', result.cause);
+    return submission.reply({
+      formErrors: ['main.newsletter.error' satisfies TranslationKey],
+    });
+  }
+
+  return yield* Effect.promise(() =>
+    redirectWithToast(new URL(request.url).pathname, {
       type: 'success',
       title: 'main.newsletter.success.title' satisfies TranslationKey,
       description:
         'main.newsletter.success.description' satisfies TranslationKey,
       form: 'newsletter-form',
-    });
-  } catch (e) {
-    console.error(e);
-    return submission.reply({
-      formErrors: ['main.newsletter.error' satisfies TranslationKey],
-    });
-  }
-};
+    }),
+  );
+});
 
 export default function Index() {
   const translate = useTranslate();

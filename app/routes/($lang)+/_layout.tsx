@@ -1,10 +1,10 @@
-import type { LoaderFunctionArgs } from '@remix-run/node';
 import {
+  type LoaderFunctionArgs,
   Outlet,
   Link as RLink,
   useLoaderData,
   useLocation,
-} from '@remix-run/react';
+} from 'react-router';
 import dayjs from 'dayjs';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
@@ -29,7 +29,7 @@ import { Portal } from '~/ui/portal';
 export const loader = ({ params }: LoaderFunctionArgs) => {
   const translation = getTranslation(params, root);
   const currentConference = getCurrentConference(
-    ((params.lang as Locale) || undefined) ?? Locale.En,
+    ((params['lang'] as Locale) || undefined) ?? Locale.En,
   );
   return { ...translation, currentConference };
 };

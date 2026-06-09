@@ -19,12 +19,14 @@ function findNearestBreakpointSrc(
   }
 
   for (let i = index; i < keys.length; i++) {
-    if (images[keys[i]]) {
-      return images[keys[i]];
+    const key = keys[i];
+    if (key !== undefined && images[key]) {
+      return images[key];
     }
   }
 
-  return images[keys[0]];
+  const firstKey = keys[0];
+  return firstKey !== undefined ? images[firstKey] : undefined;
 }
 
 interface LocalizedImageProps extends Omit<React.ComponentProps<'img'>, 'src'> {

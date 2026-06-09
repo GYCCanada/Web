@@ -1,14 +1,16 @@
 import { FormProvider, FormStateInput, useForm } from '@conform-to/react';
 import { parseWithZod } from '@conform-to/zod';
-import type { ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Form, useActionData } from '@remix-run/react';
+import { Effect } from 'effect';
+import { Form, type MetaFunction, useActionData } from 'react-router';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 
+import { ReactRouterContext } from '~/lib/effect/router-context';
+import { routeAction } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import type { TranslationKey } from '~/lib/localization/translations';
-import { sendMail } from '~/lib/mailer.server';
+import { Mailer } from '~/lib/mailer.server';
 import { redirectWithToast } from '~/lib/toast.server';
 import { Button } from '~/ui/button';
 import { ExternalLink } from '~/ui/external-link';
@@ -98,8 +100,11 @@ export const meta: MetaFunction = ({ params }) => {
   ];
 };
 
-export async function action({ request }: ActionFunctionArgs) {
-  const formData = await request.formData();
+export const action = routeAction(function* () {
+  const { request } = yield* ReactRouterContext;
+  const mailer = yield* Mailer;
+
+  const formData = yield* Effect.promise(() => request.formData());
   const submission = parseWithZod(formData, { schema });
 
   if (submission.status !== 'success') {
@@ -108,8 +113,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const data = submission.value;
 
-  try {
-    await sendMail({
+  const result = yield* Effect.exit(
+    mailer.send({
       subject: `[!] Contact Inquiry from ${data.name}`,
       content: `Name: ${data.name}\n${match(data)
         .with(
@@ -121,21 +126,24 @@ export async function action({ request }: ActionFunctionArgs) {
         .with({ method: 'phone' }, (d) => `Phone: ${d.phone}`)
         .with({ method: 'both' }, (d) => `Email: ${d.email}\nPhone: ${d.phone}`)
         .exhaustive()}\nMessage: ${data.message}`,
-    });
-  } catch (error) {
-    console.error('Error sending email', error);
+    }),
+  );
+  if (result._tag === 'Failure') {
+    yield* Effect.logError('Error sending email', result.cause);
     return submission.reply({
       formErrors: ['contact.form.error'],
     });
   }
 
-  return redirectWithToast(new URL(request.url).pathname, {
-    description: 'contact.form.success.description' satisfies TranslationKey,
-    title: 'contact.form.success.title' satisfies TranslationKey,
-    type: 'success',
-    form: 'contact',
-  });
-}
+  return yield* Effect.promise(() =>
+    redirectWithToast(new URL(request.url).pathname, {
+      description: 'contact.form.success.description' satisfies TranslationKey,
+      title: 'contact.form.success.title' satisfies TranslationKey,
+      type: 'success',
+      form: 'contact',
+    }),
+  );
+});
 
 export default function Index() {
   const translate = useTranslate();

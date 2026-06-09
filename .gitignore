@@ -133,9 +133,12 @@ dist
 .pnpm-store
 .DS_Store
 
-# App build output (Remix client/server bundles)
+# App build output (React Router client/server bundles)
 /build
 /.cache
+
+# React Router generated route types
+/.react-router
 
 # Local workflow scripts (not part of the app)
 .claude/

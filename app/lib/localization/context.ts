@@ -1,4 +1,4 @@
-import { useParams } from '@remix-run/react';
+import { useParams } from 'react-router';
 import * as React from 'react';
 
 import { Locale } from './localization';
@@ -48,5 +48,5 @@ export function useTranslate(): <Key extends TranslationKey>(
 export function useLocale(): Locale {
   const params = useParams();
 
-  return (params.lang || Locale.En) as Locale;
+  return (params['lang'] || Locale.En) as Locale;
 }

@@ -1,41 +1,64 @@
+import { Context, Effect, Layer, Option, Redacted, Schema } from 'effect';
 import nodemailer from 'nodemailer';
 
-import { env } from './env.server';
+import { Env } from './env.server';
 
-let transporter: nodemailer.Transporter;
+export class MailError extends Schema.TaggedErrorClass<MailError>()(
+  'gycc/lib/mailer.server/MailError',
+  { message: Schema.String },
+) {}
 
-if (env.NODE_ENV === 'production') {
-  const host = env.MAIL_HOST;
-  const port = env.MAIL_PORT;
-  const user = env.MAIL_USER;
-  const pass = env.MAIL_PASS;
-
-  const options = {
-    host: host,
-    port: port,
-    secure: port === 465 ? true : false,
-    auth: {
-      user: user,
-      pass: pass,
-    },
-  };
-  transporter = nodemailer.createTransport(options);
-}
-
-export async function sendMail({
-  subject,
-  content,
-}: {
-  subject: string;
-  content: string;
-}): Promise<void> {
-  if (env.NODE_ENV !== 'production') {
-    return;
+/**
+ * Contact / volunteer email sender, ported from the standalone
+ * `nodemailer` module to an Effect `Context.Service`.
+ *
+ * Behaviour preserved exactly: outside `production` `send` is a no-op (the old
+ * module returned early when `NODE_ENV !== 'production'`); in `production` it
+ * sends through the configured SMTP transport with the same
+ * `GYCC Contact <from>` envelope.
+ */
+export class Mailer extends Context.Service<
+  Mailer,
+  {
+    readonly send: (input: {
+      readonly subject: string;
+      readonly content: string;
+    }) => Effect.Effect<void, MailError>;
   }
-  await transporter.sendMail({
-    from: `GYCC Contact <${env.MAIL_FROM}>`,
-    to: env.MAIL_TO,
-    subject,
-    text: content,
-  });
+>()('gycc/lib/mailer.server/Mailer') {
+  static layer = Layer.effect(
+    Mailer,
+    Effect.gen(function* () {
+      const env = yield* Env;
+
+      if (!env.isProduction || Option.isNone(env.mail)) {
+        return Mailer.of({ send: () => Effect.void });
+      }
+
+      const mail = env.mail.value;
+      const transporter = nodemailer.createTransport({
+        host: mail.host,
+        port: mail.port,
+        secure: mail.port === 465,
+        auth: {
+          user: mail.user,
+          pass: Redacted.value(mail.pass),
+        },
+      });
+
+      return Mailer.of({
+        send: ({ subject, content }) =>
+          Effect.tryPromise({
+            try: () =>
+              transporter.sendMail({
+                from: `GYCC Contact <${mail.from}>`,
+                to: mail.to,
+                subject,
+                text: content,
+              }),
+            catch: (cause) => new MailError({ message: String(cause) }),
+          }).pipe(Effect.asVoid),
+      });
+    }),
+  );
 }

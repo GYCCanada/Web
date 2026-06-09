@@ -1,5 +1,3 @@
-import { serverOnly$ } from 'vite-env-only/macros';
-
 import type { Locale } from './localization';
 
 const en = {
@@ -688,7 +686,7 @@ const fr: Record<TranslationKey, string> = {
   'faq.question.3.answer.2': `Toutes les ventes de billets sont finales.`,
 };
 
-export const root = serverOnly$({
+export const root = {
   en,
   fr,
-} as const satisfies Record<Locale, Record<TranslationKey, string>>)!;
+} as const satisfies Record<Locale, Record<TranslationKey, string>>;

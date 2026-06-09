@@ -1,5 +1,9 @@
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData, useSearchParams } from '@remix-run/react';
+import {
+  type LoaderFunctionArgs,
+  type MetaFunction,
+  useLoaderData,
+  useSearchParams,
+} from 'react-router';
 import clsx from 'clsx';
 import {
   AnimatePresence,
@@ -492,7 +496,7 @@ const SpeakerCardVariants = {
 };
 
 function useCardRotation(
-  ref: React.RefObject<HTMLDivElement>,
+  ref: React.RefObject<HTMLDivElement | null>,
   isActive?: boolean,
 ) {
   const position = useMotionValue(20);
@@ -508,7 +512,7 @@ function useCardRotation(
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        if (entry.isIntersecting) {
+        if (entry?.isIntersecting) {
           isInViewport = true;
         } else {
           isInViewport = false;

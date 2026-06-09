@@ -1,5 +1,5 @@
-import { createCookieSessionStorage, redirect } from '@remix-run/node';
 import { nanoid } from 'nanoid';
+import { createCookieSessionStorage, redirect } from 'react-router';
 import { z } from 'zod';
 
 import { combineHeaders } from './misc.js';
@@ -24,7 +24,7 @@ export const toastSessionStorage = createCookieSessionStorage({
     path: '/',
     httpOnly: true,
     secrets: ['secret-key'],
-    secure: process.env.NODE_ENV === 'production',
+    secure: Bun.env.NODE_ENV === 'production',
   },
 });
 
