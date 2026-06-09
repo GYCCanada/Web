@@ -196,7 +196,7 @@ export default function RegistrationForm() {
 
   return (
     <Main className="gap-10 px-3 py-12 text-2xl md:px-16">
-      <h1>{translate('registration.form.title')}</h1>
+      <h1>{translate('registration.form.title', { year: 2024 })}</h1>
       <FormProvider context={form.context}>
         <Form
           method="POST"
