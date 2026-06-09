@@ -1,21 +1,31 @@
 import { Cause, Effect, Exit, Layer, ManagedRuntime } from 'effect';
 
+import { Content } from '~/lib/content.server';
 import { Env } from '~/lib/env.server';
 import { Mailchimp, MailchimpDisabled, MailchimpError } from '~/lib/mailchimp.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
+import { Storage } from '~/lib/storage.server';
 
 import { ReactRouterContext, type RouteArgs } from './router-context';
 
-export type AppServices = Env | Mailer | Mailchimp;
+export type AppServices = Env | Mailer | Mailchimp | Content;
 export type AppError =
   | Response
   | MailError
   | MailchimpError
   | MailchimpDisabled;
 
-const AppLayer = Layer.mergeAll(Mailer.layer, Mailchimp.layer).pipe(
-  Layer.provideMerge(Env.layer),
-);
+// `Content` reads through `Storage` and falls back to bundled defaults when no
+// bucket is configured (D3). `Storage.layerOptional` therefore never fails to
+// build — bucket-less, it provides a disabled storage whose reads report
+// `NotFound`, which `Content` recovers from — so the runtime boots identically
+// with or without a bucket. `Storage` is provided *into* `Content` and not
+// re-exported, so it is not an `AppServices` requirement routes must satisfy.
+const AppLayer = Layer.mergeAll(
+  Mailer.layer,
+  Mailchimp.layer,
+  Content.layer.pipe(Layer.provide(Storage.layerOptional)),
+).pipe(Layer.provideMerge(Env.layer));
 const AppRuntime = ManagedRuntime.make(AppLayer);
 
 const isResponse = (v: unknown): v is Response =>

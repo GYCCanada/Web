@@ -6,7 +6,6 @@ import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import * as React from 'react';
 import {
   Form,
-  type LoaderFunctionArgs,
   type MetaFunction,
   useActionData,
   useLoaderData,
@@ -15,10 +14,10 @@ import { match } from 'ts-pattern';
 import { z } from 'zod';
 
 import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
-import { getCurrentConference } from '~/lib/conference.server';
+import { Content } from '~/lib/content.server';
 import { dayjs } from '~/lib/dayjs';
 import { ReactRouterContext } from '~/lib/effect/router-context';
-import { routeAction } from '~/lib/effect/route';
+import { routeAction, routeHandler } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import type { TranslationKey } from '~/lib/localization/translations';
@@ -45,12 +44,14 @@ export const meta: MetaFunction<typeof loader> = ({ data, params }) => {
   ];
 };
 
-export const loader = ({ params }: LoaderFunctionArgs) => {
+export const loader = routeHandler(function* () {
+  const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
+  const content = yield* Content;
   return {
-    conference: getCurrentConference(locale),
+    conference: yield* content.getCurrentConference(locale),
   };
-};
+});
 
 export const action = routeAction(function* () {
   const { request, url } = yield* ReactRouterContext;

@@ -8,14 +8,15 @@ import { parseWithZod } from '@conform-to/zod';
 import {
   type ActionFunctionArgs,
   Form,
-  type LoaderFunctionArgs,
   type MetaFunction,
   useActionData,
 } from 'react-router';
 import dayjs from 'dayjs';
 import { z } from 'zod';
 
-import { getCurrentConference } from '~/lib/conference.server';
+import { Content } from '~/lib/content.server';
+import { ReactRouterContext } from '~/lib/effect/router-context';
+import { routeHandler } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import { Button } from '~/ui/button';
@@ -47,13 +48,15 @@ export const meta: MetaFunction<typeof loader> = ({ params }) => {
   ];
 };
 
-export const loader = async ({ params }: LoaderFunctionArgs) => {
+export const loader = routeHandler(function* () {
+  const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
-  const conference = getCurrentConference(locale);
+  const content = yield* Content;
+  const conference = yield* content.getCurrentConference(locale);
   return {
     conference,
   };
-};
+});
 
 export const action = async (_args: ActionFunctionArgs) => {};
 

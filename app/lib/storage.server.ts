@@ -302,4 +302,38 @@ export class Storage extends Context.Service<
       });
     }),
   );
+
+  /**
+   * A `Storage` that never fails to *build*: it uses the real bucket-backed
+   * `layer` when a bucket is configured, and a **disabled** in-bucket-less
+   * instance otherwise (where every read reports `NotFound` and every write
+   * fails `StorageError`). This is the layer the always-on `Content` service
+   * (C3) composes: the CMS is optional everywhere, so `Storage` must be present
+   * in the application context even without a bucket — callers then degrade to
+   * bundled defaults on the `NotFound`, rather than the whole runtime failing to
+   * build on `StorageUnconfigured` (`make-impossible-states-unrepresentable`,
+   * D3). The admin write path (C4/C5) is only reachable when a bucket *is*
+   * configured, so the disabled writes are unreachable there.
+   */
+  static layerOptional = Storage.layer.pipe(
+    Layer.catchCause(() =>
+      Layer.succeed(
+        Storage,
+        Storage.of({
+          get: (key) => Effect.fail(new NotFound({ key })),
+          put: (key) =>
+            Effect.fail(
+              new StorageError({
+                key,
+                op: 'put',
+                message: 'storage unconfigured',
+              }),
+            ),
+          head: () => Effect.succeed(Option.none()),
+          list: () => Effect.succeed([]),
+          delete: () => Effect.void,
+        }),
+      ),
+    ),
+  );
 }

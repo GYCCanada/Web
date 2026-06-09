@@ -1,10 +1,10 @@
 import { type MetaFunction, useLoaderData } from 'react-router';
 
+import { Content } from '~/lib/content.server';
+import { routeHandler } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import { Main } from '~/ui/main';
-
-import { board, team } from './team.server';
 
 export const meta: MetaFunction = ({ params }) => {
   const lang = getLocale(params);
@@ -20,12 +20,10 @@ export const meta: MetaFunction = ({ params }) => {
   ];
 };
 
-export const loader = () => {
-  return {
-    team,
-    board,
-  };
-};
+export const loader = routeHandler(function* () {
+  const content = yield* Content;
+  return yield* content.getTeam();
+});
 
 export default function Index() {
   const translate = useTranslate();

@@ -328,15 +328,50 @@ export const Meta = Schema.Struct({
 export type Meta = typeof Meta.Type;
 
 /**
+ * The conference slugs the public routes are built to serve. Each `/YYYY` route
+ * (`_index` via `getCurrentConference`, plus the explicit `/2024` `/2025`
+ * `/2026` pages via `getConference(locale, year)`) requires its conference to be
+ * present in the document; the `SiteContent` filter below rejects any document
+ * that omits one. This is the single source of truth for "which conferences the
+ * site needs", so the boundary invariant and the routes cannot drift
+ * (`derive-dont-sync`).
+ */
+export const REQUIRED_CONFERENCE_SLUGS = ['/2024', '/2025', '/2026'] as const;
+
+/**
  * The whole editable site as one bilingual document. The encoded form is the
  * JSON stored at `content/site.json`; the decoded form is what the `Content`
  * service hands to the routes (C3).
+ *
+ * The struct-level filter is the C3 boundary's semantic gate
+ * (`make-impossible-states-unrepresentable`, `boundary-discipline`): a document
+ * whose `conferences` array decodes cleanly but is empty, or omits one of the
+ * slugs the routes serve, is NOT a usable site — the `Content` selectors
+ * (`getCurrentConference`, `getConference(year)`) would throw on it downstream
+ * of the read pipeline's recovery. Rejecting it HERE (during decode) lets the
+ * `Content` service's read-path `catchCause` fall back to the bundled defaults
+ * rather than caching a document that 500s the public site on the next request.
  */
+const requiredConferencesFilter = Schema.makeFilter<{
+  readonly conferences: ReadonlyArray<{ readonly slug: string }>;
+}>(
+  ({ conferences }) => {
+    const present = new Set(conferences.map((conference) => conference.slug));
+    const missing = REQUIRED_CONFERENCE_SLUGS.filter(
+      (slug) => !present.has(slug),
+    );
+    return missing.length === 0
+      ? undefined
+      : `SiteContent must include a conference for each served slug; missing ${missing.join(', ')}`;
+  },
+  { title: 'SiteContent' },
+);
+
 export const SiteContent = Schema.Struct({
   meta: Meta,
   conferences: Schema.Array(Conference),
   team: Schema.Array(TeamMember),
   board: Schema.Array(Schema.NonEmptyString),
   translations: Translations,
-});
+}).check(requiredConferencesFilter);
 export type SiteContent = typeof SiteContent.Type;
