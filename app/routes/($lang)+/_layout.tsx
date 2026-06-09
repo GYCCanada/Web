@@ -142,39 +142,35 @@ function PopupNav() {
           <Portal>
             <AnimatePresence>
               {open ? (
-                <motion.div
-                  variants={{
-                    hidden: { opacity: 0 },
-                    show: {
-                      opacity: 1,
-                      transition: {
-                        staggerChildren: 0.1,
-                        ease: 'easeInOut',
-                        type: 'tween',
-                        stiffness: 100,
-                        damping: 20,
-                      },
-                    },
-                  }}
-                  initial="hidden"
-                  animate="show"
-                  exit="hidden"
+                <motion.nav
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
                   transition={{ duration: 0.2 }}
                   className="bg-background text-foreground fixed inset-x-0 top-[60px] flex h-[calc(100%_-_60px)] flex-1 flex-col justify-center gap-10 p-4"
                 >
-                  <NavItem to={`/${new Date().getFullYear()}`}>
-                    {translate('nav.home', {
-                      year: new Date().getFullYear(),
-                    })}
-                  </NavItem>
-                  <NavItem to="/about">{translate('nav.about')}</NavItem>
-                  <NavItem to="/team">{translate('nav.team')}</NavItem>
-                  <NavItem to="/contact">{translate('nav.contact')}</NavItem>
-                  <NavItem to="/give">{translate('nav.give')}</NavItem>
-                  <NavItem to="/volunteer">
-                    {translate('nav.volunteer')}
-                  </NavItem>
-                </motion.div>
+                  {[
+                    {
+                      to: `/${new Date().getFullYear()}`,
+                      label: translate('nav.home', {
+                        year: new Date().getFullYear(),
+                      }),
+                    },
+                    { to: '/about', label: translate('nav.about') },
+                    { to: '/team', label: translate('nav.team') },
+                    { to: '/contact', label: translate('nav.contact') },
+                    { to: '/give', label: translate('nav.give') },
+                    { to: '/volunteer', label: translate('nav.volunteer') },
+                  ].map((item, index) => (
+                    <NavItem
+                      key={item.to}
+                      to={item.to}
+                      revealDelay={index * STAGGER_STEP}
+                    >
+                      {item.label}
+                    </NavItem>
+                  ))}
+                </motion.nav>
               ) : null}
             </AnimatePresence>
           </Portal>
@@ -221,13 +217,33 @@ function getNextLocalePath(path: string, nextLocale: Locale): string {
 
 const MotionLink = motion(Link);
 
+/** Per-link delay (seconds) for the staggered PopupNav reveal. */
+const STAGGER_STEP = 0.1;
+
 function NavItem({
   to,
   children,
+  revealDelay,
   ...props
 }: {
   to: string;
   children: React.ReactNode;
+  /**
+   * When set, the link self-drives its enter animation (hidden -> show) with
+   * this delay (seconds), reproducing the PopupNav staggered reveal.
+   *
+   * The reveal is driven per-link rather than via the parent's
+   * `staggerChildren` because Framer Motion's variant-child orchestration does
+   * not propagate reliably through a `motion()`-wrapped custom forwardRef
+   * component (our `Link`): the parent registers the children but the variant
+   * animation stalls at `hidden` (opacity:0) — the original
+   * "mobile-nav-links-invisible" regression. Self-driving with an explicit
+   * staggered delay restores the visual identity (ADR 0002) without depending
+   * on that orchestration channel.
+   *
+   * TopNav (desktop) omits this, so the links render statically as before.
+   */
+  revealDelay?: number;
   onClick?: () => void;
 }) {
   const location = useLocation();
@@ -250,10 +266,13 @@ function NavItem({
     <MotionLink
       {...props}
       to={activeLocale ? `/${activeLocale}${to}` : to}
-      variants={{
-        hidden: { opacity: 0, y: -10 },
-        show: { opacity: 1, y: 0 },
-      }}
+      {...(revealDelay !== undefined
+        ? {
+            initial: { opacity: 0, y: -10 },
+            animate: { opacity: 1, y: 0 },
+            transition: { delay: revealDelay, duration: 0.2, ease: 'easeInOut' },
+          }
+        : {})}
       className={
         'data-[active]:text-accent-600 hover:text-accent-500 active:text-accent-700 text-5xl font-medium duration-200 max-xl:uppercase xl:text-base'
       }
