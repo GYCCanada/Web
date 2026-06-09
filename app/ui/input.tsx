@@ -1,6 +1,6 @@
 import { Input as BaseInput } from '@base-ui/react/input';
 import clsx from 'clsx';
-import * as React from 'react';
+import type * as React from 'react';
 
 import { useTextField } from './text-field';
 
@@ -11,12 +11,15 @@ const variants = {
 
 export type InputVariant = keyof typeof variants;
 
-const Input = React.forwardRef<
-  HTMLInputElement,
-  Omit<BaseInput.Props, 'value' | 'defaultValue' | 'onChange'> & {
-    variant?: InputVariant;
-  }
->(function Input({ className, variant, ...props }, ref) {
+function Input({
+  className,
+  variant,
+  ref,
+  ...props
+}: Omit<BaseInput.Props, 'value' | 'defaultValue' | 'onChange'> & {
+  variant?: InputVariant;
+  ref?: React.Ref<HTMLInputElement>;
+}) {
   const { meta, control, variant: contextVariant, controlId } = useTextField();
   const resolvedVariant = variant ?? contextVariant ?? 'positive';
 
@@ -39,8 +42,6 @@ const Input = React.forwardRef<
       )}
     />
   );
-});
-
-Input.displayName = 'Input';
+}
 
 export { Input };

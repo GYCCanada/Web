@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import * as React from 'react';
+import type * as React from 'react';
 
 import { useTextField } from './text-field';
 
@@ -12,12 +12,18 @@ const variants = {
 
 export type InputVariant = keyof typeof variants;
 
-const TextArea = React.forwardRef<
-  HTMLTextAreaElement,
-  Omit<React.ComponentProps<'textarea'>, 'value' | 'defaultValue' | 'onChange'> & {
-    variant?: InputVariant;
-  }
->(function TextArea({ className, variant, ...props }, ref) {
+function TextArea({
+  className,
+  variant,
+  ref,
+  ...props
+}: Omit<
+  React.ComponentProps<'textarea'>,
+  'value' | 'defaultValue' | 'onChange'
+> & {
+  variant?: InputVariant;
+  ref?: React.Ref<HTMLTextAreaElement>;
+}) {
   const { meta, control, variant: contextVariant, controlId } = useTextField();
   const resolvedVariant = variant ?? contextVariant ?? 'positive';
 
@@ -36,8 +42,6 @@ const TextArea = React.forwardRef<
       className={clsx(base, variants[resolvedVariant], className)}
     />
   );
-});
-
-TextArea.displayName = 'TextArea';
+}
 
 export { TextArea };

@@ -1,4 +1,4 @@
-import * as React from 'react';
+import type * as React from 'react';
 
 import { useBreakpoint } from '~/lib/client-hints';
 import type { Breakpoint } from '~/lib/client-hints';
@@ -34,27 +34,28 @@ interface LocalizedImageProps extends Omit<React.ComponentProps<'img'>, 'src'> {
   srcs?: Record<Locale, string>;
 }
 
-const LocalizedImage = React.forwardRef<HTMLImageElement, LocalizedImageProps>(
-  function Image({ srcs, breakpointSrcs, ...props }, ref) {
-    const locale = useLocale();
-    const breakpoint = useBreakpoint();
-    const localeSrc = srcs?.[locale];
-    const breakpoints = breakpointSrcs?.[locale];
-    const breakpointSrc = breakpoints
-      ? findNearestBreakpointSrc(breakpoints, breakpoint)
-      : undefined;
-    const src = breakpointSrc ?? localeSrc;
+function LocalizedImage({
+  srcs,
+  breakpointSrcs,
+  ref,
+  ...props
+}: LocalizedImageProps & { ref?: React.Ref<HTMLImageElement> }) {
+  const locale = useLocale();
+  const breakpoint = useBreakpoint();
+  const localeSrc = srcs?.[locale];
+  const breakpoints = breakpointSrcs?.[locale];
+  const breakpointSrc = breakpoints
+    ? findNearestBreakpointSrc(breakpoints, breakpoint)
+    : undefined;
+  const src = breakpointSrc ?? localeSrc;
 
-    return (
-      <img
-        ref={ref}
-        src={src}
-        {...props}
-      />
-    );
-  },
-);
-
-LocalizedImage.displayName = 'LocalizedImage';
+  return (
+    <img
+      ref={ref}
+      src={src}
+      {...props}
+    />
+  );
+}
 
 export { LocalizedImage };

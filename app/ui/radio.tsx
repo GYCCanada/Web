@@ -7,19 +7,22 @@ import * as React from 'react';
 import type { InputVariant } from './input';
 import { TextFieldContext } from './text-field';
 
-const _RadioGroup = React.forwardRef<
-  HTMLDivElement,
-  Omit<BaseRadioGroup.Props, 'value' | 'defaultValue' | 'onValueChange'> & {
-    name?: string;
-    variant?: InputVariant;
-    orientation?: 'horizontal' | 'vertical';
-    defaultValue?: string;
-    value?: string;
-  }
->(function _RadioGroup(
-  { className, variant = 'negative', orientation, defaultValue, value, ...props },
+function _RadioGroup({
+  className,
+  variant = 'negative',
+  orientation,
+  defaultValue,
+  value,
   ref,
-) {
+  ...props
+}: Omit<BaseRadioGroup.Props, 'value' | 'defaultValue' | 'onValueChange'> & {
+  name?: string;
+  variant?: InputVariant;
+  orientation?: 'horizontal' | 'vertical';
+  defaultValue?: string;
+  value?: string;
+  ref?: React.Ref<HTMLDivElement>;
+}) {
   const [meta] = useField<string | string[]>(props.name ?? '');
   const control = useInputControl(meta);
   const labelId = React.useId();
@@ -51,31 +54,37 @@ const _RadioGroup = React.forwardRef<
       />
     </TextFieldContext.Provider>
   );
-});
-_RadioGroup.displayName = 'RadioGroup';
+}
 
-const Radios = React.forwardRef<HTMLDivElement, { children: React.ReactNode }>(
-  function Radios({ children }, ref) {
-    return (
-      <div
-        ref={ref}
-        className="flex group-aria-[orientation=horizontal]:flex-row group-aria-[orientation=vertical]:flex-col group-aria-[orientation=horizontal]:gap-4 group-aria-[orientation=vertical]:gap-2.5"
-        style={{
-          gridArea: 'radio',
-        }}
-      >
-        {children}
-      </div>
-    );
-  },
-);
+function Radios({
+  children,
+  ref,
+}: {
+  children: React.ReactNode;
+  ref?: React.Ref<HTMLDivElement>;
+}) {
+  return (
+    <div
+      ref={ref}
+      className="flex group-aria-[orientation=horizontal]:flex-row group-aria-[orientation=vertical]:flex-col group-aria-[orientation=horizontal]:gap-4 group-aria-[orientation=vertical]:gap-2.5"
+      style={{
+        gridArea: 'radio',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
-Radios.displayName = 'Radios';
-
-const _Radio = React.forwardRef<
-  HTMLButtonElement,
-  BaseRadio.Root.Props & { children?: React.ReactNode }
->(function _Radio({ className, children, ...props }, ref) {
+function _Radio({
+  className,
+  children,
+  ref,
+  ...props
+}: BaseRadio.Root.Props & {
+  children?: React.ReactNode;
+  ref?: React.Ref<HTMLButtonElement>;
+}) {
   return (
     <BaseRadio.Root
       ref={ref}
@@ -91,8 +100,6 @@ const _Radio = React.forwardRef<
       {children}
     </BaseRadio.Root>
   );
-});
-
-_Radio.displayName = 'Radio';
+}
 
 export { _RadioGroup as RadioGroup, _Radio as Radio, Radios };

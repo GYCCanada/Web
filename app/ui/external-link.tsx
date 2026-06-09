@@ -1,13 +1,14 @@
 import clsx from 'clsx';
-import * as React from 'react';
+import type * as React from 'react';
 
 export const linkStyle =
   'dark:text-link-500 dark:hover:text-link-600 dark:active:text-link-700 text-link-700 hover:text-link-600 active:text-link-800 duration-200 hover:underline active:underline';
 
-export const ExternalLink = React.forwardRef<
-  HTMLAnchorElement,
-  React.ComponentProps<'a'>
->(function ExternalLink({ className, ...props }, ref) {
+export function ExternalLink({
+  className,
+  ref,
+  ...props
+}: React.ComponentProps<'a'> & { ref?: React.Ref<HTMLAnchorElement> }) {
   return (
     <a
       target="_blank"
@@ -17,4 +18,4 @@ export const ExternalLink = React.forwardRef<
       className={clsx(linkStyle, className)}
     />
   );
-});
+}

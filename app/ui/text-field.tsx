@@ -38,14 +38,19 @@ export function useTextField() {
   return context;
 }
 
-const _TextField = React.forwardRef<
-  HTMLDivElement,
-  Omit<React.ComponentProps<'div'>, 'children'> & {
-    name?: string;
-    variant?: InputVariant;
-    children?: React.ReactNode;
-  }
->(function TextField({ className, name, variant, children, ...props }, ref) {
+function _TextField({
+  className,
+  name,
+  variant,
+  children,
+  ref,
+  ...props
+}: Omit<React.ComponentProps<'div'>, 'children'> & {
+  name?: string;
+  variant?: InputVariant;
+  children?: React.ReactNode;
+  ref?: React.Ref<HTMLDivElement>;
+}) {
   const [meta] = useField<string | string[]>(name ?? '');
   const control = useInputControl(meta);
   const controlId = React.useId();
@@ -65,9 +70,7 @@ const _TextField = React.forwardRef<
       </div>
     </TextFieldContext.Provider>
   );
-});
-
-_TextField.displayName = 'TextField';
+}
 
 export const TextField = Object.assign(_TextField, {
   Input: Input,
