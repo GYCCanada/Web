@@ -4,7 +4,6 @@ import {
   useLoaderData,
   useSearchParams,
 } from 'react-router';
-import clsx from 'clsx';
 import {
   AnimatePresence,
   motion,
@@ -24,7 +23,6 @@ import { useLocale, useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import { buttonStyle } from '~/ui/button';
 import { ExternalLink } from '~/ui/external-link';
-import { LocalizedImage } from '~/ui/image';
 import { Link } from '~/ui/link';
 import { Main } from '~/ui/main';
 
@@ -195,6 +193,8 @@ function DesktopHero() {
 
 // 1. two column section with hotel info & map on right hand side (one column on mobile)
 // 2. change early bird to normal rates
+// Dormant scaffolding: wired into the page when 2026 venue/map content is set.
+// eslint-disable-next-line no-unused-vars
 function MapSection() {
   const translate = useTranslate();
   return (
@@ -237,6 +237,8 @@ function MapSection() {
   );
 }
 
+// Dormant scaffolding: rendered when the 2026 speaker/seminar lineup is set (TBD).
+// eslint-disable-next-line no-unused-vars
 function SpeakersAndSeminars() {
   const { conference } = useLoaderData<typeof loader>();
   const translate = useTranslate();
@@ -559,6 +561,8 @@ function useCardRotation(
   };
 }
 
+// Dormant scaffolding: rendered when 2026 registration windows/pricing are set.
+// eslint-disable-next-line no-unused-vars
 function RegistrationSection() {
   const translate = useTranslate();
 
