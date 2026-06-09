@@ -5,11 +5,11 @@ import { Content } from '~/lib/content.server';
 import { Env } from '~/lib/env.server';
 import { Mailchimp, MailchimpDisabled, MailchimpError } from '~/lib/mailchimp.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
-import { Storage } from '~/lib/storage.server';
+import { NotFound, Storage, StorageError } from '~/lib/storage.server';
 
 import { ReactRouterContext, type RouteArgs } from './router-context';
 
-export type AppServices = Env | Mailer | Mailchimp | Content | Auth;
+export type AppServices = Env | Mailer | Mailchimp | Content | Auth | Storage;
 export type AppError =
   | Response
   | MailError
@@ -17,21 +17,29 @@ export type AppError =
   | MailchimpDisabled
   | AdminDisabled
   | Unauthorized
-  | BadPassword;
+  | BadPassword
+  | StorageError
+  | NotFound;
 
-// `Content` reads through `Storage` and falls back to bundled defaults when no
-// bucket is configured (D3). `Storage.layerOptional` therefore never fails to
-// build — bucket-less, it provides a disabled storage whose reads report
-// `NotFound`, which `Content` recovers from — so the runtime boots identically
-// with or without a bucket. `Storage` is provided *into* `Content` and not
-// re-exported, so it is not an `AppServices` requirement routes must satisfy.
+// `Storage.layerOptional` never fails to *build*: bucket-less it provides a
+// disabled storage whose reads report `NotFound` and whose writes fail
+// `StorageError`, so the runtime boots identically with or without a bucket
+// (D3). It is provided once and shared by BOTH `Content` (the public read path,
+// which recovers `NotFound` → bundled defaults) and the `/admin` editor (C5 —
+// the write path: save-draft / publish / image upload). The admin write surface
+// is only *reachable* when `Auth` is enabled (`ADMIN_PASSWORD` + `COOKIE_SECRET`
+// set), independent of the bucket; the editor still surfaces a `StorageError`
+// when an admin is configured without a bucket, rather than silently dropping a
+// save.
 //
 // `Auth` is likewise optional everywhere: with `ADMIN_PASSWORD` unset its layer
 // builds a disabled instance (admin 404s), so it never fails to build either.
+const StorageLive = Storage.layerOptional;
 const AppLayer = Layer.mergeAll(
   Mailer.layer,
   Mailchimp.layer,
-  Content.layer.pipe(Layer.provide(Storage.layerOptional)),
+  Content.layer.pipe(Layer.provide(StorageLive)),
+  StorageLive,
   Auth.layer,
 ).pipe(Layer.provideMerge(Env.layer));
 const AppRuntime = ManagedRuntime.make(AppLayer);

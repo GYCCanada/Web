@@ -24,6 +24,7 @@ import { dayjs } from './dayjs';
 import { assertValidLocale } from './localization/localization';
 import type { Locale } from './localization/localization';
 import { Storage } from './storage.server';
+import type { ObjectHead } from './storage.server';
 
 /**
  * The deep module the public routes talk to (CMS plan §"Services", decision
@@ -132,8 +133,18 @@ export type Translation = Record<string, string>;
 // Document → boundary conversion (`derive-dont-sync`, `boundary-discipline`)
 // ---------------------------------------------------------------------------
 
-/** A bucket key (`2024/x.png`) → the served URL today's HTML renders (`/2024/x.png`). */
-const assetUrl = (key: string): string => `/${key}`;
+/**
+ * Resolve a bucket object key (`2024/speakers/matt.png`) to the URL the HTML
+ * renders (`/images/2024/speakers/matt.png`). Every managed image is served
+ * through the Effect server's `GET /images/*` route (C5, mirroring
+ * paulo-suzanne's `bucketResponse`): it streams the bucket object when present
+ * and falls back to the bundled `public/<key>` file otherwise. So a bucket-less
+ * dev/prod still serves today's `public/` art (the default keys map 1:1 onto the
+ * `public/` tree), while an uploaded image at the same key transparently
+ * overrides it — with no change to any component (`derive-dont-sync`,
+ * `boundary-discipline`).
+ */
+const assetUrl = (key: string): string => `/images/${key}`;
 
 /**
  * Widen an ISO calendar date to the existing end-of-day-UTC millisecond the
@@ -263,6 +274,23 @@ const selectByYear = (
 export const SITE_CONTENT_KEY = 'content/site.json';
 
 /**
+ * The bucket key the *unpublished* draft lives at. The `/admin` editor (C5)
+ * writes here on "Save draft" and reads here first so an in-progress edit
+ * survives a reload without going live; "Publish" promotes the draft to
+ * `SITE_CONTENT_KEY` and removes it. The public read path
+ * (`getSiteContent`) never reads the draft.
+ */
+export const SITE_CONTENT_DRAFT_KEY = 'content/site.draft.json';
+
+/** Where the editor's content originated, for the admin banner. */
+export type AdminContentSource = 'draft' | 'published' | 'defaults';
+
+export interface AdminContent {
+  readonly content: SiteContentType;
+  readonly source: AdminContentSource;
+}
+
+/**
  * Cache TTL. Short by design (D3 — runtime read with cache, no redeploy): a
  * publish becomes visible on the next read after the TTL elapses (or an
  * explicit bust, added with the editor in C5). 30s keeps the bucket-read rate
@@ -293,6 +321,20 @@ export class Content extends Context.Service<
       readonly team: readonly TeamMember[];
       readonly board: readonly string[];
     }>;
+    /**
+     * Load the document the `/admin` editor edits: the unpublished draft if one
+     * exists, else the published document, else the bundled defaults. Unlike
+     * the public read path this is NOT cached and NOT converted to the legacy
+     * boundary shape — the editor edits the raw `SiteContent` document.
+     */
+    readonly getAdminContent: () => Effect.Effect<AdminContent>;
+    /**
+     * Invalidate the public read cache so the next `getSiteContent` re-reads the
+     * bucket. Called by the editor's publish action so a publish is visible
+     * immediately, with no redeploy and without waiting out the TTL (D3,
+     * `make-operations-idempotent` — busting an already-empty cache is a no-op).
+     */
+    readonly bust: () => Effect.Effect<void>;
   }
 >()('gycc/lib/content.server/Content') {
   static layer = Layer.effect(
@@ -301,6 +343,20 @@ export class Content extends Context.Service<
       const storage = yield* Storage;
       const cache = yield* Ref.make<Option.Option<CacheEntry>>(Option.none());
       const refreshLock = yield* Semaphore.make(1);
+      /**
+       * Monotonic publish-epoch counter (`derive-dont-sync`,
+       * `serialize-shared-state-mutations`). `bust()` increments it; a refresh
+       * snapshots it *before* its bucket read and only commits the freshly-read
+       * document to the cache if the epoch is unchanged when it goes to write.
+       * This closes the publish/refresh race: a refresh that read the document
+       * the bucket held *before* a concurrent publish cannot repopulate the
+       * cache with that now-stale document, because the publish's `bust()` will
+       * have advanced the epoch in between — the refresh observes the change and
+       * leaves the cache empty so the very next read re-fetches the published
+       * document (D3 — a publish is visible on the next read, never stale for a
+       * full TTL).
+       */
+      const epoch = yield* Ref.make(0);
 
       /**
        * Read + decode the document from the bucket, falling back to the bundled
@@ -315,20 +371,36 @@ export class Content extends Context.Service<
        * failures and any defect so the read is total — the public site always
        * gets a `SiteContent`.
        */
-      const fetchDocument: Effect.Effect<SiteContentType> = Effect.gen(
-        function* () {
-          const object = yield* storage.get(SITE_CONTENT_KEY);
+      /**
+       * Read + decode the `SiteContent` document at `key`, or `Option.none()`
+       * when it is absent / unreadable / malformed. Shared by the public read
+       * path (which maps `none` to the bundled defaults) and the admin read
+       * path (which tries the draft, then the published key, then defaults).
+       */
+      const readDocument = (
+        key: string,
+      ): Effect.Effect<Option.Option<SiteContentType>> =>
+        Effect.gen(function* () {
+          const object = yield* storage.get(key);
           const json = yield* Effect.promise(() =>
             new Response(object.stream).text(),
           );
           return yield* decodeDocument(json);
-        },
+        }).pipe(
+          Effect.map(Option.some),
+          Effect.catchCause((cause) =>
+            Effect.logWarning(
+              `Content: could not read ${key}`,
+              cause,
+            ).pipe(Effect.as(Option.none<SiteContentType>())),
+          ),
+        );
+
+      const fetchDocument: Effect.Effect<SiteContentType> = readDocument(
+        SITE_CONTENT_KEY,
       ).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning(
-            'Content: falling back to bundled defaults',
-            cause,
-          ).pipe(Effect.as(defaultContent)),
+        Effect.map((document) =>
+          Option.getOrElse(document, () => defaultContent),
         ),
       );
 
@@ -362,9 +434,26 @@ export class Content extends Context.Service<
                 return afterLock.value.value;
               }
 
+              // Snapshot the publish epoch *before* reading the bucket. If a
+              // concurrent publish busts the cache while this read is in flight,
+              // the epoch advances and we must NOT cache the value we just read
+              // (it predates the publish). We still return it to *this* caller —
+              // it is a coherent decoded document — but we leave the cache empty
+              // so the next read re-fetches the published document.
+              const readEpoch = yield* Ref.get(epoch);
               const value = yield* fetchDocument;
               const loadedAt = yield* Clock.currentTimeMillis;
-              yield* Ref.set(cache, Option.some({ value, loadedAt }));
+              // Commit the cache write only if no bust intervened during the
+              // read. `bust()` advances the epoch under the *same* `refreshLock`
+              // this fiber holds, so it cannot interleave between this check and
+              // the store; a bust that lands while `fetchDocument` is in flight
+              // raises the epoch above `readEpoch`, and we skip the write —
+              // leaving the cache empty so the next read re-fetches the freshly
+              // published document.
+              const currentEpoch = yield* Ref.get(epoch);
+              if (currentEpoch === readEpoch) {
+                yield* Ref.set(cache, Option.some({ value, loadedAt }));
+              }
               return value;
             }),
           );
@@ -403,12 +492,88 @@ export class Content extends Context.Service<
           };
         });
 
+      /**
+       * Load the document the `/admin` editor edits, reconciling draft vs
+       * published by their bucket `lastModified` rather than by the mere
+       * *presence* of a draft object (`derive-dont-sync`,
+       * `make-impossible-states-unrepresentable`).
+       *
+       * A draft represents pending unpublished edits **only when it is strictly
+       * newer than the published document** — i.e. it was saved after the last
+       * publish. The publish path deletes the draft best-effort, but correctness
+       * must not depend on that delete succeeding: a draft left behind by a
+       * failed delete, or a stale draft that predates the current published doc,
+       * is older-or-equal and is therefore ignored, so the editor opens from the
+       * published document and a subsequent save/publish can never overwrite the
+       * live content with stale draft values. A draft with no published document
+       * to compare against is always a valid edit source.
+       *
+       * (Bucket `lastModified` is second-granular on some backends, so a draft
+       * saved and published within the same second compares equal — the strict
+       * `>` then drops the ambiguous draft in favour of the just-published live
+       * content, the safe direction.)
+       */
+      const getAdminContent = (): Effect.Effect<AdminContent> =>
+        Effect.gen(function* () {
+          const draft = yield* readDocument(SITE_CONTENT_DRAFT_KEY);
+          const published = yield* readDocument(SITE_CONTENT_KEY);
+
+          if (Option.isSome(draft)) {
+            if (Option.isNone(published)) {
+              return { content: draft.value, source: 'draft' as const };
+            }
+            const draftHead = yield* storage
+              .head(SITE_CONTENT_DRAFT_KEY)
+              .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
+            const publishedHead = yield* storage
+              .head(SITE_CONTENT_KEY)
+              .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
+            const draftIsNewer =
+              Option.isSome(draftHead) &&
+              Option.isSome(publishedHead) &&
+              draftHead.value.lastModified.getTime() >
+                publishedHead.value.lastModified.getTime();
+            if (draftIsNewer) {
+              return { content: draft.value, source: 'draft' as const };
+            }
+            return { content: published.value, source: 'published' as const };
+          }
+
+          if (Option.isSome(published)) {
+            return { content: published.value, source: 'published' as const };
+          }
+          return { content: defaultContent, source: 'defaults' as const };
+        });
+
+      // Drop the cached document AND advance the publish epoch so the next
+      // public read re-fetches the bucket (D3 — a publish is visible on the very
+      // next read). Both steps run *under* `refreshLock`, the same permit a
+      // refresh holds while it reads the bucket and writes the cache. This
+      // closes the publish/refresh race (`serialize-shared-state-mutations`): a
+      // bust cannot interleave between a refresh's epoch-check and its cache
+      // store, so it either runs *before* the refresh snapshots the epoch (the
+      // refresh then sees the new bucket document) or *after* the refresh
+      // commits — in which case it raises the epoch the refresh had snapshotted
+      // and clears the just-cached stale document. Either way the stale,
+      // pre-publish document can never survive in the cache.
+      // (`make-operations-idempotent`: busting an already-empty cache, or
+      // double-busting, is harmless — it just clears `none` and bumps a counter.)
+      const bust = (): Effect.Effect<void> =>
+        refreshLock.withPermits(1)(
+          Effect.gen(function* () {
+            yield* Ref.update(epoch, (current) => current + 1);
+            yield* Ref.set(cache, Option.none());
+          }),
+        );
+
       return Content.of({
         getSiteContent,
         getConference,
         getCurrentConference,
         getTranslations,
         getTeam,
+        getAdminContent,
+        bust,
       });
     }),
   );
