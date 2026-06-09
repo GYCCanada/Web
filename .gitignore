@@ -130,7 +130,9 @@ dist
 .pnp.*
 
 
-.nx/cache
 .pnpm-store
-apps/cms/pnpm-lock.yaml
 .DS_Store
+
+# App build output (Remix client/server bundles)
+/build
+/.cache
