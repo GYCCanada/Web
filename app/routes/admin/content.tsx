@@ -95,20 +95,19 @@ const issueMessages = (cause: Cause.Cause<unknown>): readonly string[] => {
 
 export const loader = routeHandler(function* () {
   const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth;
+  const auth = yield* Auth.Service;
   // 404 the whole area when disabled; the layout guard already redirected an
   // unauthenticated visitor, but re-checking keeps this route safe on its own.
   yield* auth.checkCookie(request.headers.get('cookie')).pipe(
     Effect.catchTags({
-      'gycc/lib/auth.server/AdminDisabled': () =>
+      'Auth.Disabled': () =>
         Effect.fail(new Response('Not Found', { status: 404 })),
-      'gycc/lib/auth.server/Unauthorized': () =>
-        Effect.fail(redirect('/admin/login')),
+      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
     }),
   );
 
-  const content = yield* Content;
-  const env = yield* Env;
+  const content = yield* Content.Service;
+  const env = yield* Env.Service;
   const { content: document, source } = yield* content.getAdminContent();
   const encoded = yield* encodeDocument(document);
 
@@ -122,18 +121,17 @@ export const loader = routeHandler(function* () {
 
 export const action = routeAction(function* () {
   const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth;
+  const auth = yield* Auth.Service;
   yield* auth.checkCookie(request.headers.get('cookie')).pipe(
     Effect.catchTags({
-      'gycc/lib/auth.server/AdminDisabled': () =>
+      'Auth.Disabled': () =>
         Effect.fail(new Response('Not Found', { status: 404 })),
-      'gycc/lib/auth.server/Unauthorized': () =>
-        Effect.fail(redirect('/admin/login')),
+      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
     }),
   );
 
-  const content = yield* Content;
-  const storage = yield* Storage;
+  const content = yield* Content.Service;
+  const storage = yield* Storage.Service;
   const form = yield* Effect.promise(() => request.formData());
   const intent = String(form.get('intent') ?? 'save-draft');
 

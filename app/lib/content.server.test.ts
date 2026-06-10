@@ -12,6 +12,7 @@ import { HexColour, SiteContent } from './content/schema';
 import type { SiteContent as SiteContentType } from './content/schema';
 import { dayjs } from './dayjs';
 import { NotFound, Storage, StorageError } from './storage.server';
+import { layerTest } from './storage.test-helper';
 
 /**
  * The `Content` service is the single read path for the public site (C3). These
@@ -36,8 +37,8 @@ const encodeDoc = (doc: SiteContentType): Promise<string> =>
 
 /** A `Storage` with no document — every read reports `NotFound` (bucket-less). */
 const emptyStorage = Layer.succeed(
-  Storage,
-  Storage.of({
+  Storage.Service,
+  Storage.Service.of({
     get: (key) => Effect.fail(new NotFound({ key })),
     put: (key) =>
       Effect.fail(
@@ -50,8 +51,8 @@ const emptyStorage = Layer.succeed(
 );
 
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Content | Storage>,
-  storageLayer: Layer.Layer<Storage>,
+  effect: Effect.Effect<A, E, Content.Service | Storage.Service>,
+  storageLayer: Layer.Layer<Storage.Service>,
 ) =>
   Effect.runPromise(
     Effect.scoped(
@@ -70,8 +71,8 @@ const run = <A, E>(
  * test hits the same backing store `Content` reads (publish → bust → read).
  */
 const runWithStorage = <A, E>(
-  effect: Effect.Effect<A, E, Content | Storage>,
-  storageLayer: Layer.Layer<Storage>,
+  effect: Effect.Effect<A, E, Content.Service | Storage.Service>,
+  storageLayer: Layer.Layer<Storage.Service>,
 ) =>
   Effect.runPromise(
     Effect.scoped(
@@ -86,7 +87,7 @@ describe('Content fallback (no document in bucket)', () => {
   it('serves the bundled defaults when the document is absent', async () => {
     const content = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getSiteContent();
       }),
       emptyStorage,
@@ -100,7 +101,7 @@ describe('Content fallback (no document in bucket)', () => {
         // Pin "now" to a date before the earliest conference so the
         // first-future-conference branch selects 2024 deterministically.
         yield* TestClock.setTime(dayjs('2024-01-01').valueOf());
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getCurrentConference('en');
       }),
       emptyStorage,
@@ -115,7 +116,7 @@ describe('Content fallback (no document in bucket)', () => {
     const conference = await run(
       Effect.gen(function* () {
         yield* TestClock.setTime(dayjs('2030-01-01').valueOf());
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getCurrentConference('en');
       }),
       emptyStorage,
@@ -131,10 +132,10 @@ describe('Content boundary conversion (decode → legacy shape)', () => {
     const json = await encodeDoc(defaultContent);
     const conference = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getConference('en', 2024);
       }),
-      Storage.layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
+      layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
     );
 
     // Dates widen to the exact end-of-day-UTC ms the route code formats.
@@ -158,10 +159,10 @@ describe('Content boundary conversion (decode → legacy shape)', () => {
     const json = await encodeDoc(defaultContent);
     const fr = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getConference('fr', 2024);
       }),
-      Storage.layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
+      layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
     );
     expect(fr.title).toBe("Tant qu'il fait jour");
     expect(fr.hero.image.desktop).toBe('/images/2024/fr/hero-desktop.jpg');
@@ -172,10 +173,10 @@ describe('Content boundary conversion (decode → legacy shape)', () => {
     const json = await encodeDoc(defaultContent);
     const conference = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getConference('en', 2026);
       }),
-      Storage.layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
+      layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
     );
     expect(conference.registration).toBeUndefined();
     expect(conference.title).toBe('Speak');
@@ -193,10 +194,10 @@ describe('Content boundary conversion (decode → legacy shape)', () => {
     const json = await encodeDoc(edited);
     const conference = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getConference('en', 2026);
       }),
-      Storage.layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
+      layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
     );
     expect(conference.theme).toBe('#123456');
   });
@@ -220,13 +221,13 @@ describe('Content fallback (semantically-invalid document)', () => {
     const json = invalidJson((doc) => ({ ...doc, conferences: [] }));
     const result = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         const site = yield* content.getSiteContent();
         // The selectors must not throw (they would 500 the public site).
         const current = yield* content.getCurrentConference('en');
         return { site, current };
       }),
-      Storage.layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
+      layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
     );
     expect(result.site).toEqual(defaultContent);
     // At the default TestClock time (epoch) every conference is still future, so
@@ -245,10 +246,10 @@ describe('Content fallback (semantically-invalid document)', () => {
     }));
     const conference = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getConference('en', 2026);
       }),
-      Storage.layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
+      layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
     );
     // The defaults' 2026 conference is served, not a 500.
     expect(conference.slug).toBe('/2026');
@@ -261,12 +262,12 @@ describe('Content translations + team selectors', () => {
     const json = await encodeDoc(defaultContent);
     const { translations, team } = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         const translations = yield* content.getTranslations('fr');
         const team = yield* content.getTeam();
         return { translations, team };
       }),
-      Storage.layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
+      layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
     );
 
     expect(translations['team.position.president']).toBe('Président');
@@ -281,10 +282,10 @@ describe('Content cache (TTL + single-flight)', () => {
   /** A `Storage` whose `get` count is observable, to assert caching. */
   const countingStorage = (json: string) =>
     Layer.effect(
-      Storage,
+      Storage.Service,
       Effect.gen(function* () {
         const calls = yield* Ref.make(0);
-        return Storage.of({
+        return Storage.Service.of({
           get: (key) =>
             key === SITE_CONTENT_KEY
               ? Ref.update(calls, (n) => n + 1).pipe(
@@ -317,7 +318,7 @@ describe('Content cache (TTL + single-flight)', () => {
     // built-in `Effect.cachedInvalidateWithTTL` provides both contracts.
     const result = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         const a = yield* content.getSiteContent();
         const b = yield* content.getSiteContent(); // cached — same reference
         yield* TestClock.adjust('31 seconds'); // past the 30s TTL
@@ -339,10 +340,10 @@ describe('Content cache (TTL + single-flight)', () => {
    */
   const mutableStorage = (initial: string) =>
     Layer.effect(
-      Storage,
+      Storage.Service,
       Effect.gen(function* () {
         const body = yield* Ref.make(initial);
-        return Storage.of({
+        return Storage.Service.of({
           get: (key) =>
             key === SITE_CONTENT_KEY
               ? Ref.get(body).pipe(
@@ -390,8 +391,8 @@ describe('Content cache (TTL + single-flight)', () => {
 
     const result = await runWithStorage(
       Effect.gen(function* () {
-        const content = yield* Content;
-        const storage = yield* Storage;
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
 
         const before = yield* content.getSiteContent(); // caches the original
         yield* storage.put(SITE_CONTENT_KEY, edited, 'application/json'); // publish
@@ -423,7 +424,7 @@ describe('Content cache (TTL + single-flight)', () => {
 
     const result = await runWithStorage(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         // Race many cold-cache reads at once; the built-in cache must collapse
         // them onto a single `fetchDocument`.
         const docs = yield* Effect.all(
@@ -447,7 +448,7 @@ describe('Content cache (TTL + single-flight)', () => {
 
 describe('Content admin read (draft → published → defaults)', () => {
   const adminStorage = (objects: Record<string, string>) =>
-    Storage.layerTest(
+    layerTest(
       Object.fromEntries(
         Object.entries(objects).map(([key, body]) => [key, { body }]),
       ),
@@ -456,7 +457,7 @@ describe('Content admin read (draft → published → defaults)', () => {
   it('falls back to the bundled defaults when nothing is stored', async () => {
     const result = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getAdminContent();
       }),
       adminStorage({}),
@@ -469,7 +470,7 @@ describe('Content admin read (draft → published → defaults)', () => {
     const published = await encodeDoc(defaultContent);
     const result = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getAdminContent();
       }),
       adminStorage({ [SITE_CONTENT_KEY]: published }),
@@ -488,8 +489,8 @@ describe('Content admin read (draft → published → defaults)', () => {
     // "I edited and saved a draft after the last publish" timeline.
     const result = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
-        const storage = yield* Storage;
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
         yield* TestClock.adjust('1 second');
         yield* storage.put(SITE_CONTENT_DRAFT_KEY, draft, 'application/json');
         return yield* content.getAdminContent();
@@ -516,8 +517,8 @@ describe('Content admin read (draft → published → defaults)', () => {
     const published = await encodeDoc(publishedDoc);
     const result = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
-        const storage = yield* Storage;
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
         // Draft written first…
         yield* storage.put(
           SITE_CONTENT_DRAFT_KEY,

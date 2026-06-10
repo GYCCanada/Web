@@ -17,7 +17,7 @@ export const headers = adminSecurityHeaders;
  */
 export const loader = routeHandler(function* () {
   const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth;
+  const auth = yield* Auth.Service;
   return yield* auth.checkCookie(request.headers.get('cookie')).pipe(
     Effect.match({
       onSuccess: () => redirect('/admin'),
@@ -36,7 +36,7 @@ export const loader = routeHandler(function* () {
  */
 export const action = routeAction(function* () {
   const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth;
+  const auth = yield* Auth.Service;
   const form = yield* Effect.promise(() => request.formData());
   const password = String(form.get('password') ?? '');
 

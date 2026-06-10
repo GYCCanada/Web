@@ -1,3 +1,5 @@
+export * as Env from './env.server';
+
 import { Config, Context, Effect, Layer, Option, Redacted } from 'effect';
 
 /**
@@ -110,43 +112,52 @@ const bucketConfig: Config.Config<Option.Option<BucketConfig>> = Config.all({
   ),
 );
 
-export class Env extends Context.Service<
-  Env,
+export class Service extends Context.Service<
+  Service,
   {
     readonly isProduction: boolean;
     readonly mail: Option.Option<MailConfig>;
     readonly mailchimp: Option.Option<MailchimpConfig>;
     readonly bucket: Option.Option<BucketConfig>;
   }
->()('gycc/lib/env.server/Env') {
-  static layer = Layer.effect(
-    Env,
-    Effect.gen(function* () {
-      const nodeEnv = yield* Config.string('NODE_ENV').pipe(
-        Config.withDefault('development'),
-      );
-      const isProduction = nodeEnv === 'production';
+>()('gycc/lib/env.server/Service') {}
 
-      // Bucket is optional in dev AND prod: a bucket-less prod still serves the
-      // bundled defaults, so it must never fail the layer at boot. `bucketConfig`
-      // already yields `Option.none()` whenever any required key is missing OR
-      // present-but-blank.
-      const bucket = yield* bucketConfig;
+/**
+ * The `Env` layer, read straight off the platform `Config` (opencode's
+ * module-level `export const layer`, `packages/core/src/git.ts:79`). It has no
+ * service dependencies, so `defaultLayer` is just `layer` — provided for shape
+ * parity with the other services so every consumer can pre-provide `Env`
+ * uniformly via `Env.defaultLayer`.
+ */
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const nodeEnv = yield* Config.string('NODE_ENV').pipe(
+      Config.withDefault('development'),
+    );
+    const isProduction = nodeEnv === 'production';
 
-      if (isProduction) {
-        const mail = yield* mailConfigRequired;
-        const mailchimp = yield* mailchimpConfigRequired;
-        return Env.of({
-          isProduction,
-          mail: Option.some(mail),
-          mailchimp: Option.some(mailchimp),
-          bucket,
-        });
-      }
+    // Bucket is optional in dev AND prod: a bucket-less prod still serves the
+    // bundled defaults, so it must never fail the layer at boot. `bucketConfig`
+    // already yields `Option.none()` whenever any required key is missing OR
+    // present-but-blank.
+    const bucket = yield* bucketConfig;
 
-      const mail = yield* Config.option(mailConfigRequired);
-      const mailchimp = yield* Config.option(mailchimpConfigRequired);
-      return Env.of({ isProduction, mail, mailchimp, bucket });
-    }),
-  );
-}
+    if (isProduction) {
+      const mail = yield* mailConfigRequired;
+      const mailchimp = yield* mailchimpConfigRequired;
+      return Service.of({
+        isProduction,
+        mail: Option.some(mail),
+        mailchimp: Option.some(mailchimp),
+        bucket,
+      });
+    }
+
+    const mail = yield* Config.option(mailConfigRequired);
+    const mailchimp = yield* Config.option(mailchimpConfigRequired);
+    return Service.of({ isProduction, mail, mailchimp, bucket });
+  }),
+);
+
+export const defaultLayer = layer;

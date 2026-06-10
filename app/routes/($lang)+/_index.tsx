@@ -47,7 +47,7 @@ export const meta: MetaFunction<typeof loader> = ({ data, params }) => {
 export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
-  const content = yield* Content;
+  const content = yield* Content.Service;
   return {
     conference: yield* content.getCurrentConference(locale),
   };
@@ -55,7 +55,7 @@ export const loader = routeHandler(function* () {
 
 export const action = routeAction(function* () {
   const { request, url } = yield* ReactRouterContext;
-  const mailchimp = yield* Mailchimp;
+  const mailchimp = yield* Mailchimp.Service;
 
   const formData = yield* Effect.promise(() => request.formData());
   const submission = parseWithZod(formData, { schema });

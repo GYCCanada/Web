@@ -21,7 +21,7 @@ export const meta: MetaFunction = ({ params }) => {
 };
 
 export const loader = routeHandler(function* () {
-  const content = yield* Content;
+  const content = yield* Content.Service;
   return yield* content.getTeam();
 });
 

@@ -9,7 +9,13 @@ import { NotFound, Storage, StorageError } from '~/lib/storage.server';
 
 import { ReactRouterContext, type RouteArgs } from './router-context';
 
-export type AppServices = Env | Mailer | Mailchimp | Content | Auth | Storage;
+export type AppServices =
+  | Env.Service
+  | Mailer.Service
+  | Mailchimp.Service
+  | Content.Service
+  | Auth.Service
+  | Storage.Service;
 export type AppError =
   | Response
   | MailError
@@ -21,25 +27,29 @@ export type AppError =
   | StorageError
   | NotFound;
 
-// `Storage.layerOptional` never fails to *build*: bucket-less it provides a
-// disabled storage whose reads report `NotFound` and whose writes fail
-// `StorageError`, so the runtime boots identically with or without a bucket
-// (D3). It is provided once and shared by BOTH `Content` (the public read path,
-// which recovers `NotFound` → bundled defaults) and the `/admin` editor (C5 —
-// the write path: save-draft / publish / image upload). The admin write surface
-// is only *reachable* when `Auth` is enabled (`ADMIN_PASSWORD` + `COOKIE_SECRET`
-// set), independent of the bucket; the editor still surfaces a `StorageError`
-// when an admin is configured without a bucket, rather than silently dropping a
-// save.
+// `Content.defaultLayer` wires the public read path: it is `Content.layer` with
+// its `Storage` dependency pre-provided as `Storage.layerOptional` (the
+// never-fails-to-build storage — bucket-less it reports `NotFound`, which the
+// read path recovers to the bundled defaults, D3), leaving only `Env` open for
+// the merge below to discharge.
+//
+// `Storage.layerOptional` is ALSO provided standalone here — a legit second
+// consumer (the `/admin` editor's write path: save-draft / publish / image
+// upload, plus any route that reads `Storage` directly). It is a separate
+// instance from the one inside `Content.defaultLayer`; both point at the same
+// bucket via `Env`, so there is no shared in-memory state to coordinate. The
+// admin write surface is only *reachable* when `Auth` is enabled
+// (`ADMIN_PASSWORD` + `COOKIE_SECRET` set), independent of the bucket; the
+// editor still surfaces a `StorageError` when an admin is configured without a
+// bucket, rather than silently dropping a save.
 //
 // `Auth` is likewise optional everywhere: with `ADMIN_PASSWORD` unset its layer
 // builds a disabled instance (admin 404s), so it never fails to build either.
-const StorageLive = Storage.layerOptional;
 const AppLayer = Layer.mergeAll(
   Mailer.layer,
   Mailchimp.layer,
-  Content.layer.pipe(Layer.provide(StorageLive)),
-  StorageLive,
+  Content.defaultLayer,
+  Storage.layerOptional,
   Auth.layer,
 ).pipe(Layer.provideMerge(Env.layer));
 const AppRuntime = ManagedRuntime.make(AppLayer);

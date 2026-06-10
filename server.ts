@@ -81,7 +81,7 @@ const fileResponse = Effect.fn('fileResponse')(function* (
 const bucketImageResponse = Effect.fn('bucketImageResponse')(function* (
   key: string,
 ) {
-  const storage = yield* Storage;
+  const storage = yield* Storage.Service;
   const obj = yield* storage.get(key);
   return HttpServerResponse.raw(obj.stream, {
     status: 200,
@@ -105,14 +105,14 @@ const imageResponse = Effect.fn('imageResponse')(function* () {
   // while a bucket-less dev/prod still serves the defaults (D3).
   const publicPath = `${isDev ? 'public' : CLIENT_PATH}/${key}`;
   return yield* bucketImageResponse(key).pipe(
-    Effect.catchTag('gycc/lib/storage.server/NotFound', () =>
+    Effect.catchTag('Storage.NotFound', () =>
       fileResponse(publicPath, mimeFor(key), 'public, max-age=300').pipe(
         Effect.catchTag('gycc/server/FileMissing', () =>
           Effect.succeed(HttpServerResponse.empty({ status: 404 })),
         ),
       ),
     ),
-    Effect.catchTag('gycc/lib/storage.server/StorageError', (e) =>
+    Effect.catchTag('Storage.Error', (e) =>
       Effect.logWarning('image bucket read failed, falling back to public', e).pipe(
         Effect.flatMap(() =>
           fileResponse(publicPath, mimeFor(key), 'public, max-age=300').pipe(
@@ -248,17 +248,17 @@ const RoutesLive = isDev ? DevRoutes : ProdRoutes;
 // (ADR 0004:38-40). Providing `Env.layer` discharges the requirement, so a
 // missing secret fails `Layer.launch` and `BunRuntime.runMain` exits non-zero.
 // In dev / test the env vars are optional, so this is a cheap no-op.
-const StartupCheck = Layer.effectDiscard(Env.asEffect()).pipe(
+const StartupCheck = Layer.effectDiscard(Env.Service.asEffect()).pipe(
   Layer.provide(Env.layer),
 );
 
-// The `/images/*` route reads through `Storage`. `Storage.layerOptional` never
+// The `/images/*` route reads through `Storage`. `Storage.defaultLayer` never
 // fails to build (bucket-less it serves `NotFound`, which the route recovers by
 // falling back to the bundled `public/<key>` file), so providing it here keeps
-// the server booting identically with or without a bucket (D3). It reads its
-// bucket config from `Env`, discharged with `Env.layer` so the storage layer is
-// self-contained.
-const StorageLive = Storage.layerOptional.pipe(Layer.provide(Env.layer));
+// the server booting identically with or without a bucket (D3). It is
+// `Storage.layerOptional` with its `Env` dependency pre-provided, so the
+// storage layer is self-contained.
+const StorageLive = Storage.defaultLayer;
 
 const ServerLive = HttpRouter.serve(RoutesLive).pipe(
   Layer.provide(StorageLive),

@@ -1,5 +1,6 @@
+export * as Storage from './storage.server';
+
 import {
-  Clock,
   Context,
   DateTime,
   Effect,
@@ -17,23 +18,26 @@ import { Env } from './env.server';
  * `put`, `head`, `list`, `delete` — that the `Content`/admin layers build on
  * (small-interface-deep-implementation).
  *
- * `static layer` reads the bucket config off the `Env` service. The bucket is
- * optional everywhere (the CMS degrades to bundled defaults without one), so a
- * `Storage` *instance* is only constructible when a bucket is configured: with
- * `Env.bucket` absent the layer fails with `StorageUnconfigured`, and callers
- * that want the degraded path (the `Content` service) decide not to require
- * `Storage` rather than holding a half-built one
+ * The module-level `layer` reads the bucket config off the `Env` service
+ * (opencode's strongest service convention — `export const layer` /
+ * `export const defaultLayer`, `packages/core/src/git.ts:347`, vs a `static`
+ * member). The bucket is optional everywhere (the CMS degrades to bundled
+ * defaults without one), so a `Storage` *instance* is only constructible when a
+ * bucket is configured: with `Env.bucket` absent the layer fails with
+ * `StorageUnconfigured`, and callers that want the degraded path (the `Content`
+ * service) decide not to require `Storage` rather than holding a half-built one
  * (make-impossible-states-unrepresentable).
  *
- * `static layerTest` is an in-memory `Map`, used by the unit tests and by any
- * service-level test that needs a real round-trip without a bucket.
+ * The in-memory test layer lives in `storage.test-helper.ts` (opencode keeps
+ * test layers under `test/`, per its AGENTS.md "test real impl"), so the
+ * production module never ships a `Map`-backed fake.
  */
 
 const StorageOp = Schema.Literals(['get', 'put', 'head', 'list', 'delete']);
 type StorageOp = typeof StorageOp.Type;
 
 export class StorageError extends Schema.TaggedErrorClass<StorageError>()(
-  'gycc/lib/storage.server/StorageError',
+  'Storage.Error',
   {
     key: Schema.String,
     op: StorageOp,
@@ -60,12 +64,12 @@ const isNoSuchKey = (e: unknown): boolean =>
   (e as { readonly code?: unknown }).code === 'NoSuchKey';
 
 export class NotFound extends Schema.TaggedErrorClass<NotFound>()(
-  'gycc/lib/storage.server/NotFound',
+  'Storage.NotFound',
   { key: Schema.String },
 ) {}
 
 export class StorageUnconfigured extends Schema.TaggedErrorClass<StorageUnconfigured>()(
-  'gycc/lib/storage.server/StorageUnconfigured',
+  'Storage.Unconfigured',
   {},
 ) {}
 
@@ -86,13 +90,6 @@ export interface ListedObject {
   readonly key: string;
   readonly size: number;
   readonly lastModified: Date;
-}
-
-export interface TestStoredObject {
-  readonly body: Uint8Array | string;
-  readonly contentType?: string;
-  readonly lastModified?: Date;
-  readonly etag?: string;
 }
 
 type ListClient = {
@@ -137,8 +134,8 @@ const listStoredObjects = Effect.fnUntraced(function* (
   return objects;
 });
 
-export class Storage extends Context.Service<
-  Storage,
+export class Service extends Context.Service<
+  Service,
   {
     readonly get: (key: string) => Effect.Effect<StoredObject, StorageError | NotFound>;
     readonly put: (
@@ -152,196 +149,135 @@ export class Storage extends Context.Service<
     readonly list: (prefix?: string) => Effect.Effect<readonly ListedObject[], StorageError>;
     readonly delete: (key: string) => Effect.Effect<void, StorageError>;
   }
->()('gycc/lib/storage.server/Storage') {
-  static layerTest = (objects: Record<string, TestStoredObject> = {}) =>
-    Layer.sync(Storage, () => {
-      const entries = new Map<string, Required<TestStoredObject>>();
-      for (const [key, object] of Object.entries(objects)) {
-        entries.set(key, {
-          body: object.body,
-          contentType: object.contentType ?? 'application/json',
-          lastModified: object.lastModified ?? epoch(),
-          etag: object.etag ?? `"${key}"`,
-        });
-      }
+>()('gycc/lib/storage.server/Service') {}
 
-      const bytes = (body: Uint8Array | string): Uint8Array =>
-        typeof body === 'string' ? new TextEncoder().encode(body) : body;
-      const responseBody = (body: Uint8Array | string): BodyInit =>
-        typeof body === 'string'
-          ? body
-          : new Blob([body as Uint8Array<ArrayBuffer>]);
+/**
+ * The bucket-backed `Storage`, reading its config off `Env` (opencode's
+ * module-level `export const layer`, `packages/core/src/git.ts:79`). When
+ * `Env.bucket` is absent it fails with `StorageUnconfigured`; callers that want
+ * the degraded path compose `layerOptional` instead of holding a half-built
+ * instance (`make-impossible-states-unrepresentable`).
+ */
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const env = yield* Env.Service;
 
-      const get = Effect.fn('Storage.get')(function* (key: string) {
-        const object = entries.get(key);
-        if (object === undefined) return yield* new NotFound({ key });
-        return {
-          stream:
-            new Response(responseBody(object.body)).body ??
-            new ReadableStream<Uint8Array>(),
-          contentType: object.contentType,
-          size: bytes(object.body).byteLength,
-        };
-      });
+    if (Option.isNone(env.bucket)) {
+      return yield* new StorageUnconfigured();
+    }
 
-      const put = Effect.fn('Storage.put')(function* (
-        key: string,
-        body: Uint8Array | string,
-        contentType: string,
-      ) {
-        const now = yield* Clock.currentTimeMillis;
-        entries.set(key, {
-          body,
-          contentType,
-          lastModified: DateTime.toDateUtc(DateTime.makeUnsafe(now)),
-          etag: `"test-${now}"`,
-        });
-      });
-
-      const head = Effect.fn('Storage.head')((key: string) =>
-        Effect.sync(() => {
-          const object = entries.get(key);
-          if (object === undefined) return Option.none<ObjectHead>();
-          return Option.some<ObjectHead>({
-            size: bytes(object.body).byteLength,
-            contentType: object.contentType,
-            lastModified: object.lastModified,
-            etag: object.etag,
-          });
-        }),
-      );
-
-      const list = Effect.fn('Storage.list')((prefix?: string) =>
-        Effect.sync(() =>
-          [...entries.entries()]
-            .filter(([key]) => prefix === undefined || key.startsWith(prefix))
-            .map(([key, object]) => ({
-              key,
-              size: bytes(object.body).byteLength,
-              lastModified: object.lastModified,
-            })),
-        ),
-      );
-
-      const del = Effect.fn('Storage.delete')((key: string) =>
-        Effect.sync(() => {
-          entries.delete(key);
-        }),
-      );
-
-      return Storage.of({ get, put, head, list, delete: del });
+    const config = env.bucket.value;
+    const client = new Bun.S3Client({
+      endpoint: config.endpoint,
+      accessKeyId: Redacted.value(config.accessKeyId),
+      secretAccessKey: Redacted.value(config.secretAccessKey),
+      bucket: config.bucket,
+      region: config.region,
     });
 
-  static layer = Layer.effect(
-    Storage,
-    Effect.gen(function* () {
-      const env = yield* Env;
-
-      if (Option.isNone(env.bucket)) {
-        return yield* new StorageUnconfigured();
-      }
-
-      const config = env.bucket.value;
-      const client = new Bun.S3Client({
-        endpoint: config.endpoint,
-        accessKeyId: Redacted.value(config.accessKeyId),
-        secretAccessKey: Redacted.value(config.secretAccessKey),
-        bucket: config.bucket,
-        region: config.region,
+    const get = Effect.fn('Storage.get')(function* (key: string) {
+      const file = client.file(key);
+      const stat = yield* Effect.tryPromise({
+        try: () => file.stat(),
+        catch: (e) =>
+          isNoSuchKey(e)
+            ? new NotFound({ key })
+            : new StorageError({ key, op: 'get', cause: e }),
       });
+      return {
+        stream: file.stream(),
+        contentType: stat.type === '' ? 'application/octet-stream' : stat.type,
+        size: stat.size,
+      };
+    });
 
-      const get = Effect.fn('Storage.get')(function* (key: string) {
-        const file = client.file(key);
-        const stat = yield* Effect.tryPromise({
-          try: () => file.stat(),
-          catch: (e) =>
-            isNoSuchKey(e)
-              ? new NotFound({ key })
-              : new StorageError({ key, op: 'get', cause: e }),
-        });
-        return {
-          stream: file.stream(),
-          contentType: stat.type === '' ? 'application/octet-stream' : stat.type,
-          size: stat.size,
-        };
+    const put = Effect.fn('Storage.put')(function* (
+      key: string,
+      body: Uint8Array | string,
+      contentType: string,
+    ) {
+      yield* Effect.tryPromise({
+        try: () => client.write(key, body, { type: contentType }),
+        catch: (e) => new StorageError({ key, op: 'put', cause: e }),
       });
+    });
 
-      const put = Effect.fn('Storage.put')(function* (
-        key: string,
-        body: Uint8Array | string,
-        contentType: string,
-      ) {
-        yield* Effect.tryPromise({
-          try: () => client.write(key, body, { type: contentType }),
-          catch: (e) => new StorageError({ key, op: 'put', cause: e }),
-        });
+    const head = Effect.fn('Storage.head')(function* (key: string) {
+      const file = client.file(key);
+      const exists = yield* Effect.tryPromise({
+        try: () => file.exists(),
+        catch: (e) => new StorageError({ key, op: 'head', cause: e }),
       });
-
-      const head = Effect.fn('Storage.head')(function* (key: string) {
-        const file = client.file(key);
-        const exists = yield* Effect.tryPromise({
-          try: () => file.exists(),
-          catch: (e) => new StorageError({ key, op: 'head', cause: e }),
-        });
-        if (!exists) return Option.none<ObjectHead>();
-        const stat = yield* Effect.tryPromise({
-          try: () => file.stat(),
-          catch: (e) => new StorageError({ key, op: 'head', cause: e }),
-        });
-        return Option.some<ObjectHead>({
-          size: stat.size,
-          contentType: stat.type === '' ? 'application/octet-stream' : stat.type,
-          lastModified: stat.lastModified,
-          etag: stat.etag,
-        });
+      if (!exists) return Option.none<ObjectHead>();
+      const stat = yield* Effect.tryPromise({
+        try: () => file.stat(),
+        catch: (e) => new StorageError({ key, op: 'head', cause: e }),
       });
-
-      const list = Effect.fn('Storage.list')(function* (prefix?: string) {
-        return yield* listStoredObjects(client, prefix);
+      return Option.some<ObjectHead>({
+        size: stat.size,
+        contentType: stat.type === '' ? 'application/octet-stream' : stat.type,
+        lastModified: stat.lastModified,
+        etag: stat.etag,
       });
+    });
 
-      const del = Effect.fn('Storage.delete')(function* (key: string) {
-        yield* Effect.tryPromise({
-          try: () => client.delete(key),
-          catch: (e) => new StorageError({ key, op: 'delete', cause: e }),
-        });
+    const list = Effect.fn('Storage.list')(function* (prefix?: string) {
+      return yield* listStoredObjects(client, prefix);
+    });
+
+    const del = Effect.fn('Storage.delete')(function* (key: string) {
+      yield* Effect.tryPromise({
+        try: () => client.delete(key),
+        catch: (e) => new StorageError({ key, op: 'delete', cause: e }),
       });
+    });
 
-      return Storage.of({ get, put, head, list, delete: del });
-    }),
-  );
+    return Service.of({ get, put, head, list, delete: del });
+  }),
+);
 
-  /**
-   * A `Storage` that never fails to *build*: it uses the real bucket-backed
-   * `layer` when a bucket is configured, and a **disabled** in-bucket-less
-   * instance otherwise (where every read reports `NotFound` and every write
-   * fails `StorageError`). This is the layer the always-on `Content` service
-   * (C3) composes: the CMS is optional everywhere, so `Storage` must be present
-   * in the application context even without a bucket — callers then degrade to
-   * bundled defaults on the `NotFound`, rather than the whole runtime failing to
-   * build on `StorageUnconfigured` (`make-impossible-states-unrepresentable`,
-   * D3). The admin write path (C4/C5) is only reachable when a bucket *is*
-   * configured, so the disabled writes are unreachable there.
-   */
-  static layerOptional = Storage.layer.pipe(
-    Layer.catchCause(() =>
-      Layer.succeed(
-        Storage,
-        Storage.of({
-          get: (key) => Effect.fail(new NotFound({ key })),
-          put: (key) =>
-            Effect.fail(
-              new StorageError({
-                key,
-                op: 'put',
-                cause: new Error('storage unconfigured'),
-              }),
-            ),
-          head: () => Effect.succeed(Option.none()),
-          list: () => Effect.succeed([]),
-          delete: () => Effect.void,
-        }),
-      ),
+/**
+ * A `Storage` that never fails to *build*: it uses the real bucket-backed
+ * `layer` when a bucket is configured, and a **disabled** in-bucket-less
+ * instance otherwise (where every read reports `NotFound` and every write
+ * fails `StorageError`). This is the layer the always-on `Content` service
+ * (C3) composes: the CMS is optional everywhere, so `Storage` must be present
+ * in the application context even without a bucket — callers then degrade to
+ * bundled defaults on the `NotFound`, rather than the whole runtime failing to
+ * build on `StorageUnconfigured` (`make-impossible-states-unrepresentable`,
+ * D3). The admin write path (C4/C5) is only reachable when a bucket *is*
+ * configured, so the disabled writes are unreachable there.
+ */
+export const layerOptional = layer.pipe(
+  Layer.catchCause(() =>
+    Layer.succeed(
+      Service,
+      Service.of({
+        get: (key) => Effect.fail(new NotFound({ key })),
+        put: (key) =>
+          Effect.fail(
+            new StorageError({
+              key,
+              op: 'put',
+              cause: new Error('storage unconfigured'),
+            }),
+          ),
+        head: () => Effect.succeed(Option.none()),
+        list: () => Effect.succeed([]),
+        delete: () => Effect.void,
+      }),
     ),
-  );
-}
+  ),
+);
+
+/**
+ * The self-contained, never-fails-to-build `Storage` (opencode's
+ * `export const defaultLayer`, `packages/core/src/git.ts:347`): `layerOptional`
+ * with its `Env` dependency pre-provided. The standalone consumers that need a
+ * `Storage` without separately wiring `Env` — the `/images/*` route in
+ * `server.ts` and the `/admin` write path — provide this directly. (`Content`
+ * composes `layerOptional` on its own `defaultLayer` instead, sharing `Env`
+ * with the rest of the app runtime.)
+ */
+export const defaultLayer = layerOptional.pipe(Layer.provide(Env.defaultLayer));

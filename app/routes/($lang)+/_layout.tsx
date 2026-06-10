@@ -29,7 +29,7 @@ import { Portal } from '~/ui/portal';
 export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const lang = getLocale(params);
-  const content = yield* Content;
+  const content = yield* Content.Service;
   const translation = yield* content.getTranslations(lang);
   const currentConference = yield* content.getCurrentConference(lang);
   return { lang, translation, currentConference };

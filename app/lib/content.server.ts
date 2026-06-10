@@ -1,3 +1,5 @@
+export * as Content from './content.server';
+
 import {
   Clock,
   Context,
@@ -312,8 +314,8 @@ const CACHE_TTL_MS = 30_000;
 
 const decodeDocument = Schema.decodeUnknownEffect(Schema.fromJsonString(SiteContent));
 
-export class Content extends Context.Service<
-  Content,
+export class Service extends Context.Service<
+  Service,
   {
     readonly getSiteContent: () => Effect.Effect<SiteContentType>;
     readonly getConference: (
@@ -347,186 +349,204 @@ export class Content extends Context.Service<
      */
     readonly bust: () => Effect.Effect<void>;
   }
->()('gycc/lib/content.server/Content') {
-  static layer = Layer.effect(
-    Content,
-    Effect.gen(function* () {
-      const storage = yield* Storage;
+>()('gycc/lib/content.server/Service') {}
 
-      /**
-       * Read + decode the `SiteContent` document at `key`, or `Option.none()`
-       * when it is absent / unreadable / malformed. Shared by the public read
-       * path (which maps `none` to the bundled defaults) and the admin read
-       * path (which tries the draft, then the published key, then defaults).
-       */
-      const readDocument = Effect.fnUntraced(
-        function* (key: string) {
-          const object = yield* storage.get(key);
-          const json = yield* Effect.promise(() =>
-            new Response(object.stream).text(),
-          );
-          return Option.some(yield* decodeDocument(json));
-        },
-        (effect, key) =>
-          effect.pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning(`Content: could not read ${key}`, cause).pipe(
-                Effect.as(Option.none<SiteContentType>()),
-              ),
+/**
+ * The `Content` layer (opencode's module-level `export const layer`,
+ * `packages/core/src/git.ts:79`), leaving its `Storage` requirement open so the
+ * app runtime and tests can supply different `Storage` layers. `defaultLayer`
+ * pre-provides `Storage.layerOptional` (the never-fails-to-build storage,
+ * mirroring `git.ts:347`), leaving only `Env` open — the public read path is
+ * thus wired with a single `Content.defaultLayer` in the runtime, with `Env`
+ * discharged by the surrounding merge.
+ */
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const storage = yield* Storage.Service;
+
+    /**
+     * Read + decode the `SiteContent` document at `key`, or `Option.none()`
+     * when it is absent / unreadable / malformed. Shared by the public read
+     * path (which maps `none` to the bundled defaults) and the admin read
+     * path (which tries the draft, then the published key, then defaults).
+     */
+    const readDocument = Effect.fnUntraced(
+      function* (key: string) {
+        const object = yield* storage.get(key);
+        const json = yield* Effect.promise(() =>
+          new Response(object.stream).text(),
+        );
+        return Option.some(yield* decodeDocument(json));
+      },
+      (effect, key) =>
+        effect.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning(`Content: could not read ${key}`, cause).pipe(
+              Effect.as(Option.none<SiteContentType>()),
             ),
           ),
-      );
-
-      /**
-       * Read + decode the document from the bucket, falling back to the bundled
-       * defaults on every failure mode (`boundary-discipline`, D3):
-       *   - no bucket configured → `Storage.layerOptional` yields a disabled
-       *     storage whose `get` reports `NotFound`;
-       *   - object absent / empty → `NotFound`;
-       *   - bucket unreachable or document malformed → any other failure /
-       *     decode error / unexpected defect.
-       * In all cases `readDocument` logs and yields `none`, so the site is never
-       * broken by a missing or bad document — the public read always gets a
-       * `SiteContent`.
-       */
-      const fetchDocument: Effect.Effect<SiteContentType> = readDocument(
-        SITE_CONTENT_KEY,
-      ).pipe(
-        Effect.map((document) =>
-          Option.getOrElse(document, () => defaultContent),
         ),
-      );
+    );
 
-      /**
-       * The public read cache: Effect's built-in TTL cache with manual
-       * invalidation (`use-the-platform`). `cachedContent` single-flights
-       * concurrent first-reads onto one `fetchDocument` (the others park on its
-       * latch and share the result, so the bucket is not stampeded) and returns
-       * the same decoded `SiteContent` reference for the TTL's duration;
-       * `invalidate` arms the next read to re-fetch (the editor's publish path).
-       */
-      const [cachedContent, invalidate] = yield* Effect.cachedInvalidateWithTTL(
-        fetchDocument,
-        Duration.millis(CACHE_TTL_MS),
-      );
+    /**
+     * Read + decode the document from the bucket, falling back to the bundled
+     * defaults on every failure mode (`boundary-discipline`, D3):
+     *   - no bucket configured → `Storage.layerOptional` yields a disabled
+     *     storage whose `get` reports `NotFound`;
+     *   - object absent / empty → `NotFound`;
+     *   - bucket unreachable or document malformed → any other failure /
+     *     decode error / unexpected defect.
+     * In all cases `readDocument` logs and yields `none`, so the site is never
+     * broken by a missing or bad document — the public read always gets a
+     * `SiteContent`.
+     */
+    const fetchDocument: Effect.Effect<SiteContentType> = readDocument(
+      SITE_CONTENT_KEY,
+    ).pipe(
+      Effect.map((document) =>
+        Option.getOrElse(document, () => defaultContent),
+      ),
+    );
 
-      const getSiteContent = Effect.fn('Content.getSiteContent')(function* () {
-        return yield* cachedContent;
-      });
+    /**
+     * The public read cache: Effect's built-in TTL cache with manual
+     * invalidation (`use-the-platform`). `cachedContent` single-flights
+     * concurrent first-reads onto one `fetchDocument` (the others park on its
+     * latch and share the result, so the bucket is not stampeded) and returns
+     * the same decoded `SiteContent` reference for the TTL's duration;
+     * `invalidate` arms the next read to re-fetch (the editor's publish path).
+     */
+    const [cachedContent, invalidate] = yield* Effect.cachedInvalidateWithTTL(
+      fetchDocument,
+      Duration.millis(CACHE_TTL_MS),
+    );
 
-      const getConference = Effect.fn('Content.getConference')(function* (
-        locale: Locale,
-        year?: number,
-      ) {
-        assertValidLocale(locale);
-        const content = yield* getSiteContent();
-        const now = yield* Clock.currentTimeMillis;
-        return year === undefined
-          ? selectCurrent(content, locale, now)
-          : selectByYear(content, locale, year);
-      });
+    const getSiteContent = Effect.fn('Content.getSiteContent')(function* () {
+      return yield* cachedContent;
+    });
 
-      const getCurrentConference = Effect.fn('Content.getCurrentConference')(
-        function* (locale: Locale) {
-          return yield* getConference(locale);
-        },
-      );
+    const getConference = Effect.fn('Content.getConference')(function* (
+      locale: Locale,
+      year?: number,
+    ) {
+      assertValidLocale(locale);
+      const content = yield* getSiteContent();
+      const now = yield* Clock.currentTimeMillis;
+      return year === undefined
+        ? selectCurrent(content, locale, now)
+        : selectByYear(content, locale, year);
+    });
 
-      const getTranslations = Effect.fn('Content.getTranslations')(function* (
-        locale: Locale,
-      ) {
-        assertValidLocale(locale);
-        const content = yield* getSiteContent();
-        return content.translations[locale];
-      });
+    const getCurrentConference = Effect.fn('Content.getCurrentConference')(
+      function* (locale: Locale) {
+        return yield* getConference(locale);
+      },
+    );
 
-      const getTeam = Effect.fn('Content.getTeam')(function* () {
-        const content = yield* getSiteContent();
-        return {
-          team: content.team.map(toTeamMember),
-          board: [...content.board],
-        };
-      });
+    const getTranslations = Effect.fn('Content.getTranslations')(function* (
+      locale: Locale,
+    ) {
+      assertValidLocale(locale);
+      const content = yield* getSiteContent();
+      return content.translations[locale];
+    });
 
-      /**
-       * Load the document the `/admin` editor edits, reconciling draft vs
-       * published by their bucket `lastModified` rather than by the mere
-       * *presence* of a draft object (`derive-dont-sync`,
-       * `make-impossible-states-unrepresentable`).
-       *
-       * A draft represents pending unpublished edits **only when it is strictly
-       * newer than the published document** — i.e. it was saved after the last
-       * publish. The publish path deletes the draft best-effort, but correctness
-       * must not depend on that delete succeeding: a draft left behind by a
-       * failed delete, or a stale draft that predates the current published doc,
-       * is older-or-equal and is therefore ignored, so the editor opens from the
-       * published document and a subsequent save/publish can never overwrite the
-       * live content with stale draft values. A draft with no published document
-       * to compare against is always a valid edit source.
-       *
-       * (Bucket `lastModified` is second-granular on some backends, so a draft
-       * saved and published within the same second compares equal — the strict
-       * `>` then drops the ambiguous draft in favour of the just-published live
-       * content, the safe direction.)
-       */
-      const getAdminContent = Effect.fn('Content.getAdminContent')(
-        function* () {
-          const draft = yield* readDocument(SITE_CONTENT_DRAFT_KEY);
-          const published = yield* readDocument(SITE_CONTENT_KEY);
+    const getTeam = Effect.fn('Content.getTeam')(function* () {
+      const content = yield* getSiteContent();
+      return {
+        team: content.team.map(toTeamMember),
+        board: [...content.board],
+      };
+    });
 
-          if (Option.isSome(draft)) {
-            if (Option.isNone(published)) {
-              return { content: draft.value, source: 'draft' as const };
-            }
-            const draftHead = yield* storage
-              .head(SITE_CONTENT_DRAFT_KEY)
-              .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
-            const publishedHead = yield* storage
-              .head(SITE_CONTENT_KEY)
-              .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
-            const draftIsNewer =
-              Option.isSome(draftHead) &&
-              Option.isSome(publishedHead) &&
-              draftHead.value.lastModified.getTime() >
-                publishedHead.value.lastModified.getTime();
-            if (draftIsNewer) {
-              return { content: draft.value, source: 'draft' as const };
-            }
-            return { content: published.value, source: 'published' as const };
+    /**
+     * Load the document the `/admin` editor edits, reconciling draft vs
+     * published by their bucket `lastModified` rather than by the mere
+     * *presence* of a draft object (`derive-dont-sync`,
+     * `make-impossible-states-unrepresentable`).
+     *
+     * A draft represents pending unpublished edits **only when it is strictly
+     * newer than the published document** — i.e. it was saved after the last
+     * publish. The publish path deletes the draft best-effort, but correctness
+     * must not depend on that delete succeeding: a draft left behind by a
+     * failed delete, or a stale draft that predates the current published doc,
+     * is older-or-equal and is therefore ignored, so the editor opens from the
+     * published document and a subsequent save/publish can never overwrite the
+     * live content with stale draft values. A draft with no published document
+     * to compare against is always a valid edit source.
+     *
+     * (Bucket `lastModified` is second-granular on some backends, so a draft
+     * saved and published within the same second compares equal — the strict
+     * `>` then drops the ambiguous draft in favour of the just-published live
+     * content, the safe direction.)
+     */
+    const getAdminContent = Effect.fn('Content.getAdminContent')(
+      function* () {
+        const draft = yield* readDocument(SITE_CONTENT_DRAFT_KEY);
+        const published = yield* readDocument(SITE_CONTENT_KEY);
+
+        if (Option.isSome(draft)) {
+          if (Option.isNone(published)) {
+            return { content: draft.value, source: 'draft' as const };
           }
-
-          if (Option.isSome(published)) {
-            return { content: published.value, source: 'published' as const };
+          const draftHead = yield* storage
+            .head(SITE_CONTENT_DRAFT_KEY)
+            .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
+          const publishedHead = yield* storage
+            .head(SITE_CONTENT_KEY)
+            .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
+          const draftIsNewer =
+            Option.isSome(draftHead) &&
+            Option.isSome(publishedHead) &&
+            draftHead.value.lastModified.getTime() >
+              publishedHead.value.lastModified.getTime();
+          if (draftIsNewer) {
+            return { content: draft.value, source: 'draft' as const };
           }
-          return { content: defaultContent, source: 'defaults' as const };
-        },
-      );
+          return { content: published.value, source: 'published' as const };
+        }
 
-      // Arm the next public read to re-fetch the bucket so a publish is visible
-      // immediately, with no redeploy and without waiting out the TTL (D3). This
-      // is the built-in cache's `invalidate`: it expires the cached document and
-      // clears the stored result, so the next `getSiteContent` recomputes
-      // `fetchDocument`. (`make-operations-idempotent`: busting an already-empty
-      // or already-expired cache is a harmless no-op.) The built-in does NOT
-      // pre-empt an in-flight refresh: a publish landing during one is masked
-      // because that refresh re-arms the TTL with its pre-publish document, so
-      // the stale window measured from the publish is `(the refresh's remaining
-      // bucket-read duration) + one TTL`, not ≤ one TTL. That documented window
-      // is within D3's "visible on the next read after the window" contract
-      // (see the `Content` doc above for the full mechanism).
-      const bust = Effect.fn('Content.bust')(function* () {
-        yield* invalidate;
-      });
+        if (Option.isSome(published)) {
+          return { content: published.value, source: 'published' as const };
+        }
+        return { content: defaultContent, source: 'defaults' as const };
+      },
+    );
 
-      return Content.of({
-        getSiteContent,
-        getConference,
-        getCurrentConference,
-        getTranslations,
-        getTeam,
-        getAdminContent,
-        bust,
-      });
-    }),
-  );
-}
+    // Arm the next public read to re-fetch the bucket so a publish is visible
+    // immediately, with no redeploy and without waiting out the TTL (D3). This
+    // is the built-in cache's `invalidate`: it expires the cached document and
+    // clears the stored result, so the next `getSiteContent` recomputes
+    // `fetchDocument`. (`make-operations-idempotent`: busting an already-empty
+    // or already-expired cache is a harmless no-op.) The built-in does NOT
+    // pre-empt an in-flight refresh: a publish landing during one is masked
+    // because that refresh re-arms the TTL with its pre-publish document, so
+    // the stale window measured from the publish is `(the refresh's remaining
+    // bucket-read duration) + one TTL`, not ≤ one TTL. That documented window
+    // is within D3's "visible on the next read after the window" contract
+    // (see the `Content` doc above for the full mechanism).
+    const bust = Effect.fn('Content.bust')(function* () {
+      yield* invalidate;
+    });
+
+    return Service.of({
+      getSiteContent,
+      getConference,
+      getCurrentConference,
+      getTranslations,
+      getTeam,
+      getAdminContent,
+      bust,
+    });
+  }),
+);
+
+/**
+ * The public read path's `Content`, with its `Storage` dependency pre-provided
+ * as `Storage.layerOptional` (the never-fails-to-build storage, mirroring
+ * opencode `packages/core/src/git.ts:347`). Only `Env` stays open, discharged
+ * by the surrounding app-runtime merge. The admin write path provides `Storage`
+ * standalone (a legit second consumer), so it is NOT wired here.
+ */
+export const defaultLayer = layer.pipe(Layer.provide(Storage.layerOptional));

@@ -8,6 +8,7 @@ import {
   SITE_CONTENT_KEY,
 } from '../content.server';
 import { Storage } from '../storage.server';
+import { layerTest } from '../storage.test-helper';
 import {
   assembleOverrides,
   deepMerge,
@@ -21,7 +22,7 @@ import { SiteContent } from './schema';
 
 /**
  * End-to-end-ish proof of the C5 publish + image paths against the in-memory
- * `Storage.layerTest` (a real S3 / MinIO is not reachable headless in CI —
+ * `layerTest` storage helper (a real S3 / MinIO is not reachable headless in CI —
  * flagged in the C5 runtime-verify notes). It reproduces, step for step, what
  * the `/admin/content` route's action does — assemble form → deepMerge onto the
  * current document → decode → `Storage.put(site.json)` → `Content.bust()` — and
@@ -42,13 +43,13 @@ const seedBody = (): Promise<string> =>
 
 /** Wire `Content` over a shared in-memory bucket also exposed to the test. */
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Content | Storage>,
+  effect: Effect.Effect<A, E, Content.Service | Storage.Service>,
   objects: Record<string, { body: string }> = {},
 ) =>
   Effect.runPromise(
     Effect.scoped(
       Effect.provide(effect, [
-        Layer.provideMerge(Content.layer, Storage.layerTest(objects)),
+        Layer.provideMerge(Content.layer, layerTest(objects)),
         TestClock.layer(),
       ]),
     ),
@@ -60,8 +61,8 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
 
     const result = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
-        const storage = yield* Storage;
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
 
         // 1. The public site reads the seeded defaults.
         const before = yield* content.getConference('en', 2026);
@@ -101,8 +102,8 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
 
     const result = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
-        const storage = yield* Storage;
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
 
         // Save a draft that renames 2026 — public read must NOT see it. The
         // draft is saved AFTER the seeded publish (clock advanced) so it is the
@@ -138,8 +139,8 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
 
     const result = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
-        const storage = yield* Storage;
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
 
         // Validate + store the upload exactly as the route action does.
         const contentType = 'image/png';
@@ -193,7 +194,7 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
     const seed = await seedBody();
     const team = await run(
       Effect.gen(function* () {
-        const content = yield* Content;
+        const content = yield* Content.Service;
         return yield* content.getTeam();
       }),
       { [SITE_CONTENT_KEY]: { body: seed } },

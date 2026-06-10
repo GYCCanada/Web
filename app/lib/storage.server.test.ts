@@ -10,25 +10,26 @@ import {
 
 import { Env } from './env.server';
 import { NotFound, Storage, StorageUnconfigured } from './storage.server';
+import { layerTest } from './storage.test-helper';
 
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Storage>,
-  layer: Layer.Layer<Storage>,
+  effect: Effect.Effect<A, E, Storage.Service>,
+  layer: Layer.Layer<Storage.Service>,
 ) => Effect.runPromise(Effect.provide(effect, layer));
 
 const runExit = <A, E>(
-  effect: Effect.Effect<A, E, Storage>,
-  layer: Layer.Layer<Storage>,
+  effect: Effect.Effect<A, E, Storage.Service>,
+  layer: Layer.Layer<Storage.Service>,
 ) => Effect.runPromise(Effect.exit(Effect.provide(effect, layer)));
 
 const text = (object: { readonly stream: ReadableStream<Uint8Array> }) =>
   new Response(object.stream).text();
 
-describe('Storage.layerTest', () => {
+describe('Storage in-memory test layer', () => {
   it('round-trips a put → get → head → list → delete', async () => {
     const result = await run(
       Effect.gen(function* () {
-        const storage = yield* Storage;
+        const storage = yield* Storage.Service;
 
         yield* storage.put('content/site.json', '{"hello":"world"}', 'application/json');
 
@@ -43,7 +44,7 @@ describe('Storage.layerTest', () => {
 
         return { body, got, head, listed, afterDelete };
       }),
-      Storage.layerTest(),
+      layerTest(),
     );
 
     expect(result.body).toBe('{"hello":"world"}');
@@ -70,13 +71,13 @@ describe('Storage.layerTest', () => {
   it('overwrites an existing object on a second put', async () => {
     const body = await run(
       Effect.gen(function* () {
-        const storage = yield* Storage;
+        const storage = yield* Storage.Service;
         yield* storage.put('content/site.json', 'first', 'text/plain');
         yield* storage.put('content/site.json', 'second', 'text/plain');
         const got = yield* storage.get('content/site.json');
         return yield* Effect.promise(() => text(got));
       }),
-      Storage.layerTest(),
+      layerTest(),
     );
 
     expect(body).toBe('second');
@@ -85,12 +86,12 @@ describe('Storage.layerTest', () => {
   it('serves seeded objects and filters list by prefix', async () => {
     const result = await run(
       Effect.gen(function* () {
-        const storage = yield* Storage;
+        const storage = yield* Storage.Service;
         const images = yield* storage.list('images/');
         const all = yield* storage.list();
         return { images, all };
       }),
-      Storage.layerTest({
+      layerTest({
         'content/site.json': { body: '{}' },
         'images/a.avif': { body: 'a' },
         'images/bb.avif': { body: 'bb' },
@@ -108,10 +109,10 @@ describe('Storage.layerTest', () => {
   it('fails get with NotFound for a missing key', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const storage = yield* Storage;
+        const storage = yield* Storage.Service;
         return yield* storage.get('missing.json');
       }),
-      Storage.layerTest(),
+      layerTest(),
     );
 
     expect(exit._tag).toBe('Failure');
@@ -126,10 +127,10 @@ describe('Storage.layerTest', () => {
   it('reports head as None for a missing key without failing', async () => {
     const head = await run(
       Effect.gen(function* () {
-        const storage = yield* Storage;
+        const storage = yield* Storage.Service;
         return yield* storage.head('missing.json');
       }),
-      Storage.layerTest(),
+      layerTest(),
     );
 
     expect(Option.isNone(head)).toBe(true);
@@ -138,10 +139,10 @@ describe('Storage.layerTest', () => {
   it('treats delete of a missing key as a no-op', async () => {
     await run(
       Effect.gen(function* () {
-        const storage = yield* Storage;
+        const storage = yield* Storage.Service;
         yield* storage.delete('never-existed.json');
       }),
-      Storage.layerTest(),
+      layerTest(),
     );
   });
 });
@@ -153,7 +154,7 @@ describe('Storage.layer', () => {
   it('fails with StorageUnconfigured when no bucket is configured', async () => {
     const exit = await Effect.runPromise(
       Effect.exit(
-        Storage.asEffect().pipe(
+        Storage.Service.asEffect().pipe(
           Effect.provide(
             Storage.layer.pipe(
               Layer.provide(envFromBucketless({ NODE_ENV: 'development' })),
@@ -176,7 +177,7 @@ describe('Storage.layer', () => {
   it('constructs a storage instance when the bucket is configured', async () => {
     const exit = await Effect.runPromise(
       Effect.exit(
-        Storage.asEffect().pipe(
+        Storage.Service.asEffect().pipe(
           Effect.provide(
             Storage.layer.pipe(
               Layer.provide(

@@ -47,7 +47,7 @@ export const meta: MetaFunction = ({ params }) => {
 export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
-  const content = yield* Content;
+  const content = yield* Content.Service;
   return { conference: yield* content.getConference(locale, 2024) };
 });
 

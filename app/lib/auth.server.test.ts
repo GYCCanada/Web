@@ -26,12 +26,12 @@ const ENABLED_ENV = {
 // `Effect.scoped` supplies the `Scope` that `TestClock.adjust` requires; the
 // `Auth` layer + test clock are provided beneath it.
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Auth>,
+  effect: Effect.Effect<A, E, Auth.Service>,
   env: Record<string, string>,
 ) => Effect.runPromise(Effect.scoped(Effect.provide(effect, authLayer(env))));
 
 const runExit = <A, E>(
-  effect: Effect.Effect<A, E, Auth>,
+  effect: Effect.Effect<A, E, Auth.Service>,
   env: Record<string, string>,
 ) =>
   Effect.runPromise(
@@ -55,7 +55,7 @@ describe('Auth (enabled)', () => {
   it('reports the admin as enabled when ADMIN_PASSWORD is set', () =>
     run(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         expect(auth.enabled).toBe(true);
       }),
       ENABLED_ENV,
@@ -64,7 +64,7 @@ describe('Auth (enabled)', () => {
   it('round-trips: a token minted by the correct password verifies', () =>
     run(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         const token = yield* auth.verifyPassword(ENABLED_ENV.ADMIN_PASSWORD);
         expect(token.split('.')).toHaveLength(3);
         // The signed cookie verifies through the same secret.
@@ -76,7 +76,7 @@ describe('Auth (enabled)', () => {
   it('rejects a wrong password with BadPassword', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         return yield* auth.verifyPassword('wrong password');
       }),
       ENABLED_ENV,
@@ -87,7 +87,7 @@ describe('Auth (enabled)', () => {
   it('rejects a missing cookie with Unauthorized', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         yield* auth.checkCookie(null);
       }),
       ENABLED_ENV,
@@ -98,7 +98,7 @@ describe('Auth (enabled)', () => {
   it('rejects an expired token with Unauthorized', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         const token = yield* auth.verifyPassword(ENABLED_ENV.ADMIN_PASSWORD);
         // Advance past the 30-day TTL — the same token must now be rejected.
         yield* TestClock.adjust('31 days');
@@ -112,7 +112,7 @@ describe('Auth (enabled)', () => {
   it('rejects a token whose signature was tampered with', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         const token = yield* auth.verifyPassword(ENABLED_ENV.ADMIN_PASSWORD);
         const [issued, expires] = token.split('.');
         // Keep the issued/expires claims but forge the signature.
@@ -127,7 +127,7 @@ describe('Auth (enabled)', () => {
   it('rejects a token whose expires claim was extended', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         const token = yield* auth.verifyPassword(ENABLED_ENV.ADMIN_PASSWORD);
         const [issued, , sig] = token.split('.');
         // Push the expiry far into the future without re-signing — the
@@ -143,7 +143,7 @@ describe('Auth (enabled)', () => {
   it('rejects a malformed (non-three-part) token with Unauthorized', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         yield* auth.checkCookie('gycc_admin=not-a-valid-token');
       }),
       ENABLED_ENV,
@@ -156,7 +156,7 @@ describe('Auth (disabled when ADMIN_PASSWORD unset)', () => {
   it('reports the admin as disabled', () =>
     run(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         expect(auth.enabled).toBe(false);
       }),
       {},
@@ -165,7 +165,7 @@ describe('Auth (disabled when ADMIN_PASSWORD unset)', () => {
   it('rejects every password with AdminDisabled (never BadPassword)', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         // Even the empty string must NOT authenticate — a missing password is
         // "no admin", not "an admin whose password is empty".
         return yield* auth.verifyPassword('');
@@ -179,7 +179,7 @@ describe('Auth (disabled when ADMIN_PASSWORD unset)', () => {
   it('rejects cookie checks with AdminDisabled (never Unauthorized)', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         yield* auth.checkCookie('gycc_admin=anything');
       }),
       {},
@@ -191,7 +191,7 @@ describe('Auth (disabled when ADMIN_PASSWORD unset)', () => {
   it('treats a present-but-blank ADMIN_PASSWORD as disabled', () =>
     run(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         expect(auth.enabled).toBe(false);
       }),
       { ADMIN_PASSWORD: '', COOKIE_SECRET: 'secret' },
@@ -202,7 +202,7 @@ describe('Auth (disabled when COOKIE_SECRET unset)', () => {
   it('reports the admin as disabled when only ADMIN_PASSWORD is set', () =>
     run(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         expect(auth.enabled).toBe(false);
       }),
       { ADMIN_PASSWORD: 'correct horse battery staple' },
@@ -211,7 +211,7 @@ describe('Auth (disabled when COOKIE_SECRET unset)', () => {
   it('treats a present-but-blank COOKIE_SECRET as disabled', () =>
     run(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         expect(auth.enabled).toBe(false);
       }),
       { ADMIN_PASSWORD: 'correct horse battery staple', COOKIE_SECRET: '' },
@@ -225,7 +225,7 @@ describe('Auth (disabled when COOKIE_SECRET unset)', () => {
   it('rejects verifyPassword with AdminDisabled instead of crashing on an empty HMAC key', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         return yield* auth.verifyPassword('correct horse battery staple');
       }),
       { ADMIN_PASSWORD: 'correct horse battery staple', COOKIE_SECRET: '' },
@@ -239,7 +239,7 @@ describe('Auth (disabled when COOKIE_SECRET unset)', () => {
   it('rejects checkCookie with AdminDisabled when COOKIE_SECRET is unset', async () => {
     const exit = await runExit(
       Effect.gen(function* () {
-        const auth = yield* Auth;
+        const auth = yield* Auth.Service;
         yield* auth.checkCookie('gycc_admin=anything');
       }),
       { ADMIN_PASSWORD: 'correct horse battery staple' },

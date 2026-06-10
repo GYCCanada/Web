@@ -25,13 +25,12 @@ export const headers = adminSecurityHeaders;
  */
 export const loader = routeHandler(function* () {
   const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth;
+  const auth = yield* Auth.Service;
   yield* auth.checkCookie(request.headers.get('cookie')).pipe(
     Effect.catchTags({
-      'gycc/lib/auth.server/AdminDisabled': () =>
+      'Auth.Disabled': () =>
         Effect.fail(new Response('Not Found', { status: 404 })),
-      'gycc/lib/auth.server/Unauthorized': () =>
-        Effect.fail(redirect('/admin/login')),
+      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
     }),
   );
   return null;

@@ -1,3 +1,5 @@
+export * as Auth from './auth.server';
+
 import {
   Clock,
   Config,
@@ -41,12 +43,12 @@ import {
  */
 
 export class BadPassword extends Schema.TaggedErrorClass<BadPassword>()(
-  'gycc/lib/auth.server/BadPassword',
+  'Auth.BadPassword',
   {},
 ) {}
 
 export class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()(
-  'gycc/lib/auth.server/Unauthorized',
+  'Auth.Unauthorized',
   {},
 ) {}
 
@@ -57,7 +59,7 @@ export class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()(
  * unauthenticated visitor to the login page when it is enabled.
  */
 export class AdminDisabled extends Schema.TaggedErrorClass<AdminDisabled>()(
-  'gycc/lib/auth.server/AdminDisabled',
+  'Auth.Disabled',
   {},
 ) {}
 
@@ -117,8 +119,8 @@ const parseCookie = (header: string | null, name: string): string | null => {
   return null;
 };
 
-export class Auth extends Context.Service<
-  Auth,
+export class Service extends Context.Service<
+  Service,
   {
     /**
      * Whether the admin area is configured (both `ADMIN_PASSWORD` and
@@ -144,94 +146,102 @@ export class Auth extends Context.Service<
     readonly cookieHeader: (token: string) => string;
     readonly clearCookieHeader: () => string;
   }
->()('gycc/lib/auth.server/Auth') {
-  static layer = Layer.effect(
-    Auth,
-    Effect.gen(function* () {
-      // Both optional — a missing password disables the admin (degrade, not
-      // fail-fast), matching the bucket's optional-everywhere contract.
-      const adminPassword = yield* Config.redacted('ADMIN_PASSWORD').pipe(
-        Config.withDefault(Redacted.make('')),
+>()('gycc/lib/auth.server/Service') {}
+
+/**
+ * The `Auth` layer (opencode's module-level `export const layer`,
+ * `packages/core/src/git.ts:79`). It reads `ADMIN_PASSWORD` / `COOKIE_SECRET`
+ * straight off the platform `Config` and has no service dependencies, so
+ * `defaultLayer` is just `layer`.
+ */
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    // Both optional — a missing password disables the admin (degrade, not
+    // fail-fast), matching the bucket's optional-everywhere contract.
+    const adminPassword = yield* Config.redacted('ADMIN_PASSWORD').pipe(
+      Config.withDefault(Redacted.make('')),
+    );
+    const cookieSecret = yield* Config.redacted('COOKIE_SECRET').pipe(
+      Config.withDefault(Redacted.make('')),
+    );
+
+    const adminPw = Redacted.value(adminPassword);
+    const secret = Redacted.value(cookieSecret);
+    // The admin is enabled only when BOTH a real password AND a real signing
+    // secret are set — matching the `.env.example` contract ("set both to
+    // enable it"). An "enabled admin with a blank secret" is an impossible,
+    // unsafe state (make-impossible-states-unrepresentable): the HMAC key
+    // would be the empty string, which `crypto.subtle.importKey` rejects with
+    // a `DataError` — so the first sign/verify would crash login with a 500 —
+    // and a blank signing key is trivially forgeable anyway. Requiring both
+    // collapses "auth on, no secret" into the single "disabled" state.
+    const enabled = adminPw !== '' && secret !== '';
+
+    // Internal helpers (not part of the service surface) — untraced, mirroring
+    // opencode's traced-boundary / untraced-internal split (`git.ts`).
+    const issueToken = Effect.fnUntraced(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const issued = Math.floor(now / 1000);
+      const expires = issued + TOKEN_TTL_SECONDS;
+      const payload = `${issued}.${expires}`;
+      const sig = yield* sign(secret, payload);
+      return `${payload}.${sig}`;
+    });
+
+    const validateToken = Effect.fnUntraced(function* (token: string) {
+      const parts = token.split('.');
+      if (parts.length !== 3) return yield* new Unauthorized();
+      const [issuedStr, expiresStr, sig] = parts as [string, string, string];
+      const expires = Number(expiresStr);
+      if (!Number.isFinite(expires)) return yield* new Unauthorized();
+      const now = yield* Clock.currentTimeMillis;
+      if (expires < Math.floor(now / 1000)) return yield* new Unauthorized();
+      const ok = yield* verifySig(secret, `${issuedStr}.${expiresStr}`, sig);
+      if (!ok) return yield* new Unauthorized();
+    });
+
+    const verifyPassword = Effect.fn('Auth.verifyPassword')(function* (
+      password: string,
+    ) {
+      if (!enabled) return yield* new AdminDisabled();
+      // HMAC both sides to a fixed-length digest under the signing secret
+      // before comparing, so the compare never branches on the secret
+      // `ADMIN_PASSWORD`'s length — defeating a timing probe of the
+      // password length. The digests are equal-length (43-char base64url
+      // of a 32-byte SHA-256 HMAC), so the constant-time compare runs the
+      // full loop regardless of the submitted password.
+      const submitted = yield* sign(secret, password);
+      const expected = yield* sign(secret, adminPw);
+      const ok = constantTimeEqual(
+        new TextEncoder().encode(submitted),
+        new TextEncoder().encode(expected),
       );
-      const cookieSecret = yield* Config.redacted('COOKIE_SECRET').pipe(
-        Config.withDefault(Redacted.make('')),
-      );
+      if (!ok) return yield* new BadPassword();
+      return yield* issueToken();
+    });
 
-      const adminPw = Redacted.value(adminPassword);
-      const secret = Redacted.value(cookieSecret);
-      // The admin is enabled only when BOTH a real password AND a real signing
-      // secret are set — matching the `.env.example` contract ("set both to
-      // enable it"). An "enabled admin with a blank secret" is an impossible,
-      // unsafe state (make-impossible-states-unrepresentable): the HMAC key
-      // would be the empty string, which `crypto.subtle.importKey` rejects with
-      // a `DataError` — so the first sign/verify would crash login with a 500 —
-      // and a blank signing key is trivially forgeable anyway. Requiring both
-      // collapses "auth on, no secret" into the single "disabled" state.
-      const enabled = adminPw !== '' && secret !== '';
+    const checkCookie = Effect.fn('Auth.checkCookie')(function* (
+      header: string | null,
+    ) {
+      if (!enabled) return yield* new AdminDisabled();
+      const token = parseCookie(header, COOKIE_NAME);
+      if (token === null) return yield* new Unauthorized();
+      yield* validateToken(token);
+    });
 
-      // Internal helpers (not part of the service surface) — untraced, mirroring
-      // opencode's traced-boundary / untraced-internal split (`git.ts`).
-      const issueToken = Effect.fnUntraced(function* () {
-        const now = yield* Clock.currentTimeMillis;
-        const issued = Math.floor(now / 1000);
-        const expires = issued + TOKEN_TTL_SECONDS;
-        const payload = `${issued}.${expires}`;
-        const sig = yield* sign(secret, payload);
-        return `${payload}.${sig}`;
-      });
+    return Service.of({
+      enabled,
+      verifyPassword,
+      checkCookie,
 
-      const validateToken = Effect.fnUntraced(function* (token: string) {
-        const parts = token.split('.');
-        if (parts.length !== 3) return yield* new Unauthorized();
-        const [issuedStr, expiresStr, sig] = parts as [string, string, string];
-        const expires = Number(expiresStr);
-        if (!Number.isFinite(expires)) return yield* new Unauthorized();
-        const now = yield* Clock.currentTimeMillis;
-        if (expires < Math.floor(now / 1000)) return yield* new Unauthorized();
-        const ok = yield* verifySig(secret, `${issuedStr}.${expiresStr}`, sig);
-        if (!ok) return yield* new Unauthorized();
-      });
+      cookieHeader: (token) =>
+        `${COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${TOKEN_TTL_SECONDS}`,
 
-      const verifyPassword = Effect.fn('Auth.verifyPassword')(function* (
-        password: string,
-      ) {
-        if (!enabled) return yield* new AdminDisabled();
-        // HMAC both sides to a fixed-length digest under the signing secret
-        // before comparing, so the compare never branches on the secret
-        // `ADMIN_PASSWORD`'s length — defeating a timing probe of the
-        // password length. The digests are equal-length (43-char base64url
-        // of a 32-byte SHA-256 HMAC), so the constant-time compare runs the
-        // full loop regardless of the submitted password.
-        const submitted = yield* sign(secret, password);
-        const expected = yield* sign(secret, adminPw);
-        const ok = constantTimeEqual(
-          new TextEncoder().encode(submitted),
-          new TextEncoder().encode(expected),
-        );
-        if (!ok) return yield* new BadPassword();
-        return yield* issueToken();
-      });
+      clearCookieHeader: () =>
+        `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+    });
+  }),
+);
 
-      const checkCookie = Effect.fn('Auth.checkCookie')(function* (
-        header: string | null,
-      ) {
-        if (!enabled) return yield* new AdminDisabled();
-        const token = parseCookie(header, COOKIE_NAME);
-        if (token === null) return yield* new Unauthorized();
-        yield* validateToken(token);
-      });
-
-      return Auth.of({
-        enabled,
-        verifyPassword,
-        checkCookie,
-
-        cookieHeader: (token) =>
-          `${COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${TOKEN_TTL_SECONDS}`,
-
-        clearCookieHeader: () =>
-          `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
-      });
-    }),
-  );
-}
+export const defaultLayer = layer;
