@@ -102,7 +102,7 @@ export const meta: MetaFunction = ({ params }) => {
 
 export const action = routeAction(function* () {
   const { request, url } = yield* ReactRouterContext;
-  const mailer = yield* Mailer;
+  const mailer = yield* Mailer.Service;
 
   const formData = yield* Effect.promise(() => request.formData());
   const submission = parseWithZod(formData, { schema });

@@ -1,5 +1,4 @@
 import {
-  type LoaderFunctionArgs,
   Outlet,
   Link as RLink,
   useLoaderData,
@@ -14,11 +13,12 @@ import { ClientOnly } from 'remix-utils/client-only';
 import { match } from 'ts-pattern';
 
 import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
-import { getCurrentConference } from '~/lib/conference.server';
+import { Content } from '~/lib/content.server';
+import { ReactRouterContext } from '~/lib/effect/router-context';
+import { routeHandler } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
-import { getTranslation, Locale } from '~/lib/localization/localization';
+import { getLocale, Locale } from '~/lib/localization/localization';
 import { LocalizationProvider } from '~/lib/localization/provider';
-import { root } from '~/lib/localization/translations';
 import { useRootLoader } from '~/lib/root-loader';
 import { useToast } from '~/lib/toast';
 import { ExternalLink, linkStyle } from '~/ui/external-link';
@@ -26,13 +26,14 @@ import { CloseIcon, LanguageIcon, MenuIcon } from '~/ui/icon';
 import { Link } from '~/ui/link';
 import { Portal } from '~/ui/portal';
 
-export const loader = ({ params }: LoaderFunctionArgs) => {
-  const translation = getTranslation(params, root);
-  const currentConference = getCurrentConference(
-    ((params['lang'] as Locale) || undefined) ?? Locale.En,
-  );
-  return { ...translation, currentConference };
-};
+export const loader = routeHandler(function* () {
+  const { params } = yield* ReactRouterContext;
+  const lang = getLocale(params);
+  const content = yield* Content.Service;
+  const translation = yield* content.getTranslations(lang);
+  const currentConference = yield* content.getCurrentConference(lang);
+  return { lang, translation, currentConference };
+});
 
 export default function Layout() {
   const { translation } = useLoaderData<typeof loader>();

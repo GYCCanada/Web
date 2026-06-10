@@ -1,5 +1,4 @@
 import {
-  type LoaderFunctionArgs,
   type MetaFunction,
   useLoaderData,
   useSearchParams,
@@ -18,13 +17,14 @@ import { useButton } from '@base-ui/react/internals/use-button';
 import { match } from 'ts-pattern';
 
 import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
-import { getConferenceByYear } from '~/lib/conference.server';
+import { Content } from '~/lib/content.server';
 import { dayjs } from '~/lib/dayjs';
+import { ReactRouterContext } from '~/lib/effect/router-context';
+import { routeHandler } from '~/lib/effect/route';
 import { useLocale, useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import { buttonStyle } from '~/ui/button';
 import { ExternalLink } from '~/ui/external-link';
-import { LocalizedImage } from '~/ui/image';
 import { Link } from '~/ui/link';
 import { Main } from '~/ui/main';
 
@@ -44,10 +44,12 @@ export const meta: MetaFunction = ({ params }) => {
   ];
 };
 
-export const loader = ({ params }: LoaderFunctionArgs) => {
+export const loader = routeHandler(function* () {
+  const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
-  return { conference: getConferenceByYear(locale, 2024) };
-};
+  const content = yield* Content.Service;
+  return { conference: yield* content.getConference(locale, 2024) };
+});
 
 export default function Registration() {
   return (
@@ -84,11 +86,9 @@ function MobileHero() {
   return (
     <section className="flex flex-col gap-10 pb-16">
       <div>
-        <LocalizedImage
-          srcs={{
-            en: '/2024/en/hero-mobile.jpg',
-            fr: '/2024/fr/hero-mobile.jpg',
-          }}
+        <img
+          src={conference.hero.image.mobile}
+          alt={conference.hero.alt}
         />
         <div className="absolute -bottom-6 left-4 flex items-center gap-4">
           <a
@@ -143,11 +143,9 @@ function DesktopHero() {
     <section className="full-bleed flex flex-col gap-10 p-4 pb-16">
       <div className="mx-auto flex w-(--width) gap-10 py-16">
         <div className="flex flex-1 flex-col gap-10">
-          <LocalizedImage
-            srcs={{
-              en: '/2024/en/hero-desktop.jpg',
-              fr: '/2024/fr/hero-desktop.jpg',
-            }}
+          <img
+            src={conference.hero.image.desktop}
+            alt={conference.hero.alt}
           />
           <p className="text-2xl italic">{conference.tagline}</p>
         </div>
