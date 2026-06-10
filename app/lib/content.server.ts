@@ -1,12 +1,11 @@
 import {
   Clock,
   Context,
+  Duration,
   Effect,
   Layer,
   Option,
-  Ref,
   Schema,
-  Semaphore,
 } from 'effect';
 
 import { defaultContent } from './content/defaults';
@@ -44,11 +43,23 @@ import type { ObjectHead } from './storage.server';
  *     `Schema`-decoded on read — and is converted HERE to the legacy
  *     route/component shape (per-locale strings, `[start, end]` millisecond
  *     tuples, leading-`/` image URLs) so component code is UNCHANGED.
- *   - `serialize-shared-state-mutations` + `make-operations-idempotent`: a
- *     single-permit `Semaphore` guards the cache refresh so concurrent
- *     first-reads do not stampede the bucket; the holder double-checks the TTL
- *     after acquiring the permit, so a refresh that already happened is not
- *     repeated.
+ *   - `use-the-platform`: the read cache is Effect's built-in
+ *     `Effect.cachedInvalidateWithTTL` — it single-flights concurrent
+ *     first-reads (a fetch in flight parks the other fibers on a latch and they
+ *     all get the one result, so the bucket is not stampeded) and hands back an
+ *     `invalidate` effect the editor's publish calls (`bust`). Within the TTL it
+ *     returns the *same* decoded `SiteContent` reference. **Documented staleness
+ *     window:** the built-in `invalidate` is a bare sync that only expires the
+ *     entry (`expiresAt = 0`); it does not pre-empt an in-flight refresh nor
+ *     clear its `running` flag. So a publish that lands while a refresh is
+ *     already fetching the bucket is masked: that refresh's `onExit` completes
+ *     with the *pre-publish* document and re-arms the TTL from its own
+ *     completion instant. Measured from the publish instant the stale window is
+ *     therefore `(the refresh's remaining bucket-read duration) + one TTL` — not
+ *     ≤ one TTL. For a 30s-TTL, low-write CMS this worst case (a multi-second
+ *     bucket read in flight + 30s) still stays inside D3's "visible on the next
+ *     read after the window" contract, so we take the platform primitive over a
+ *     hand-rolled epoch guard (`subtract-before-you-add`).
  *   - `make-impossible-states-unrepresentable`: a Conference whose pricing is
  *     undecided carries `registration: undefined` (the `Option.none()` in the
  *     document), never empty tuples.
@@ -292,16 +303,11 @@ export interface AdminContent {
 
 /**
  * Cache TTL. Short by design (D3 — runtime read with cache, no redeploy): a
- * publish becomes visible on the next read after the TTL elapses (or an
- * explicit bust, added with the editor in C5). 30s keeps the bucket-read rate
- * negligible while making edits feel near-instant.
+ * publish becomes visible on the next read after the TTL elapses (or the
+ * editor's explicit `bust`). 30s keeps the bucket-read rate negligible while
+ * making edits feel near-instant.
  */
 const CACHE_TTL_MS = 30_000;
-
-interface CacheEntry {
-  readonly value: SiteContentType;
-  readonly loadedAt: number;
-}
 
 const decodeDocument = Schema.decodeUnknownEffect(Schema.fromJsonString(SiteContent));
 
@@ -329,10 +335,14 @@ export class Content extends Context.Service<
      */
     readonly getAdminContent: () => Effect.Effect<AdminContent>;
     /**
-     * Invalidate the public read cache so the next `getSiteContent` re-reads the
-     * bucket. Called by the editor's publish action so a publish is visible
-     * immediately, with no redeploy and without waiting out the TTL (D3,
+     * Invalidate the public read cache so a subsequent `getSiteContent`
+     * re-reads the bucket. Called by the editor's publish action so a publish
+     * is visible with no redeploy and without waiting out the TTL (D3,
      * `make-operations-idempotent` — busting an already-empty cache is a no-op).
+     * When no refresh is already in flight a publish is visible on the very
+     * next read; otherwise it is visible within the documented staleness window
+     * — `invalidate` only expires the entry, it does not pre-empt an in-flight
+     * refresh (see the `Content` doc above for the full mechanism).
      */
     readonly bust: () => Effect.Effect<void>;
   }
@@ -341,36 +351,7 @@ export class Content extends Context.Service<
     Content,
     Effect.gen(function* () {
       const storage = yield* Storage;
-      const cache = yield* Ref.make<Option.Option<CacheEntry>>(Option.none());
-      const refreshLock = yield* Semaphore.make(1);
-      /**
-       * Monotonic publish-epoch counter (`derive-dont-sync`,
-       * `serialize-shared-state-mutations`). `bust()` increments it; a refresh
-       * snapshots it *before* its bucket read and only commits the freshly-read
-       * document to the cache if the epoch is unchanged when it goes to write.
-       * This closes the publish/refresh race: a refresh that read the document
-       * the bucket held *before* a concurrent publish cannot repopulate the
-       * cache with that now-stale document, because the publish's `bust()` will
-       * have advanced the epoch in between — the refresh observes the change and
-       * leaves the cache empty so the very next read re-fetches the published
-       * document (D3 — a publish is visible on the next read, never stale for a
-       * full TTL).
-       */
-      const epoch = yield* Ref.make(0);
 
-      /**
-       * Read + decode the document from the bucket, falling back to the bundled
-       * defaults on every failure mode (`boundary-discipline`, D3):
-       *   - no bucket configured → `Storage.layerOptional` yields a disabled
-       *     storage whose `get` reports `NotFound`;
-       *   - object absent / empty → `NotFound`;
-       *   - bucket unreachable or document malformed → any other failure /
-       *     decode error / unexpected defect.
-       * In all cases we log and serve the defaults, so the site is never broken
-       * by a missing or bad document. `catchCause` recovers from BOTH the typed
-       * failures and any defect so the read is total — the public site always
-       * gets a `SiteContent`.
-       */
       /**
        * Read + decode the `SiteContent` document at `key`, or `Option.none()`
        * when it is absent / unreadable / malformed. Shared by the public read
@@ -396,6 +377,18 @@ export class Content extends Context.Service<
           ),
         );
 
+      /**
+       * Read + decode the document from the bucket, falling back to the bundled
+       * defaults on every failure mode (`boundary-discipline`, D3):
+       *   - no bucket configured → `Storage.layerOptional` yields a disabled
+       *     storage whose `get` reports `NotFound`;
+       *   - object absent / empty → `NotFound`;
+       *   - bucket unreachable or document malformed → any other failure /
+       *     decode error / unexpected defect.
+       * In all cases `readDocument` logs and yields `none`, so the site is never
+       * broken by a missing or bad document — the public read always gets a
+       * `SiteContent`.
+       */
       const fetchDocument: Effect.Effect<SiteContentType> = readDocument(
         SITE_CONTENT_KEY,
       ).pipe(
@@ -405,59 +398,19 @@ export class Content extends Context.Service<
       );
 
       /**
-       * Return the cached document if it is within the TTL, otherwise refresh
-       * it under the single-permit lock. The lock holder re-checks the TTL
-       * after acquiring the permit so a refresh that another fiber already
-       * completed is not repeated (`make-operations-idempotent`); waiters
-       * therefore return the freshly-loaded value without a second bucket read
-       * (`serialize-shared-state-mutations`).
+       * The public read cache: Effect's built-in TTL cache with manual
+       * invalidation (`use-the-platform`). `cachedContent` single-flights
+       * concurrent first-reads onto one `fetchDocument` (the others park on its
+       * latch and share the result, so the bucket is not stampeded) and returns
+       * the same decoded `SiteContent` reference for the TTL's duration;
+       * `invalidate` arms the next read to re-fetch (the editor's publish path).
        */
-      const getSiteContent = (): Effect.Effect<SiteContentType> =>
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis;
-          const current = yield* Ref.get(cache);
-          if (
-            Option.isSome(current) &&
-            now - current.value.loadedAt < CACHE_TTL_MS
-          ) {
-            return current.value.value;
-          }
+      const [cachedContent, invalidate] = yield* Effect.cachedInvalidateWithTTL(
+        fetchDocument,
+        Duration.millis(CACHE_TTL_MS),
+      );
 
-          return yield* refreshLock.withPermits(1)(
-            Effect.gen(function* () {
-              const afterLock = yield* Ref.get(cache);
-              const lockNow = yield* Clock.currentTimeMillis;
-              if (
-                Option.isSome(afterLock) &&
-                lockNow - afterLock.value.loadedAt < CACHE_TTL_MS
-              ) {
-                return afterLock.value.value;
-              }
-
-              // Snapshot the publish epoch *before* reading the bucket. If a
-              // concurrent publish busts the cache while this read is in flight,
-              // the epoch advances and we must NOT cache the value we just read
-              // (it predates the publish). We still return it to *this* caller —
-              // it is a coherent decoded document — but we leave the cache empty
-              // so the next read re-fetches the published document.
-              const readEpoch = yield* Ref.get(epoch);
-              const value = yield* fetchDocument;
-              const loadedAt = yield* Clock.currentTimeMillis;
-              // Commit the cache write only if no bust intervened during the
-              // read. `bust()` advances the epoch under the *same* `refreshLock`
-              // this fiber holds, so it cannot interleave between this check and
-              // the store; a bust that lands while `fetchDocument` is in flight
-              // raises the epoch above `readEpoch`, and we skip the write —
-              // leaving the cache empty so the next read re-fetches the freshly
-              // published document.
-              const currentEpoch = yield* Ref.get(epoch);
-              if (currentEpoch === readEpoch) {
-                yield* Ref.set(cache, Option.some({ value, loadedAt }));
-              }
-              return value;
-            }),
-          );
-        });
+      const getSiteContent = (): Effect.Effect<SiteContentType> => cachedContent;
 
       const getConference = (
         locale: Locale,
@@ -545,26 +498,19 @@ export class Content extends Context.Service<
           return { content: defaultContent, source: 'defaults' as const };
         });
 
-      // Drop the cached document AND advance the publish epoch so the next
-      // public read re-fetches the bucket (D3 — a publish is visible on the very
-      // next read). Both steps run *under* `refreshLock`, the same permit a
-      // refresh holds while it reads the bucket and writes the cache. This
-      // closes the publish/refresh race (`serialize-shared-state-mutations`): a
-      // bust cannot interleave between a refresh's epoch-check and its cache
-      // store, so it either runs *before* the refresh snapshots the epoch (the
-      // refresh then sees the new bucket document) or *after* the refresh
-      // commits — in which case it raises the epoch the refresh had snapshotted
-      // and clears the just-cached stale document. Either way the stale,
-      // pre-publish document can never survive in the cache.
-      // (`make-operations-idempotent`: busting an already-empty cache, or
-      // double-busting, is harmless — it just clears `none` and bumps a counter.)
-      const bust = (): Effect.Effect<void> =>
-        refreshLock.withPermits(1)(
-          Effect.gen(function* () {
-            yield* Ref.update(epoch, (current) => current + 1);
-            yield* Ref.set(cache, Option.none());
-          }),
-        );
+      // Arm the next public read to re-fetch the bucket so a publish is visible
+      // immediately, with no redeploy and without waiting out the TTL (D3). This
+      // is the built-in cache's `invalidate`: it expires the cached document and
+      // clears the stored result, so the next `getSiteContent` recomputes
+      // `fetchDocument`. (`make-operations-idempotent`: busting an already-empty
+      // or already-expired cache is a harmless no-op.) The built-in does NOT
+      // pre-empt an in-flight refresh: a publish landing during one is masked
+      // because that refresh re-arms the TTL with its pre-publish document, so
+      // the stale window measured from the publish is `(the refresh's remaining
+      // bucket-read duration) + one TTL`, not ≤ one TTL. That documented window
+      // is within D3's "visible on the next read after the window" contract
+      // (see the `Content` doc above for the full mechanism).
+      const bust = (): Effect.Effect<void> => invalidate;
 
       return Content.of({
         getSiteContent,

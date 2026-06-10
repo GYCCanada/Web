@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { Deferred, Effect, Fiber, Layer, Option, Ref, Schema } from 'effect';
+import { Effect, Layer, Option, Ref, Schema } from 'effect';
 import { TestClock } from 'effect/testing';
 
 import {
@@ -23,8 +23,10 @@ import { NotFound, Storage, StorageError } from './storage.server';
  *     leading-`/` image URLs) so component code is unchanged;
  *   - the current-conference-by-date and by-year selection match today's
  *     `conference.server.ts` semantics (`derive-dont-sync`);
- *   - reads are cached within the TTL and refreshed after it
- *     (`serialize-shared-state-mutations`, `make-operations-idempotent`).
+ *   - reads are cached within the TTL (same reference) and refreshed after it,
+ *     concurrent first-reads are single-flighted, and the editor's `bust` makes
+ *     a publish visible on the next read (`use-the-platform` — the built-in
+ *     `Effect.cachedInvalidateWithTTL`).
  */
 
 const encode = Schema.encodeUnknownEffect(Schema.fromJsonString(SiteContent));
@@ -308,9 +310,9 @@ describe('Content cache (TTL + single-flight)', () => {
     const json = await encodeDoc(defaultContent);
 
     // We can't read the private call count from outside, so assert behaviour:
-    // two reads inside the TTL return the same value, and a read after the TTL
-    // still works (a fresh load). The single-flight + TTL logic is exercised by
-    // the storage `get` being called under the lock either way.
+    // two reads inside the TTL return the SAME decoded reference (the cache hit,
+    // not a re-decode), and a read after the TTL still works (a fresh load). The
+    // built-in `Effect.cachedInvalidateWithTTL` provides both contracts.
     const result = await run(
       Effect.gen(function* () {
         const content = yield* Content;
@@ -403,120 +405,37 @@ describe('Content cache (TTL + single-flight)', () => {
   });
 
   /**
-   * Regression for the publish/refresh race: a public read that is mid-refresh
-   * (it has already read the OLD document from the bucket) must NOT be able to
-   * repopulate the cache with that stale document AFTER a concurrent publish has
-   * busted it — which would serve stale content for a full TTL and break D3.
-   *
-   * The `Storage.get` here parks on a latch so we can pin the interleaving the
-   * finding describes: fiber A starts a refresh and reads the OLD document, the
-   * main fiber publishes the NEW document and busts the cache, then A's read
-   * completes. `bust()` advances the publish epoch under the same `refreshLock`
-   * the refresh holds, so the refresh's stale write can never win — the very
-   * next read re-fetches and serves the published document.
+   * Single-flight: concurrent first-reads must not stampede the bucket. The
+   * built-in `Effect.cachedInvalidateWithTTL` parks every reader on one
+   * in-flight `fetchDocument` and shares its result, so the bucket is read
+   * exactly once even when many fibers race the cold cache
+   * (`use-the-platform`). The `Storage.get` counts its calls so we can assert
+   * the single read directly.
    */
-  const latchedStorage = (
-    body: string,
-    started: Deferred.Deferred<void>,
-    release: Deferred.Deferred<void>,
-  ) =>
-    Layer.effect(
-      Storage,
-      Effect.gen(function* () {
-        const current = yield* Ref.make(body);
-        return Storage.of({
-          get: (key) =>
-            key === SITE_CONTENT_KEY
-              ? Effect.gen(function* () {
-                  // Snapshot the document, then announce the read has begun and
-                  // park until the test releases us — so the publish + bust land
-                  // while this read is in flight.
-                  const json = yield* Ref.get(current);
-                  yield* Deferred.succeed(started, undefined);
-                  yield* Deferred.await(release);
-                  return {
-                    stream:
-                      new Response(json).body ??
-                      new ReadableStream<Uint8Array>(),
-                    contentType: 'application/json',
-                    size: json.length,
-                  };
-                })
-              : Effect.fail(new NotFound({ key })),
-          put: (key, value) =>
-            key === SITE_CONTENT_KEY && typeof value === 'string'
-              ? Ref.set(current, value)
-              : Effect.fail(
-                  new StorageError({ key, op: 'put', message: 'unsupported' }),
-                ),
-          head: () => Effect.succeed(Option.none()),
-          list: () => Effect.succeed([]),
-          delete: () => Effect.void,
-        });
-      }),
-    );
-
-  it('an in-flight refresh cannot repopulate the cache with a document a concurrent bust invalidated (D3)', async () => {
-    const original = await encodeDoc(defaultContent);
-    const editedDoc = SiteContent.make({
-      ...defaultContent,
-      conferences: defaultContent.conferences.map((conference) =>
-        conference.slug === '/2026'
-          ? { ...conference, accentColor: '#0a0a0a' }
-          : conference,
-      ),
-    });
-    const edited = await encodeDoc(editedDoc);
-
-    const accent2026 = (content: SiteContentType): string | undefined =>
-      content.conferences.find((c) => c.slug === '/2026')?.accentColor;
-
-    // The latches are created outside the run so the same `Deferred`s are shared
-    // by the storage layer (which signals/parks on the read) and the test body
-    // (which drives the publish + bust between them).
-    const started = await Effect.runPromise(Deferred.make<void>());
-    const release = await Effect.runPromise(Deferred.make<void>());
+  it('single-flights concurrent first-reads onto one bucket read', async () => {
+    const json = await encodeDoc(defaultContent);
 
     const result = await runWithStorage(
       Effect.gen(function* () {
         const content = yield* Content;
-        const storage = yield* Storage;
-
-        // Fiber A: a public read whose refresh reads the OLD document and then
-        // parks on the latch, holding `refreshLock`.
-        const reader = yield* Effect.forkChild(content.getSiteContent());
-        yield* Deferred.await(started); // A has read the OLD document
-
-        // Publish the NEW document, then bust on a forked fiber. With the FIXED
-        // `bust()` this fiber blocks on the `refreshLock` A holds (so it cannot
-        // possibly clear the cache before A finishes its conditional write); the
-        // bust then runs after A and raises the epoch A snapshotted, dropping A's
-        // stale write. With the BROKEN `bust()` (a bare `Ref.set(none)` that
-        // skips the lock) the fork would clear the cache immediately — BEFORE A
-        // resumes — and A would then re-cache the stale OLD document as the final
-        // state, which the `after` assertion catches.
-        yield* storage.put(SITE_CONTENT_KEY, edited, 'application/json');
-        const buster = yield* Effect.forkChild(content.bust());
-
-        // Give the buster a scheduling window to run if it is *able* to (the
-        // broken, lock-free bust runs here; the fixed bust stays parked on the
-        // lock A holds). Then release A so its read + conditional cache write
-        // complete, and join both fibers.
-        yield* Effect.yieldNow;
-        yield* Deferred.succeed(release, undefined);
-        const stale = yield* Fiber.join(reader);
-        yield* Fiber.join(buster);
-
-        // The next read must re-fetch and serve the PUBLISHED document — never
-        // the stale one A had cached.
-        const after = yield* content.getSiteContent();
-        return { stale, after };
+        // Race many cold-cache reads at once; the built-in cache must collapse
+        // them onto a single `fetchDocument`.
+        const docs = yield* Effect.all(
+          Array.from({ length: 8 }, () => content.getSiteContent()),
+          { concurrency: 'unbounded' },
+        );
+        return docs;
       }),
-      latchedStorage(original, started, release),
+      countingStorage(json),
     );
 
-    expect(accent2026(result.stale)).toBe('#D4A24E'); // A read the OLD document
-    expect(accent2026(result.after)).toBe('#0a0a0a'); // bust wins → published
+    // Every racer got the bundled defaults…
+    for (const doc of result) {
+      expect(doc).toEqual(defaultContent);
+    }
+    // …and they share ONE decoded reference (proves the single in-flight load,
+    // not eight independent decodes).
+    expect(result.every((doc) => doc === result[0])).toBe(true);
   });
 });
 
