@@ -359,24 +359,23 @@ export class Content extends Context.Service<
        * path (which maps `none` to the bundled defaults) and the admin read
        * path (which tries the draft, then the published key, then defaults).
        */
-      const readDocument = (
-        key: string,
-      ): Effect.Effect<Option.Option<SiteContentType>> =>
-        Effect.gen(function* () {
+      const readDocument = Effect.fnUntraced(
+        function* (key: string) {
           const object = yield* storage.get(key);
           const json = yield* Effect.promise(() =>
             new Response(object.stream).text(),
           );
-          return yield* decodeDocument(json);
-        }).pipe(
-          Effect.map(Option.some),
-          Effect.catchCause((cause) =>
-            Effect.logWarning(
-              `Content: could not read ${key}`,
-              cause,
-            ).pipe(Effect.as(Option.none<SiteContentType>())),
+          return Option.some(yield* decodeDocument(json));
+        },
+        (effect, key) =>
+          effect.pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning(`Content: could not read ${key}`, cause).pipe(
+                Effect.as(Option.none<SiteContentType>()),
+              ),
+            ),
           ),
-        );
+      );
 
       /**
        * Read + decode the document from the bucket, falling back to the bundled
@@ -411,40 +410,43 @@ export class Content extends Context.Service<
         Duration.millis(CACHE_TTL_MS),
       );
 
-      const getSiteContent = (): Effect.Effect<SiteContentType> => cachedContent;
+      const getSiteContent = Effect.fn('Content.getSiteContent')(function* () {
+        return yield* cachedContent;
+      });
 
-      const getConference = (
+      const getConference = Effect.fn('Content.getConference')(function* (
         locale: Locale,
         year?: number,
-      ): Effect.Effect<Conference> =>
-        Effect.gen(function* () {
-          assertValidLocale(locale);
-          const content = yield* getSiteContent();
-          const now = yield* Clock.currentTimeMillis;
-          return year === undefined
-            ? selectCurrent(content, locale, now)
-            : selectByYear(content, locale, year);
-        });
+      ) {
+        assertValidLocale(locale);
+        const content = yield* getSiteContent();
+        const now = yield* Clock.currentTimeMillis;
+        return year === undefined
+          ? selectCurrent(content, locale, now)
+          : selectByYear(content, locale, year);
+      });
 
-      const getCurrentConference = (
+      const getCurrentConference = Effect.fn('Content.getCurrentConference')(
+        function* (locale: Locale) {
+          return yield* getConference(locale);
+        },
+      );
+
+      const getTranslations = Effect.fn('Content.getTranslations')(function* (
         locale: Locale,
-      ): Effect.Effect<Conference> => getConference(locale);
+      ) {
+        assertValidLocale(locale);
+        const content = yield* getSiteContent();
+        return content.translations[locale];
+      });
 
-      const getTranslations = (locale: Locale): Effect.Effect<Translation> =>
-        Effect.gen(function* () {
-          assertValidLocale(locale);
-          const content = yield* getSiteContent();
-          return content.translations[locale];
-        });
-
-      const getTeam = () =>
-        Effect.gen(function* () {
-          const content = yield* getSiteContent();
-          return {
-            team: content.team.map(toTeamMember),
-            board: [...content.board],
-          };
-        });
+      const getTeam = Effect.fn('Content.getTeam')(function* () {
+        const content = yield* getSiteContent();
+        return {
+          team: content.team.map(toTeamMember),
+          board: [...content.board],
+        };
+      });
 
       /**
        * Load the document the `/admin` editor edits, reconciling draft vs
@@ -467,8 +469,8 @@ export class Content extends Context.Service<
        * `>` then drops the ambiguous draft in favour of the just-published live
        * content, the safe direction.)
        */
-      const getAdminContent = (): Effect.Effect<AdminContent> =>
-        Effect.gen(function* () {
+      const getAdminContent = Effect.fn('Content.getAdminContent')(
+        function* () {
           const draft = yield* readDocument(SITE_CONTENT_DRAFT_KEY);
           const published = yield* readDocument(SITE_CONTENT_KEY);
 
@@ -497,7 +499,8 @@ export class Content extends Context.Service<
             return { content: published.value, source: 'published' as const };
           }
           return { content: defaultContent, source: 'defaults' as const };
-        });
+        },
+      );
 
       // Arm the next public read to re-fetch the bucket so a publish is visible
       // immediately, with no redeploy and without waiting out the TTL (D3). This
@@ -511,7 +514,9 @@ export class Content extends Context.Service<
       // bucket-read duration) + one TTL`, not ≤ one TTL. That documented window
       // is within D3's "visible on the next read after the window" contract
       // (see the `Content` doc above for the full mechanism).
-      const bust = (): Effect.Effect<void> => invalidate;
+      const bust = Effect.fn('Content.bust')(function* () {
+        yield* invalidate;
+      });
 
       return Content.of({
         getSiteContent,

@@ -49,24 +49,26 @@ export class Mailchimp extends Context.Service<
         server: 'us10',
       });
 
-      return Mailchimp.of({
-        subscribe: (email, name) =>
-          Effect.gen(function* () {
-            const nameParts = name.split(' ');
-            yield* Effect.tryPromise({
-              try: () =>
-                mailchimp.lists.addListMember(config.listId, {
-                  email_address: email,
-                  status: 'subscribed',
-                  merge_fields: {
-                    FNAME: nameParts[0] ?? '',
-                    LNAME: nameParts.slice(1).join(' '),
-                  },
-                }),
-              catch: (cause) => new MailchimpError({ cause }),
-            });
-          }),
+      const subscribe = Effect.fn('Mailchimp.subscribe')(function* (
+        email: string,
+        name: string,
+      ) {
+        const nameParts = name.split(' ');
+        yield* Effect.tryPromise({
+          try: () =>
+            mailchimp.lists.addListMember(config.listId, {
+              email_address: email,
+              status: 'subscribed',
+              merge_fields: {
+                FNAME: nameParts[0] ?? '',
+                LNAME: nameParts.slice(1).join(' '),
+              },
+            }),
+          catch: (cause) => new MailchimpError({ cause }),
+        });
       });
+
+      return Mailchimp.of({ subscribe });
     }),
   );
 }

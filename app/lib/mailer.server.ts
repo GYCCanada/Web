@@ -46,19 +46,21 @@ export class Mailer extends Context.Service<
         },
       });
 
-      return Mailer.of({
-        send: ({ subject, content }) =>
+      const send = Effect.fn('Mailer.send')(
+        (input: { readonly subject: string; readonly content: string }) =>
           Effect.tryPromise({
             try: () =>
               transporter.sendMail({
                 from: `GYCC Contact <${mail.from}>`,
                 to: mail.to,
-                subject,
-                text: content,
+                subject: input.subject,
+                text: input.content,
               }),
             catch: (cause) => new MailError({ cause }),
           }).pipe(Effect.asVoid),
-      });
+      );
+
+      return Mailer.of({ send });
     }),
   );
 }

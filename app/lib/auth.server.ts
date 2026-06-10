@@ -69,8 +69,8 @@ const toBase64Url = (bytes: Uint8Array): string => {
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
-const importKey = (secret: string): Effect.Effect<CryptoKey> =>
-  Effect.promise(() =>
+const importKey = Effect.fnUntraced(function* (secret: string) {
+  return yield* Effect.promise(() =>
     crypto.subtle.importKey(
       'raw',
       new TextEncoder().encode(secret),
@@ -79,15 +79,15 @@ const importKey = (secret: string): Effect.Effect<CryptoKey> =>
       ['sign', 'verify'],
     ),
   );
+});
 
-const sign = (secret: string, payload: string): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    const key = yield* importKey(secret);
-    const sig = yield* Effect.promise(() =>
-      crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)),
-    );
-    return toBase64Url(new Uint8Array(sig));
-  });
+const sign = Effect.fnUntraced(function* (secret: string, payload: string) {
+  const key = yield* importKey(secret);
+  const sig = yield* Effect.promise(() =>
+    crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)),
+  );
+  return toBase64Url(new Uint8Array(sig));
+});
 
 const constantTimeEqual = (a: Uint8Array, b: Uint8Array): boolean => {
   if (a.length !== b.length) return false;
@@ -96,18 +96,17 @@ const constantTimeEqual = (a: Uint8Array, b: Uint8Array): boolean => {
   return diff === 0;
 };
 
-const verifySig = (
+const verifySig = Effect.fnUntraced(function* (
   secret: string,
   payload: string,
   sig: string,
-): Effect.Effect<boolean> =>
-  Effect.gen(function* () {
-    const expected = yield* sign(secret, payload);
-    return constantTimeEqual(
-      new TextEncoder().encode(expected),
-      new TextEncoder().encode(sig),
-    );
-  });
+) {
+  const expected = yield* sign(secret, payload);
+  return constantTimeEqual(
+    new TextEncoder().encode(expected),
+    new TextEncoder().encode(sig),
+  );
+});
 
 const parseCookie = (header: string | null, name: string): string | null => {
   if (header === null) return null;
@@ -170,64 +169,62 @@ export class Auth extends Context.Service<
       // collapses "auth on, no secret" into the single "disabled" state.
       const enabled = adminPw !== '' && secret !== '';
 
-      const issueToken = (): Effect.Effect<string> =>
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis;
-          const issued = Math.floor(now / 1000);
-          const expires = issued + TOKEN_TTL_SECONDS;
-          const payload = `${issued}.${expires}`;
-          const sig = yield* sign(secret, payload);
-          return `${payload}.${sig}`;
-        });
+      // Internal helpers (not part of the service surface) — untraced, mirroring
+      // opencode's traced-boundary / untraced-internal split (`git.ts`).
+      const issueToken = Effect.fnUntraced(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const issued = Math.floor(now / 1000);
+        const expires = issued + TOKEN_TTL_SECONDS;
+        const payload = `${issued}.${expires}`;
+        const sig = yield* sign(secret, payload);
+        return `${payload}.${sig}`;
+      });
 
-      const validateToken = (
-        token: string,
-      ): Effect.Effect<void, Unauthorized> =>
-        Effect.gen(function* () {
-          const parts = token.split('.');
-          if (parts.length !== 3) return yield* new Unauthorized();
-          const [issuedStr, expiresStr, sig] = parts as [
-            string,
-            string,
-            string,
-          ];
-          const expires = Number(expiresStr);
-          if (!Number.isFinite(expires)) return yield* new Unauthorized();
-          const now = yield* Clock.currentTimeMillis;
-          if (expires < Math.floor(now / 1000)) return yield* new Unauthorized();
-          const ok = yield* verifySig(secret, `${issuedStr}.${expiresStr}`, sig);
-          if (!ok) return yield* new Unauthorized();
-        });
+      const validateToken = Effect.fnUntraced(function* (token: string) {
+        const parts = token.split('.');
+        if (parts.length !== 3) return yield* new Unauthorized();
+        const [issuedStr, expiresStr, sig] = parts as [string, string, string];
+        const expires = Number(expiresStr);
+        if (!Number.isFinite(expires)) return yield* new Unauthorized();
+        const now = yield* Clock.currentTimeMillis;
+        if (expires < Math.floor(now / 1000)) return yield* new Unauthorized();
+        const ok = yield* verifySig(secret, `${issuedStr}.${expiresStr}`, sig);
+        if (!ok) return yield* new Unauthorized();
+      });
+
+      const verifyPassword = Effect.fn('Auth.verifyPassword')(function* (
+        password: string,
+      ) {
+        if (!enabled) return yield* new AdminDisabled();
+        // HMAC both sides to a fixed-length digest under the signing secret
+        // before comparing, so the compare never branches on the secret
+        // `ADMIN_PASSWORD`'s length — defeating a timing probe of the
+        // password length. The digests are equal-length (43-char base64url
+        // of a 32-byte SHA-256 HMAC), so the constant-time compare runs the
+        // full loop regardless of the submitted password.
+        const submitted = yield* sign(secret, password);
+        const expected = yield* sign(secret, adminPw);
+        const ok = constantTimeEqual(
+          new TextEncoder().encode(submitted),
+          new TextEncoder().encode(expected),
+        );
+        if (!ok) return yield* new BadPassword();
+        return yield* issueToken();
+      });
+
+      const checkCookie = Effect.fn('Auth.checkCookie')(function* (
+        header: string | null,
+      ) {
+        if (!enabled) return yield* new AdminDisabled();
+        const token = parseCookie(header, COOKIE_NAME);
+        if (token === null) return yield* new Unauthorized();
+        yield* validateToken(token);
+      });
 
       return Auth.of({
         enabled,
-
-        verifyPassword: (password) =>
-          Effect.gen(function* () {
-            if (!enabled) return yield* new AdminDisabled();
-            // HMAC both sides to a fixed-length digest under the signing secret
-            // before comparing, so the compare never branches on the secret
-            // `ADMIN_PASSWORD`'s length — defeating a timing probe of the
-            // password length. The digests are equal-length (43-char base64url
-            // of a 32-byte SHA-256 HMAC), so the constant-time compare runs the
-            // full loop regardless of the submitted password.
-            const submitted = yield* sign(secret, password);
-            const expected = yield* sign(secret, adminPw);
-            const ok = constantTimeEqual(
-              new TextEncoder().encode(submitted),
-              new TextEncoder().encode(expected),
-            );
-            if (!ok) return yield* new BadPassword();
-            return yield* issueToken();
-          }),
-
-        checkCookie: (header) =>
-          Effect.gen(function* () {
-            if (!enabled) return yield* new AdminDisabled();
-            const token = parseCookie(header, COOKIE_NAME);
-            if (token === null) return yield* new Unauthorized();
-            yield* validateToken(token);
-          }),
+        verifyPassword,
+        checkCookie,
 
         cookieHeader: (token) =>
           `${COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${TOKEN_TTL_SECONDS}`,

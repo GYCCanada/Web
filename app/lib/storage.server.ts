@@ -111,7 +111,7 @@ type ListClient = {
 
 const epoch = (): Date => DateTime.toDateUtc(DateTime.makeUnsafe(0));
 
-const listStoredObjects = Effect.fn('listStoredObjects')(function* (
+const listStoredObjects = Effect.fnUntraced(function* (
   client: ListClient,
   prefix: string | undefined,
 ) {
@@ -172,58 +172,64 @@ export class Storage extends Context.Service<
           ? body
           : new Blob([body as Uint8Array<ArrayBuffer>]);
 
-      return Storage.of({
-        get: (key) => {
-          const object = entries.get(key);
-          if (object === undefined) return Effect.fail(new NotFound({ key }));
-          return Effect.sync(() => ({
-            stream:
-              new Response(responseBody(object.body)).body ??
-              new ReadableStream<Uint8Array>(),
-            contentType: object.contentType,
-            size: bytes(object.body).byteLength,
-          }));
-        },
-
-        put: (key, body, contentType) =>
-          Effect.gen(function* () {
-            const now = yield* Clock.currentTimeMillis;
-            entries.set(key, {
-              body,
-              contentType,
-              lastModified: DateTime.toDateUtc(DateTime.makeUnsafe(now)),
-              etag: `"test-${now}"`,
-            });
-          }),
-
-        head: (key) =>
-          Effect.sync(() => {
-            const object = entries.get(key);
-            if (object === undefined) return Option.none();
-            return Option.some({
-              size: bytes(object.body).byteLength,
-              contentType: object.contentType,
-              lastModified: object.lastModified,
-              etag: object.etag,
-            });
-          }),
-
-        list: (prefix) =>
-          Effect.sync(() =>
-            [...entries.entries()]
-              .filter(([key]) => prefix === undefined || key.startsWith(prefix))
-              .map(([key, object]) => ({
-                key,
-                size: bytes(object.body).byteLength,
-                lastModified: object.lastModified,
-              })),
-          ),
-
-        delete: (key) =>
-          Effect.sync(() => {
-            entries.delete(key);
-          }),
+      const get = Effect.fn('Storage.get')(function* (key: string) {
+        const object = entries.get(key);
+        if (object === undefined) return yield* new NotFound({ key });
+        return {
+          stream:
+            new Response(responseBody(object.body)).body ??
+            new ReadableStream<Uint8Array>(),
+          contentType: object.contentType,
+          size: bytes(object.body).byteLength,
+        };
       });
+
+      const put = Effect.fn('Storage.put')(function* (
+        key: string,
+        body: Uint8Array | string,
+        contentType: string,
+      ) {
+        const now = yield* Clock.currentTimeMillis;
+        entries.set(key, {
+          body,
+          contentType,
+          lastModified: DateTime.toDateUtc(DateTime.makeUnsafe(now)),
+          etag: `"test-${now}"`,
+        });
+      });
+
+      const head = Effect.fn('Storage.head')((key: string) =>
+        Effect.sync(() => {
+          const object = entries.get(key);
+          if (object === undefined) return Option.none<ObjectHead>();
+          return Option.some<ObjectHead>({
+            size: bytes(object.body).byteLength,
+            contentType: object.contentType,
+            lastModified: object.lastModified,
+            etag: object.etag,
+          });
+        }),
+      );
+
+      const list = Effect.fn('Storage.list')((prefix?: string) =>
+        Effect.sync(() =>
+          [...entries.entries()]
+            .filter(([key]) => prefix === undefined || key.startsWith(prefix))
+            .map(([key, object]) => ({
+              key,
+              size: bytes(object.body).byteLength,
+              lastModified: object.lastModified,
+            })),
+        ),
+      );
+
+      const del = Effect.fn('Storage.delete')((key: string) =>
+        Effect.sync(() => {
+          entries.delete(key);
+        }),
+      );
+
+      return Storage.of({ get, put, head, list, delete: del });
     });
 
   static layer = Layer.effect(
@@ -244,59 +250,64 @@ export class Storage extends Context.Service<
         region: config.region,
       });
 
-      return Storage.of({
-        get: (key) =>
-          Effect.gen(function* () {
-            const file = client.file(key);
-            const stat = yield* Effect.tryPromise({
-              try: () => file.stat(),
-              catch: (e) =>
-                isNoSuchKey(e)
-                  ? new NotFound({ key })
-                  : new StorageError({ key, op: 'get', cause: e }),
-            });
-            return {
-              stream: file.stream(),
-              contentType: stat.type === '' ? 'application/octet-stream' : stat.type,
-              size: stat.size,
-            };
-          }),
-
-        put: (key, body, contentType) =>
-          Effect.tryPromise({
-            try: () => client.write(key, body, { type: contentType }),
-            catch: (e) => new StorageError({ key, op: 'put', cause: e }),
-          }).pipe(Effect.asVoid),
-
-        head: (key) =>
-          Effect.gen(function* () {
-            const file = client.file(key);
-            const exists = yield* Effect.tryPromise({
-              try: () => file.exists(),
-              catch: (e) => new StorageError({ key, op: 'head', cause: e }),
-            });
-            if (!exists) return Option.none();
-            const stat = yield* Effect.tryPromise({
-              try: () => file.stat(),
-              catch: (e) => new StorageError({ key, op: 'head', cause: e }),
-            });
-            return Option.some({
-              size: stat.size,
-              contentType:
-                stat.type === '' ? 'application/octet-stream' : stat.type,
-              lastModified: stat.lastModified,
-              etag: stat.etag,
-            });
-          }),
-
-        list: (prefix) => listStoredObjects(client, prefix),
-
-        delete: (key) =>
-          Effect.tryPromise({
-            try: () => client.delete(key),
-            catch: (e) => new StorageError({ key, op: 'delete', cause: e }),
-          }),
+      const get = Effect.fn('Storage.get')(function* (key: string) {
+        const file = client.file(key);
+        const stat = yield* Effect.tryPromise({
+          try: () => file.stat(),
+          catch: (e) =>
+            isNoSuchKey(e)
+              ? new NotFound({ key })
+              : new StorageError({ key, op: 'get', cause: e }),
+        });
+        return {
+          stream: file.stream(),
+          contentType: stat.type === '' ? 'application/octet-stream' : stat.type,
+          size: stat.size,
+        };
       });
+
+      const put = Effect.fn('Storage.put')(function* (
+        key: string,
+        body: Uint8Array | string,
+        contentType: string,
+      ) {
+        yield* Effect.tryPromise({
+          try: () => client.write(key, body, { type: contentType }),
+          catch: (e) => new StorageError({ key, op: 'put', cause: e }),
+        });
+      });
+
+      const head = Effect.fn('Storage.head')(function* (key: string) {
+        const file = client.file(key);
+        const exists = yield* Effect.tryPromise({
+          try: () => file.exists(),
+          catch: (e) => new StorageError({ key, op: 'head', cause: e }),
+        });
+        if (!exists) return Option.none<ObjectHead>();
+        const stat = yield* Effect.tryPromise({
+          try: () => file.stat(),
+          catch: (e) => new StorageError({ key, op: 'head', cause: e }),
+        });
+        return Option.some<ObjectHead>({
+          size: stat.size,
+          contentType: stat.type === '' ? 'application/octet-stream' : stat.type,
+          lastModified: stat.lastModified,
+          etag: stat.etag,
+        });
+      });
+
+      const list = Effect.fn('Storage.list')(function* (prefix?: string) {
+        return yield* listStoredObjects(client, prefix);
+      });
+
+      const del = Effect.fn('Storage.delete')(function* (key: string) {
+        yield* Effect.tryPromise({
+          try: () => client.delete(key),
+          catch: (e) => new StorageError({ key, op: 'delete', cause: e }),
+        });
+      });
+
+      return Storage.of({ get, put, head, list, delete: del });
     }),
   );
 
