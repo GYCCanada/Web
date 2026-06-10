@@ -130,7 +130,15 @@ dist
 .pnp.*
 
 
-.nx/cache
 .pnpm-store
-apps/cms/pnpm-lock.yaml
 .DS_Store
+
+# App build output (React Router client/server bundles)
+/build
+/.cache
+
+# React Router generated route types
+/.react-router
+
+# Local workflow scripts (not part of the app)
+.claude/
