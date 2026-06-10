@@ -5,7 +5,7 @@ import { Env } from './env.server';
 
 export class MailError extends Schema.TaggedErrorClass<MailError>()(
   'gycc/lib/mailer.server/MailError',
-  { message: Schema.String },
+  { cause: Schema.optional(Schema.Defect) },
 ) {}
 
 /**
@@ -56,7 +56,7 @@ export class Mailer extends Context.Service<
                 subject,
                 text: content,
               }),
-            catch: (cause) => new MailError({ message: String(cause) }),
+            catch: (cause) => new MailError({ cause }),
           }).pipe(Effect.asVoid),
       });
     }),

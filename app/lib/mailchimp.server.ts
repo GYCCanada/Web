@@ -5,7 +5,7 @@ import { Env } from './env.server';
 
 export class MailchimpError extends Schema.TaggedErrorClass<MailchimpError>()(
   'gycc/lib/mailchimp.server/MailchimpError',
-  { message: Schema.String },
+  { cause: Schema.optional(Schema.Defect) },
 ) {}
 
 export class MailchimpDisabled extends Schema.TaggedErrorClass<MailchimpDisabled>()(
@@ -63,8 +63,7 @@ export class Mailchimp extends Context.Service<
                     LNAME: nameParts.slice(1).join(' '),
                   },
                 }),
-              catch: (cause) =>
-                new MailchimpError({ message: String(cause) }),
+              catch: (cause) => new MailchimpError({ cause }),
             });
           }),
       });

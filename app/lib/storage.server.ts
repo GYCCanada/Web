@@ -37,9 +37,27 @@ export class StorageError extends Schema.TaggedErrorClass<StorageError>()(
   {
     key: Schema.String,
     op: StorageOp,
-    message: Schema.String,
+    cause: Schema.optional(Schema.Defect),
   },
 ) {}
+
+/**
+ * Structured not-found predicate over Bun's S3 error, mirroring opencode's
+ * `missing()` (`packages/opencode/src/storage/storage.ts:67-74`,
+ * `packages/core/src/fs-util.ts:114`) which matches on `err.code === 'ENOENT'`
+ * rather than substring-matching a stringified error.
+ *
+ * Bun raises a structured `S3Error` (an `Error` with `name === 'S3Error'`) for
+ * S3-protocol failures, carrying the upstream S3 XML `<Code>` as a `code`
+ * field — `'NoSuchKey'` for a missing object (confirmed against the runtime;
+ * `Bun.S3Error` is not an exported constructor in Bun 1.3.x, so we match the
+ * structured field instead of `instanceof`).
+ */
+const isNoSuchKey = (e: unknown): boolean =>
+  typeof e === 'object' &&
+  e !== null &&
+  'code' in e &&
+  (e as { readonly code?: unknown }).code === 'NoSuchKey';
 
 export class NotFound extends Schema.TaggedErrorClass<NotFound>()(
   'gycc/lib/storage.server/NotFound',
@@ -100,9 +118,10 @@ const listStoredObjects = Effect.fn('listStoredObjects')(function* (
   const objects: ListedObject[] = [];
   let continuationToken: string | undefined;
   do {
-    const page = yield* Effect.tryPromise(() =>
-      client.list({ prefix, continuationToken }),
-    );
+    const page = yield* Effect.tryPromise({
+      try: () => client.list({ prefix, continuationToken }),
+      catch: (e) => new StorageError({ key: prefix ?? '', op: 'list', cause: e }),
+    });
     for (const item of page.contents ?? []) {
       objects.push({
         key: item.key,
@@ -231,17 +250,10 @@ export class Storage extends Context.Service<
             const file = client.file(key);
             const stat = yield* Effect.tryPromise({
               try: () => file.stat(),
-              catch: (e) => {
-                const message = String(e);
-                if (
-                  message.includes('NoSuchKey') ||
-                  message.includes('does not exist') ||
-                  message.includes('404')
-                ) {
-                  return new NotFound({ key });
-                }
-                return new StorageError({ key, op: 'get', message });
-              },
+              catch: (e) =>
+                isNoSuchKey(e)
+                  ? new NotFound({ key })
+                  : new StorageError({ key, op: 'get', cause: e }),
             });
             return {
               stream: file.stream(),
@@ -253,8 +265,7 @@ export class Storage extends Context.Service<
         put: (key, body, contentType) =>
           Effect.tryPromise({
             try: () => client.write(key, body, { type: contentType }),
-            catch: (e) =>
-              new StorageError({ key, op: 'put', message: String(e) }),
+            catch: (e) => new StorageError({ key, op: 'put', cause: e }),
           }).pipe(Effect.asVoid),
 
         head: (key) =>
@@ -262,14 +273,12 @@ export class Storage extends Context.Service<
             const file = client.file(key);
             const exists = yield* Effect.tryPromise({
               try: () => file.exists(),
-              catch: (e) =>
-                new StorageError({ key, op: 'head', message: String(e) }),
+              catch: (e) => new StorageError({ key, op: 'head', cause: e }),
             });
             if (!exists) return Option.none();
             const stat = yield* Effect.tryPromise({
               try: () => file.stat(),
-              catch: (e) =>
-                new StorageError({ key, op: 'head', message: String(e) }),
+              catch: (e) => new StorageError({ key, op: 'head', cause: e }),
             });
             return Option.some({
               size: stat.size,
@@ -280,24 +289,12 @@ export class Storage extends Context.Service<
             });
           }),
 
-        list: (prefix) =>
-          listStoredObjects(client, prefix).pipe(
-            Effect.catchCause((cause) =>
-              Effect.fail(
-                new StorageError({
-                  key: prefix ?? '',
-                  op: 'list',
-                  message: String(cause),
-                }),
-              ),
-            ),
-          ),
+        list: (prefix) => listStoredObjects(client, prefix),
 
         delete: (key) =>
           Effect.tryPromise({
             try: () => client.delete(key),
-            catch: (e) =>
-              new StorageError({ key, op: 'delete', message: String(e) }),
+            catch: (e) => new StorageError({ key, op: 'delete', cause: e }),
           }),
       });
     }),
@@ -326,7 +323,7 @@ export class Storage extends Context.Service<
               new StorageError({
                 key,
                 op: 'put',
-                message: 'storage unconfigured',
+                cause: new Error('storage unconfigured'),
               }),
             ),
           head: () => Effect.succeed(Option.none()),

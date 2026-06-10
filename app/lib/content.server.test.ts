@@ -40,7 +40,9 @@ const emptyStorage = Layer.succeed(
   Storage.of({
     get: (key) => Effect.fail(new NotFound({ key })),
     put: (key) =>
-      Effect.fail(new StorageError({ key, op: 'put', message: 'disabled' })),
+      Effect.fail(
+        new StorageError({ key, op: 'put', cause: new Error('disabled') }),
+      ),
     head: () => Effect.succeed(Option.none()),
     list: () => Effect.succeed([]),
     delete: () => Effect.void,
@@ -297,7 +299,7 @@ describe('Content cache (TTL + single-flight)', () => {
               : Effect.fail(new NotFound({ key })),
           put: (key) =>
             Effect.fail(
-              new StorageError({ key, op: 'put', message: 'disabled' }),
+              new StorageError({ key, op: 'put', cause: new Error('disabled') }),
             ),
           head: () => Effect.succeed(Option.none()),
           list: () => Effect.succeed([]),
@@ -358,7 +360,11 @@ describe('Content cache (TTL + single-flight)', () => {
             key === SITE_CONTENT_KEY && typeof value === 'string'
               ? Ref.set(body, value)
               : Effect.fail(
-                  new StorageError({ key, op: 'put', message: 'unsupported' }),
+                  new StorageError({
+                    key,
+                    op: 'put',
+                    cause: new Error('unsupported'),
+                  }),
                 ),
           head: () => Effect.succeed(Option.none()),
           list: () => Effect.succeed([]),
