@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, test as it } from 'effect-bun-test';
 
 import { imageKeyFromPath } from './images.server';
 

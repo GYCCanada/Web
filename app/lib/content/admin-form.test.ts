@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, test } from 'effect-bun-test';
 import { Effect, Schema } from 'effect';
 
 import {
@@ -29,7 +29,7 @@ const entries = (
 ): Iterable<readonly [string, string]> => Object.entries(record);
 
 describe('assembleOverrides', () => {
-  it('parses dotted form names into a nested object', () => {
+  test('parses dotted form names into a nested object', () => {
     const result = assembleOverrides(
       entries({
         'conferences.0.themeName.en': 'New Title',
@@ -44,7 +44,7 @@ describe('assembleOverrides', () => {
     });
   });
 
-  it('coerces bible chapter/verse leaves to numbers', () => {
+  test('coerces bible chapter/verse leaves to numbers', () => {
     const result = assembleOverrides(
       entries({
         'conferences.0.bible.chapter': '12',
@@ -57,7 +57,7 @@ describe('assembleOverrides', () => {
 });
 
 describe('deepMerge', () => {
-  it('overlays a leaf without dropping sibling keys', () => {
+  test('overlays a leaf without dropping sibling keys', () => {
     const merged = deepMerge(
       { a: { x: 1, y: 2 }, b: 3 },
       { a: { x: 9 } },
@@ -65,7 +65,7 @@ describe('deepMerge', () => {
     expect(merged).toEqual({ a: { x: 9, y: 2 }, b: 3 });
   });
 
-  it('merges arrays element-by-element by index', () => {
+  test('merges arrays element-by-element by index', () => {
     const merged = deepMerge(
       { list: [{ k: 'a', keep: true }, { k: 'b', keep: true }] },
       { list: [{ k: 'A' }] },
@@ -75,7 +75,7 @@ describe('deepMerge', () => {
     });
   });
 
-  it('does not mutate its inputs', () => {
+  test('does not mutate its inputs', () => {
     const base: Json = { a: { x: 1 } };
     deepMerge(base, { a: { x: 2 } });
     expect(base).toEqual({ a: { x: 1 } });
@@ -83,46 +83,48 @@ describe('deepMerge', () => {
 });
 
 describe('merge-onto-current-document round-trip', () => {
-  it('editing one field decodes to a document that keeps everything else', async () => {
-    const base = (await Effect.runPromise(encode(defaultContent))) as Json;
+  it.effect('editing one field decodes to a document that keeps everything else', () =>
+    Effect.gen(function* () {
+      const base = (yield* encode(defaultContent)) as Json;
 
-    // Edit only the 2026 theme name (en) and accent colour.
-    const overrides = assembleOverrides(
-      entries({
-        'conferences.2.themeName.en': 'Speak Up',
-        'conferences.2.accentColor': '#123456',
-      }),
-    );
-    const merged = deepMerge(base, overrides);
-    const decoded = await Effect.runPromise(decode(merged));
+      // Edit only the 2026 theme name (en) and accent colour.
+      const overrides = assembleOverrides(
+        entries({
+          'conferences.2.themeName.en': 'Speak Up',
+          'conferences.2.accentColor': '#123456',
+        }),
+      );
+      const merged = deepMerge(base, overrides);
+      const decoded = yield* decode(merged);
 
-    // The edited fields changed… (`accentColor` is the branded `HexColour`;
-    // widen to its base string for the value assertion).
-    expect(decoded.conferences[2]?.themeName.en).toBe('Speak Up');
-    expect(String(decoded.conferences[2]?.accentColor)).toBe('#123456');
-    // …and everything else (deep bios, the 2024 speakers, the team) survived.
-    expect(decoded.conferences[0]?.speakers.length).toBe(
-      defaultContent.conferences[0]?.speakers.length,
-    );
-    expect(decoded.team).toEqual(defaultContent.team);
-    expect(decoded.conferences[2]?.themeName.fr).toBe(
-      defaultContent.conferences[2]?.themeName.fr,
-    );
-  });
+      // The edited fields changed… (`accentColor` is the branded `HexColour`;
+      // widen to its base string for the value assertion).
+      expect(decoded.conferences[2]?.themeName.en).toBe('Speak Up');
+      expect(String(decoded.conferences[2]?.accentColor)).toBe('#123456');
+      // …and everything else (deep bios, the 2024 speakers, the team) survived.
+      expect(decoded.conferences[0]?.speakers.length).toBe(
+        defaultContent.conferences[0]?.speakers.length,
+      );
+      expect(decoded.team).toEqual(defaultContent.team);
+      expect(decoded.conferences[2]?.themeName.fr).toBe(
+        defaultContent.conferences[2]?.themeName.fr,
+      );
+    }));
 
-  it('a bad edit (non-hex colour) is rejected by the decode boundary', async () => {
-    const base = (await Effect.runPromise(encode(defaultContent))) as Json;
-    const merged = deepMerge(
-      base,
-      assembleOverrides(entries({ 'conferences.0.accentColor': 'not-a-colour' })),
-    );
-    const exit = await Effect.runPromise(Effect.exit(decode(merged)));
-    expect(exit._tag).toBe('Failure');
-  });
+  it.effect('a bad edit (non-hex colour) is rejected by the decode boundary', () =>
+    Effect.gen(function* () {
+      const base = (yield* encode(defaultContent)) as Json;
+      const merged = deepMerge(
+        base,
+        assembleOverrides(entries({ 'conferences.0.accentColor': 'not-a-colour' })),
+      );
+      const exit = yield* Effect.exit(decode(merged));
+      expect(exit._tag).toBe('Failure');
+    }));
 });
 
 describe('setAtPath', () => {
-  it('sets a deep leaf on a clone without mutating the original', () => {
+  test('sets a deep leaf on a clone without mutating the original', () => {
     const doc: Json = { conferences: [{ hero: { desktop: { key: { en: 'old' } } } }] };
     const next = setAtPath(doc, 'conferences.0.hero.desktop.key.en', 'images/new.png');
     expect(next).toEqual({
@@ -135,20 +137,20 @@ describe('setAtPath', () => {
 });
 
 describe('image upload helpers', () => {
-  it('recognises an upload intent and recovers its target path', () => {
+  test('recognises an upload intent and recovers its target path', () => {
     expect(imageUploadTarget('upload:team.0.photo.key')).toBe('team.0.photo.key');
     expect(imageUploadTarget('save-draft')).toBeNull();
     expect(imageUploadTarget('upload:')).toBeNull();
   });
 
-  it('accepts only image content-types', () => {
+  test('accepts only image content-types', () => {
     expect(isAcceptedImageType('image/png')).toBe(true);
     expect(isAcceptedImageType('image/JPEG')).toBe(true);
     expect(isAcceptedImageType('application/pdf')).toBe(false);
     expect(isAcceptedImageType('text/html')).toBe(false);
   });
 
-  it('builds a namespaced, extension-correct, collision-free upload key', () => {
+  test('builds a namespaced, extension-correct, collision-free upload key', () => {
     const key = uploadedImageKey('team.0.photo.key', 'image/png', 1_700_000_000_000);
     expect(key).toBe('images/uploads/team-0-photo-key-1700000000000.png');
     expect(extensionForType('image/webp')).toBe('webp');

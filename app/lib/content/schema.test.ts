@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, test } from 'effect-bun-test';
 import { Effect, Schema } from 'effect';
 
 import { defaultContent } from './defaults';
@@ -28,29 +28,36 @@ const codec = Schema.fromJsonString(SiteContent);
 const encode = Schema.encodeUnknownEffect(codec);
 const decode = Schema.decodeUnknownEffect(codec);
 
+/**
+ * `typeof JSON.parse(json)` — a plain (non-Effect) sanity check that the encoded
+ * string is valid JSON for an object. Kept outside the Effect context (the
+ * project's lint prefers Schema codecs to raw `JSON` *inside* effects).
+ */
+const parsedType = (json: string): string => typeof JSON.parse(json);
+
 describe('SiteContent round-trip', () => {
-  it('encodes the defaults to JSON and decodes back to a deep-equal value', async () => {
-    const restored = await Effect.runPromise(
-      encode(defaultContent).pipe(Effect.flatMap(decode)),
-    );
+  it.effect('encodes the defaults to JSON and decodes back to a deep-equal value', () =>
+    Effect.gen(function* () {
+      const restored = yield* encode(defaultContent).pipe(Effect.flatMap(decode));
 
-    expect(restored).toEqual(defaultContent);
-  });
+      expect(restored).toEqual(defaultContent);
+    }));
 
-  it('produces a string the defaults can be recovered from', async () => {
-    const json = await Effect.runPromise(encode(defaultContent));
+  it.effect('produces a string the defaults can be recovered from', () =>
+    Effect.gen(function* () {
+      const json = yield* encode(defaultContent);
 
-    expect(typeof json).toBe('string');
-    // Sanity: the JSON parses and is an object (not e.g. a thrown error string).
-    expect(typeof JSON.parse(json)).toBe('object');
-  });
+      expect(typeof json).toBe('string');
+      // Sanity: the JSON parses and is an object (not e.g. a thrown error string).
+      expect(parsedType(json)).toBe('object');
+    }));
 });
 
 const isValidAssetKey = (key: string): boolean =>
   Schema.decodeUnknownResult(AssetKey)(key)._tag === 'Success';
 
 describe('AssetKey validation', () => {
-  it('accepts plain bucket-relative keys', () => {
+  test('accepts plain bucket-relative keys', () => {
     for (const key of [
       '2024/speakers/matt.png',
       'team/elijah.jpg',
@@ -62,7 +69,7 @@ describe('AssetKey validation', () => {
     }
   });
 
-  it('rejects empty, absolute, scheme, and traversal keys', () => {
+  test('rejects empty, absolute, scheme, and traversal keys', () => {
     for (const key of [
       '', // empty
       '/2024/hero.png', // leading slash
@@ -78,7 +85,7 @@ describe('AssetKey validation', () => {
     }
   });
 
-  it('rejects backslash and percent-encoded traversal forms (boundary-discipline)', () => {
+  test('rejects backslash and percent-encoded traversal forms (boundary-discipline)', () => {
     // The validator IS the watertight boundary: C5 serves these keys via
     // `GET /images/*`, where percent-decoding can turn `%2e%2e` back into `..`.
     // Splitting on `/` alone would let these slip through, so the filter forbids
@@ -101,7 +108,7 @@ const isValidIsoDate = (value: string): boolean =>
   Schema.decodeUnknownResult(IsoDate)(value)._tag === 'Success';
 
 describe('IsoDate validation', () => {
-  it('accepts real calendar dates, including a leap-year Feb 29', () => {
+  test('accepts real calendar dates, including a leap-year Feb 29', () => {
     for (const value of [
       '2026-06-09',
       '2024-02-29', // 2024 is a leap year
@@ -112,7 +119,7 @@ describe('IsoDate validation', () => {
     }
   });
 
-  it('rejects malformed shapes and impossible calendar dates', () => {
+  test('rejects malformed shapes and impossible calendar dates', () => {
     for (const value of [
       '', // empty
       '2026-6-9', // not zero-padded
@@ -134,7 +141,7 @@ const isValidDateRange = (range: { start: string; end: string }): boolean =>
   Schema.decodeUnknownResult(DateRange)(range)._tag === 'Success';
 
 describe('DateRange ordering', () => {
-  it('accepts start before or equal to end', () => {
+  test('accepts start before or equal to end', () => {
     expect(isValidDateRange({ start: '2026-06-09', end: '2026-06-10' })).toBe(
       true,
     );
@@ -143,7 +150,7 @@ describe('DateRange ordering', () => {
     );
   });
 
-  it('rejects an inverted range (start after end)', () => {
+  test('rejects an inverted range (start after end)', () => {
     expect(isValidDateRange({ start: '2026-06-10', end: '2026-06-09' })).toBe(
       false,
     );
@@ -157,13 +164,13 @@ const isValidSlug = (value: string): boolean =>
   Schema.decodeUnknownResult(ConferenceSlug)(value)._tag === 'Success';
 
 describe('ConferenceSlug validation', () => {
-  it('accepts a `/YYYY` slug', () => {
+  test('accepts a `/YYYY` slug', () => {
     for (const value of ['/2024', '/2025', '/2026', '/0001']) {
       expect(isValidSlug(value)).toBe(true);
     }
   });
 
-  it('rejects anything that is not a `/YYYY` slug', () => {
+  test('rejects anything that is not a `/YYYY` slug', () => {
     for (const value of [
       '', // empty
       '2026', // missing leading slash
@@ -190,7 +197,7 @@ describe('ConferenceSlug validation', () => {
  * becomes assignable to a brand again).
  */
 describe('branded primitives carry their nominal brand', () => {
-  it('decode/make produce a branded value, and a raw string is not assignable', () => {
+  test('decode/make produce a branded value, and a raw string is not assignable', () => {
     // Decoding yields the branded type, assignable to its own brand…
     const key: AssetKeyType = AssetKey.make('2026/en/hero.png');
     const date: IsoDateType = IsoDate.make('2026-06-10');

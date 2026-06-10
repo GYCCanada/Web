@@ -1,13 +1,11 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'effect-bun-test';
 import {
-  Config,
   ConfigProvider,
   Effect,
   Exit,
   Layer,
   Option,
   Redacted,
-  Schema,
 } from 'effect';
 
 import { Env } from './env.server';
@@ -17,15 +15,8 @@ import { Mailer } from './mailer.server';
 const envLayer = (env: Record<string, string>) =>
   Layer.provide(Env.layer, ConfigProvider.layer(ConfigProvider.fromEnv({ env })));
 
-const run = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  layer: Layer.Layer<R, Config.ConfigError>,
-) => Effect.runPromise(Effect.provide(effect, layer));
-
-const runExit = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  layer: Layer.Layer<R, Config.ConfigError>,
-) => Effect.runPromise(Effect.exit(Effect.provide(effect, layer)));
+const provideEnv = (env: Record<string, string>) =>
+  Effect.provide(envLayer(env));
 
 const PROD_ENV = {
   NODE_ENV: 'production',
@@ -40,70 +31,61 @@ const PROD_ENV = {
 };
 
 describe('Env config', () => {
-  it('treats every mail/mailchimp var as optional in development', () =>
-    run(
-      Effect.gen(function* () {
-        const env = yield* Env.Service;
-        expect(env.isProduction).toBe(false);
-        expect(Option.isNone(env.mail)).toBe(true);
-        expect(Option.isNone(env.mailchimp)).toBe(true);
-        expect(Option.isNone(env.bucket)).toBe(true);
-      }),
-      envLayer({ NODE_ENV: 'development' }),
-    ));
+  it.effect('treats every mail/mailchimp var as optional in development', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(env.isProduction).toBe(false);
+      expect(Option.isNone(env.mail)).toBe(true);
+      expect(Option.isNone(env.mailchimp)).toBe(true);
+      expect(Option.isNone(env.bucket)).toBe(true);
+    }).pipe(provideEnv({ NODE_ENV: 'development' })));
 
-  it('requires every mail/mailchimp var in production and redacts secrets', () =>
-    run(
-      Effect.gen(function* () {
-        const env = yield* Env.Service;
-        expect(env.isProduction).toBe(true);
-        expect(Option.isSome(env.mail)).toBe(true);
-        expect(Option.isSome(env.mailchimp)).toBe(true);
-        if (Option.isSome(env.mail)) {
-          expect(env.mail.value.host).toBe('smtp.example.com');
-          expect(env.mail.value.port).toBe(465);
-          expect(Redacted.value(env.mail.value.pass)).toBe('secret');
-        }
-        if (Option.isSome(env.mailchimp)) {
-          expect(env.mailchimp.value.listId).toBe('list-123');
-          expect(Redacted.value(env.mailchimp.value.apiKey)).toBe('key-us10');
-        }
-      }),
-      envLayer(PROD_ENV),
-    ));
+  it.effect('requires every mail/mailchimp var in production and redacts secrets', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(env.isProduction).toBe(true);
+      expect(Option.isSome(env.mail)).toBe(true);
+      expect(Option.isSome(env.mailchimp)).toBe(true);
+      if (Option.isSome(env.mail)) {
+        expect(env.mail.value.host).toBe('smtp.example.com');
+        expect(env.mail.value.port).toBe(465);
+        expect(Redacted.value(env.mail.value.pass)).toBe('secret');
+      }
+      if (Option.isSome(env.mailchimp)) {
+        expect(env.mailchimp.value.listId).toBe('list-123');
+        expect(Redacted.value(env.mailchimp.value.apiKey)).toBe('key-us10');
+      }
+    }).pipe(provideEnv(PROD_ENV)));
 
-  it('fails fast in production when a required mail var is missing', async () => {
-    const exit = await runExit(
-      Env.Service.asEffect(),
-      envLayer({ NODE_ENV: 'production', MAIL_HOST: 'only-host' }),
-    );
-    expect(Exit.isFailure(exit)).toBe(true);
-  });
+  it.effect('fails fast in production when a required mail var is missing', () =>
+    Effect.gen(function* () {
+      const exit = yield* Env.Service.asEffect().pipe(
+        provideEnv({ NODE_ENV: 'production', MAIL_HOST: 'only-host' }),
+        Effect.exit,
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+    }));
 
-  it('leaves the bucket absent in production when its vars are unset', () =>
-    run(
-      Effect.gen(function* () {
-        const env = yield* Env.Service;
-        expect(env.isProduction).toBe(true);
-        expect(Option.isNone(env.bucket)).toBe(true);
-      }),
-      envLayer(PROD_ENV),
-    ));
+  it.effect('leaves the bucket absent in production when its vars are unset', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(env.isProduction).toBe(true);
+      expect(Option.isNone(env.bucket)).toBe(true);
+    }).pipe(provideEnv(PROD_ENV)));
 
-  it('resolves the bucket, redacts the secret, and defaults region to auto', () =>
-    run(
-      Effect.gen(function* () {
-        const env = yield* Env.Service;
-        expect(Option.isSome(env.bucket)).toBe(true);
-        if (Option.isSome(env.bucket)) {
-          expect(env.bucket.value.endpoint).toBe('https://s3.example.com');
-          expect(env.bucket.value.bucket).toBe('gycc-content');
-          expect(env.bucket.value.region).toBe('auto');
-          expect(Redacted.value(env.bucket.value.accessKeyId)).toBe('akid');
-          expect(Redacted.value(env.bucket.value.secretAccessKey)).toBe('secret-key');
-        }
-      }),
-      envLayer({
+  it.effect('resolves the bucket, redacts the secret, and defaults region to auto', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isSome(env.bucket)).toBe(true);
+      if (Option.isSome(env.bucket)) {
+        expect(env.bucket.value.endpoint).toBe('https://s3.example.com');
+        expect(env.bucket.value.bucket).toBe('gycc-content');
+        expect(env.bucket.value.region).toBe('auto');
+        expect(Redacted.value(env.bucket.value.accessKeyId)).toBe('akid');
+        expect(Redacted.value(env.bucket.value.secretAccessKey)).toBe('secret-key');
+      }
+    }).pipe(
+      provideEnv({
         NODE_ENV: 'development',
         BUCKET_ENDPOINT: 'https://s3.example.com',
         BUCKET_ACCESS_KEY: 'akid',
@@ -112,16 +94,15 @@ describe('Env config', () => {
       }),
     ));
 
-  it('treats present-but-blank bucket vars as absent (env.example placeholders)', () =>
-    run(
-      Effect.gen(function* () {
-        const env = yield* Env.Service;
-        expect(Option.isNone(env.bucket)).toBe(true);
-      }),
+  it.effect('treats present-but-blank bucket vars as absent (env.example placeholders)', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.bucket)).toBe(true);
+    }).pipe(
       // Mirrors a freshly-copied `.env.example`: the BUCKET_* keys are present
       // but empty. These must collapse to `Option.none()` so the CMS falls back
       // to its bundled defaults (D3), not a Some(...) of empty strings.
-      envLayer({
+      provideEnv({
         NODE_ENV: 'development',
         BUCKET_ENDPOINT: '',
         BUCKET_ACCESS_KEY: '',
@@ -131,13 +112,12 @@ describe('Env config', () => {
       }),
     ));
 
-  it('treats whitespace-only bucket vars as absent', () =>
-    run(
-      Effect.gen(function* () {
-        const env = yield* Env.Service;
-        expect(Option.isNone(env.bucket)).toBe(true);
-      }),
-      envLayer({
+  it.effect('treats whitespace-only bucket vars as absent', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.bucket)).toBe(true);
+    }).pipe(
+      provideEnv({
         NODE_ENV: 'development',
         BUCKET_ENDPOINT: '   ',
         BUCKET_ACCESS_KEY: '  ',
@@ -146,14 +126,13 @@ describe('Env config', () => {
       }),
     ));
 
-  it('treats a partially-blank bucket group as absent', () =>
-    run(
-      Effect.gen(function* () {
-        const env = yield* Env.Service;
-        expect(Option.isNone(env.bucket)).toBe(true);
-      }),
+  it.effect('treats a partially-blank bucket group as absent', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.bucket)).toBe(true);
+    }).pipe(
       // Endpoint set, but the rest left blank — not a usable bucket, so None.
-      envLayer({
+      provideEnv({
         NODE_ENV: 'development',
         BUCKET_ENDPOINT: 'https://s3.example.com',
         BUCKET_ACCESS_KEY: '',
@@ -162,17 +141,16 @@ describe('Env config', () => {
       }),
     ));
 
-  it('honours an explicit BUCKET_REGION', () =>
-    run(
-      Effect.gen(function* () {
-        const env = yield* Env.Service;
-        if (Option.isSome(env.bucket)) {
-          expect(env.bucket.value.region).toBe('us-east-1');
-        } else {
-          throw new Error('expected bucket to be configured');
-        }
-      }),
-      envLayer({
+  it.effect('honours an explicit BUCKET_REGION', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      if (Option.isSome(env.bucket)) {
+        expect(env.bucket.value.region).toBe('us-east-1');
+      } else {
+        throw new Error('expected bucket to be configured');
+      }
+    }).pipe(
+      provideEnv({
         NODE_ENV: 'development',
         BUCKET_ENDPOINT: 'https://s3.example.com',
         BUCKET_ACCESS_KEY: 'akid',
@@ -184,32 +162,26 @@ describe('Env config', () => {
 });
 
 describe('Mailer', () => {
-  it('is a no-op outside production', () =>
-    run(
-      Effect.gen(function* () {
-        const mailer = yield* Mailer.Service;
-        yield* mailer.send({ subject: 's', content: 'c' });
-      }),
-      Layer.provide(Mailer.layer, envLayer({ NODE_ENV: 'development' })),
+  it.effect('is a no-op outside production', () =>
+    Effect.gen(function* () {
+      const mailer = yield* Mailer.Service;
+      yield* mailer.send({ subject: 's', content: 'c' });
+    }).pipe(
+      Effect.provide(Layer.provide(Mailer.layer, envLayer({ NODE_ENV: 'development' }))),
     ));
 });
 
 describe('Mailchimp', () => {
-  it('fails with MailchimpDisabled when unconfigured', async () => {
-    const exit = await runExit(
-      Effect.gen(function* () {
-        const mailchimp = yield* Mailchimp.Service;
-        yield* mailchimp.subscribe('a@b.com', 'Ada Lovelace');
-      }),
-      Layer.provide(Mailchimp.layer, envLayer({ NODE_ENV: 'development' })),
-    );
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const failed = exit.cause.reasons.some(
-        (reason) =>
-          reason._tag === 'Fail' && Schema.is(MailchimpDisabled)(reason.error),
+  it.effect('fails with MailchimpDisabled when unconfigured', () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        Effect.gen(function* () {
+          const mailchimp = yield* Mailchimp.Service;
+          yield* mailchimp.subscribe('a@b.com', 'Ada Lovelace');
+        }),
       );
-      expect(failed).toBe(true);
-    }
-  });
+      expect(error).toBeInstanceOf(MailchimpDisabled);
+    }).pipe(
+      Effect.provide(Layer.provide(Mailchimp.layer, envLayer({ NODE_ENV: 'development' }))),
+    ));
 });
