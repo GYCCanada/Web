@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'effect-bun-test';
-import { ConfigProvider, Effect, Layer } from 'effect';
+import { ConfigProvider, Effect, Exit, Layer, Schema } from 'effect';
 import { TestClock } from 'effect/testing';
 
 import { AdminDisabled, Auth, BadPassword, Unauthorized } from './auth.server';
@@ -147,24 +147,63 @@ describe('Auth (disabled when COOKIE_SECRET unset)', () => {
       expect(auth.enabled).toBe(false);
     }));
 
+  test('rejects checkCookie with AdminDisabled when COOKIE_SECRET is unset', () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth.Service;
+      const error = yield* Effect.flip(auth.checkCookie('gycc_admin=anything'));
+      expect(error).toBeInstanceOf(AdminDisabled);
+      expect(error).not.toBeInstanceOf(Unauthorized);
+    }));
+});
+
+describe('Auth (disabled when COOKIE_SECRET present-but-blank)', () => {
+  // ADMIN_PASSWORD set, COOKIE_SECRET present but blank — the distinct
+  // empty-HMAC-key environment (NOT the same as COOKIE_SECRET being absent).
+  const test = it.effect.layer(
+    authLayer({
+      ADMIN_PASSWORD: 'correct horse battery staple',
+      COOKIE_SECRET: '',
+    }),
+  );
+
+  test('treats a present-but-blank COOKIE_SECRET as disabled', () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth.Service;
+      expect(auth.enabled).toBe(false);
+    }));
+
   // The regression this guards: when ADMIN_PASSWORD was set but COOKIE_SECRET
   // was blank, the admin used to report enabled, so verifyPassword proceeded to
   // mint a token and signed with an empty HMAC key. `crypto.subtle.importKey`
   // rejects an empty key with a DataError, crashing login with a 500. The fix
-  // requires BOTH secrets, so this now fails cleanly with AdminDisabled. (A
-  // defect would escape `Effect.flip` and fail the test as an unhandled error,
-  // so this asserts a clean tagged failure rather than a crash.)
+  // requires BOTH secrets, so this now fails cleanly with AdminDisabled — and
+  // it must be a CLEAN TAGGED FAILURE, not an unhandled DataError *defect*. We
+  // inspect the `Exit` (not `Effect.flip`) precisely so a defect (`Exit.hasDies`)
+  // is caught rather than silently passing as "some failure".
   test('rejects verifyPassword with AdminDisabled instead of crashing on an empty HMAC key', () =>
     Effect.gen(function* () {
       const auth = yield* Auth.Service;
-      const error = yield* Effect.flip(
+      const exit = yield* Effect.exit(
         auth.verifyPassword('correct horse battery staple'),
       );
-      expect(error).toBeInstanceOf(AdminDisabled);
-      expect(error).not.toBeInstanceOf(BadPassword);
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        const failedWithAdminDisabled = exit.cause.reasons.some(
+          (reason) =>
+            reason._tag === 'Fail' && Schema.is(AdminDisabled)(reason.error),
+        );
+        const failedWithBadPassword = exit.cause.reasons.some(
+          (reason) =>
+            reason._tag === 'Fail' && Schema.is(BadPassword)(reason.error),
+        );
+        expect(failedWithAdminDisabled).toBe(true);
+        expect(failedWithBadPassword).toBe(false);
+      }
+      // It must be a clean tagged failure, not an unhandled DataError defect.
+      expect(Exit.hasDies(exit)).toBe(false);
     }));
 
-  test('rejects checkCookie with AdminDisabled when COOKIE_SECRET is unset', () =>
+  test('rejects checkCookie with AdminDisabled when COOKIE_SECRET is blank', () =>
     Effect.gen(function* () {
       const auth = yield* Auth.Service;
       const error = yield* Effect.flip(auth.checkCookie('gycc_admin=anything'));
