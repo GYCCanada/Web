@@ -76,7 +76,9 @@ const assetKeyFilter = Schema.makeFilter<string>(
   { title: 'AssetKey' },
 );
 
-export const AssetKey = Schema.NonEmptyString.check(assetKeyFilter);
+export const AssetKey = Schema.NonEmptyString.check(assetKeyFilter).pipe(
+  Schema.brand('AssetKey'),
+);
 export type AssetKey = typeof AssetKey.Type;
 
 /**
@@ -110,7 +112,7 @@ export type ImageRef = typeof ImageRef.Type;
  */
 export const HexColour = Schema.NonEmptyString.check(
   Schema.isPattern(/^#[0-9a-fA-F]{6}$/, { title: 'HexColour' }),
-);
+).pipe(Schema.brand('HexColour'));
 export type HexColour = typeof HexColour.Type;
 
 /**
@@ -149,7 +151,7 @@ const isoCalendarDateFilter = Schema.makeFilter<string>(
 export const IsoDate = Schema.NonEmptyString.check(
   Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/, { title: 'IsoDate' }),
   isoCalendarDateFilter,
-);
+).pipe(Schema.brand('IsoDate'));
 export type IsoDate = typeof IsoDate.Type;
 
 /**
@@ -249,10 +251,21 @@ export type Hero = typeof Hero.Type;
  * pricing is undecided (2026), never empty tuples
  * (`make-impossible-states-unrepresentable`).
  */
+/**
+ * A conference's canonical year identifier — a `/YYYY` slug (`/2024`). It is the
+ * routes' year key (the `/YYYY` public pages, the `SiteContent` required-slug
+ * invariant) so it is branded to keep the validation guarantee load-bearing past
+ * the decoder: a raw `/${year}` string is not a `ConferenceSlug` until it has
+ * crossed the schema (`boundary-discipline`,
+ * `make-impossible-states-unrepresentable`).
+ */
+export const ConferenceSlug = Schema.NonEmptyString.check(
+  Schema.isPattern(/^\/\d{4}$/, { title: 'ConferenceSlug' }),
+).pipe(Schema.brand('ConferenceSlug'));
+export type ConferenceSlug = typeof ConferenceSlug.Type;
+
 export const Conference = Schema.Struct({
-  slug: Schema.NonEmptyString.check(
-    Schema.isPattern(/^\/\d{4}$/, { title: 'ConferenceSlug' }),
-  ),
+  slug: ConferenceSlug,
   themeName: Text,
   accentColor: HexColour,
   hero: Hero,

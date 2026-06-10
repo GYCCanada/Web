@@ -1,4 +1,4 @@
-import { Option } from 'effect';
+import { Schema } from 'effect';
 
 import { root } from '../localization/translations';
 import { SiteContent } from './schema';
@@ -29,11 +29,21 @@ import { SiteContent } from './schema';
  *     defect the `Text` schema rightly forbids. Descriptive bilingual alt text
  *     is authored here; it is the only place real new content is introduced.
  *   - `2024` registration windows carry the same dates as today; `2025` / `2026`
- *     have no pricing yet, modelled as `Option.none()` (not empty tuples).
+ *     have no pricing yet, so they simply omit the `registration` key (it is an
+ *     `Option.none()` on the decoded side, never empty tuples).
  *   - The UI translations are spread directly from `root` rather than re-typed,
  *     so the default table can never drift from the live one (`derive-dont-sync`).
+ *
+ * Authored in the schema's **encoded** form (the literal IS the JSON that would
+ * live at `content/site.json`: plain `string`s, `registration` an optional key)
+ * and decoded through `SiteContent` once. Decoding — not `SiteContent.make` — is
+ * the honest construction: the validated primitives (`AssetKey`, `IsoDate`,
+ * `HexColour`, the conference `ConferenceSlug`) are branded, so a value only
+ * earns the brand by crossing the schema boundary (`boundary-discipline`,
+ * `make-impossible-states-unrepresentable`). `decodeUnknownSync` throws on a
+ * malformed default, so a transcription typo fails fast at module load.
  */
-export const defaultContent: SiteContent = SiteContent.make({
+export const defaultContent: SiteContent = Schema.decodeUnknownSync(SiteContent)({
   meta: { schemaVersion: 1 },
 
   conferences: [
@@ -69,11 +79,11 @@ export const defaultContent: SiteContent = SiteContent.make({
         },
       },
       dates: { start: '2024-08-21', end: '2024-08-25' },
-      registration: Option.some({
+      registration: {
         early: { start: '2024-05-19', end: '2024-06-22' },
         regular: { start: '2024-06-23', end: '2024-07-20' },
         late: { start: '2024-07-21', end: '2024-08-25' },
-      }),
+      },
       location: {
         en: '130 Gerstmar Rd, Kelowna, BC V1X 4A7',
         fr: '130 Gerstmar Rd, Kelowna, BC V1X 4A7',
@@ -237,7 +247,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         },
       },
       dates: { start: '2025-08-20', end: '2025-08-24' },
-      registration: Option.none(),
+      // No pricing for 2025 — omit `registration` (decodes to `Option.none()`).
       location: { en: 'Montreal, QC', fr: 'Montréal, QC' },
       tagline: {
         en: '"And after the earthquake a fire, but the Lord was not in the fire; and after the fire a still small voice."',
@@ -287,8 +297,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         },
       },
       dates: { start: '2026-08-05', end: '2026-08-09' },
-      // Pricing not set yet — no registration windows.
-      registration: Option.none(),
+      // Pricing not set yet — omit `registration` (decodes to `Option.none()`).
       location: {
         en: 'Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB',
         fr: 'Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB',

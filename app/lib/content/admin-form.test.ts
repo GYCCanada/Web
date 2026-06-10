@@ -96,9 +96,10 @@ describe('merge-onto-current-document round-trip', () => {
     const merged = deepMerge(base, overrides);
     const decoded = await Effect.runPromise(decode(merged));
 
-    // The edited fields changed…
+    // The edited fields changed… (`accentColor` is the branded `HexColour`;
+    // widen to its base string for the value assertion).
     expect(decoded.conferences[2]?.themeName.en).toBe('Speak Up');
-    expect(decoded.conferences[2]?.accentColor).toBe('#123456');
+    expect(String(decoded.conferences[2]?.accentColor)).toBe('#123456');
     // …and everything else (deep bios, the 2024 speakers, the team) survived.
     expect(decoded.conferences[0]?.speakers.length).toBe(
       defaultContent.conferences[0]?.speakers.length,

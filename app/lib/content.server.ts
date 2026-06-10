@@ -11,6 +11,7 @@ import {
 import { defaultContent } from './content/defaults';
 import { SiteContent } from './content/schema';
 import type {
+  AssetKey,
   Conference as DocConference,
   IsoDate,
   Seminar as DocSeminar,
@@ -155,7 +156,7 @@ export type Translation = Record<string, string>;
  * overrides it — with no change to any component (`derive-dont-sync`,
  * `boundary-discipline`).
  */
-const assetUrl = (key: string): string => `/images/${key}`;
+const assetUrl = (key: AssetKey): string => `/images/${key}`;
 
 /**
  * Widen an ISO calendar date to the existing end-of-day-UTC millisecond the

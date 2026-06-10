@@ -2,7 +2,20 @@ import { describe, expect, it } from 'bun:test';
 import { Effect, Schema } from 'effect';
 
 import { defaultContent } from './defaults';
-import { AssetKey, DateRange, IsoDate, SiteContent } from './schema';
+import {
+  AssetKey,
+  ConferenceSlug,
+  DateRange,
+  HexColour,
+  IsoDate,
+  SiteContent,
+} from './schema';
+import type {
+  AssetKey as AssetKeyType,
+  ConferenceSlug as ConferenceSlugType,
+  HexColour as HexColourType,
+  IsoDate as IsoDateType,
+} from './schema';
 
 /**
  * The encoded form of `SiteContent` IS the JSON stored at `content/site.json`,
@@ -137,5 +150,79 @@ describe('DateRange ordering', () => {
     expect(isValidDateRange({ start: '2027-01-01', end: '2026-12-31' })).toBe(
       false,
     );
+  });
+});
+
+const isValidSlug = (value: string): boolean =>
+  Schema.decodeUnknownResult(ConferenceSlug)(value)._tag === 'Success';
+
+describe('ConferenceSlug validation', () => {
+  it('accepts a `/YYYY` slug', () => {
+    for (const value of ['/2024', '/2025', '/2026', '/0001']) {
+      expect(isValidSlug(value)).toBe(true);
+    }
+  });
+
+  it('rejects anything that is not a `/YYYY` slug', () => {
+    for (const value of [
+      '', // empty
+      '2026', // missing leading slash
+      '/26', // too few digits
+      '/20260', // too many digits
+      '/2026/', // trailing slash
+      'speak', // not a slug at all
+    ]) {
+      expect(isValidSlug(value)).toBe(false);
+    }
+  });
+});
+
+/**
+ * Branding is encode/decode-transparent — the round-trip above proves the values
+ * still pass through losslessly — but it makes the validation guarantee
+ * load-bearing past the decoder: a value only earns the brand by crossing the
+ * schema (`make-impossible-states-unrepresentable`, `boundary-discipline`). The
+ * decode-rejection cases above (`AssetKey`, `IsoDate`, `HexColour`,
+ * `ConferenceSlug`) already prove a bad value never produces a branded value;
+ * these checks pin the *type-level* half of the guarantee so a future change that
+ * silently drops a brand fails the typecheck (this whole block is a compile-time
+ * assertion — the `@ts-expect-error` lines fail `tsc` the moment a raw `string`
+ * becomes assignable to a brand again).
+ */
+describe('branded primitives carry their nominal brand', () => {
+  it('decode/make produce a branded value, and a raw string is not assignable', () => {
+    // Decoding yields the branded type, assignable to its own brand…
+    const key: AssetKeyType = AssetKey.make('2026/en/hero.png');
+    const date: IsoDateType = IsoDate.make('2026-06-10');
+    const colour: HexColourType = HexColour.make('#D4A24E');
+    const slug: ConferenceSlugType = ConferenceSlug.make('/2026');
+
+    // …and erase to their base string at runtime (brands are type-only).
+    expect(String(key)).toBe('2026/en/hero.png');
+    expect(String(date)).toBe('2026-06-10');
+    expect(String(colour)).toBe('#D4A24E');
+    expect(String(slug)).toBe('/2026');
+
+    // A raw `string` must NOT be assignable where a brand is required: each line
+    // is a deliberate type error guarded by `@ts-expect-error`, so the typecheck
+    // fails if branding is ever lost (`prove-it-works` at the type level).
+    // @ts-expect-error a raw string is not an AssetKey until it crosses the decoder
+    const notKey: AssetKeyType = '2026/en/hero.png';
+    // @ts-expect-error a raw string is not an IsoDate until it crosses the decoder
+    const notDate: IsoDateType = '2026-06-10';
+    // @ts-expect-error a raw string is not a HexColour until it crosses the decoder
+    const notColour: HexColourType = '#D4A24E';
+    // @ts-expect-error a raw string is not a ConferenceSlug until it crosses the decoder
+    const notSlug: ConferenceSlugType = '/2026';
+
+    // Reference the locals so they are not flagged as unused; their string
+    // values are intentionally identical to the branded ones above (widen to
+    // base string so the matcher compares plain strings).
+    expect([notKey, notDate, notColour, notSlug].map(String)).toEqual([
+      '2026/en/hero.png',
+      '2026-06-10',
+      '#D4A24E',
+      '/2026',
+    ]);
   });
 });

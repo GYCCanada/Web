@@ -8,7 +8,7 @@ import {
   SITE_CONTENT_KEY,
 } from './content.server';
 import { defaultContent } from './content/defaults';
-import { SiteContent } from './content/schema';
+import { HexColour, SiteContent } from './content/schema';
 import type { SiteContent as SiteContentType } from './content/schema';
 import { dayjs } from './dayjs';
 import { NotFound, Storage, StorageError } from './storage.server';
@@ -184,7 +184,7 @@ describe('Content boundary conversion (decode → legacy shape)', () => {
       ...defaultContent,
       conferences: defaultContent.conferences.map((conference) =>
         conference.slug === '/2026'
-          ? { ...conference, accentColor: '#123456' }
+          ? { ...conference, accentColor: HexColour.make('#123456') }
           : conference,
       ),
     };
@@ -373,7 +373,7 @@ describe('Content cache (TTL + single-flight)', () => {
       ...defaultContent,
       conferences: defaultContent.conferences.map((conference) =>
         conference.slug === '/2026'
-          ? { ...conference, accentColor: '#0a0a0a' }
+          ? { ...conference, accentColor: HexColour.make('#0a0a0a') }
           : conference,
       ),
     });
