@@ -7,6 +7,7 @@ import { FormProvider, useForm, useFormData } from '~/lib/conform';
 import { formValidationError } from '~/lib/effect/errors';
 import { routeFormAction, SubmissionContext } from '~/lib/effect/form';
 import { formatSchemaResult, parseSchema } from '~/lib/effect/form-schema';
+import { routeHandler } from '~/lib/effect/route';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
@@ -107,11 +108,13 @@ type Position = {
   team: string;
 };
 
-export const loader = () => {
+export const loader = routeHandler(function* () {
+  // No request-scoped data; `positions` is a static empty list.
+  yield* Effect.void;
   return {
     positions: [] as Position[],
   };
-};
+});
 
 export const action = routeFormAction(function* () {
   const { url } = yield* ReactRouterContext;
