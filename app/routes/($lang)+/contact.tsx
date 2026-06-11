@@ -23,12 +23,26 @@ import { TextField } from '~/ui/text-field';
 // Match the previous zod `.email()` validation: a basic, permissive email shape.
 const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const Name = Schema.String.check(
-  Schema.isMinLength(1, { message: 'contact.form.name.required' }),
-);
-const Message = Schema.String.check(
-  Schema.isMinLength(1, { message: 'contact.form.message.required' }),
-);
+// `invalid_type_error` keys from the old zod schema fired when a field's
+// submitted value was not a string (e.g. duplicate field names POST an array).
+// Effect Schema surfaces that as an `InvalidType` issue; a node-level `message`
+// annotation re-labels it with a translation key. Every message must be a real
+// `TranslationKey` — `FieldErrors` renders it through `translate()`, so a key
+// that is absent from `translations.ts` would render `undefined`. Fields that
+// have a dedicated `.error` key use it; the rest reuse their `.required` key for
+// the invalid-type case (the old zod schemas pointed those at `.error` keys that
+// never existed, which rendered blank — reusing `.required` is the safe copy).
+// `.annotateKey({ messageMissingKey })` covers the absent-field case (the old
+// zod `required_error` fired for both empty and absent values); `.check` covers
+// the empty-string case; the node-level `message` covers the invalid-type case.
+const Name = Schema.String.annotate({ message: 'contact.form.name.error' })
+  .check(Schema.isMinLength(1, { message: 'contact.form.name.required' }))
+  .annotateKey({ messageMissingKey: 'contact.form.name.required' });
+const Message = Schema.String.annotate({
+  message: 'contact.form.message.required',
+})
+  .check(Schema.isMinLength(1, { message: 'contact.form.message.required' }))
+  .annotateKey({ messageMissingKey: 'contact.form.message.required' });
 const Email = Schema.String.check(
   Schema.isMinLength(1, { message: 'contact.form.email.required' }),
   Schema.isPattern(EMAIL_REGEXP, { message: 'contact.form.email.error' }),
@@ -37,27 +51,51 @@ const Phone = Schema.String.check(
   Schema.isMinLength(1, { message: 'contact.form.phone.required' }),
 );
 
-export const schema = Schema.Union([
-  Schema.Struct({
-    method: Schema.Literal('email'),
-    email: Email,
-    name: Name,
-    message: Message,
+// The discriminator. Modeled as a single `Literals` field rather than per-member
+// `Schema.Literal`s inside a `Schema.Union`: a union whose members all fail
+// reports one top-level union-mismatch message (Effect v4 behavior), so the
+// discriminator error could not attach to the `method` field. As a struct field
+// with `message` (invalid value) + `messageMissingKey` (absent) annotations, a
+// missing or invalid `method` attributes cleanly to the `method` path — matching
+// the old zod `discriminatedUnion` behavior that surfaced
+// `contact.form.contact-method.required` on the method field.
+const Method = Schema.Literals(['email', 'phone', 'both'])
+  .annotate({ message: 'contact.form.contact-method.required' })
+  .annotateKey({ messageMissingKey: 'contact.form.contact-method.required' });
+
+// Per-method requirements (email when email/both, phone when phone/both) are
+// expressed as a struct-level filter that attaches each issue to the relevant
+// field path, replacing the per-member required fields the union encoded.
+export const schema = Schema.Struct({
+  method: Method,
+  name: Name,
+  message: Message,
+  // Re-annotate the optional wrapper so a non-string (array) value still maps to
+  // a translation key instead of the wrapper's union-mismatch text. `phone` has
+  // no `.error` key, so reuse `.required` to keep real copy on screen.
+  email: Schema.optional(Email).annotate({ message: 'contact.form.email.error' }),
+  phone: Schema.optional(Phone).annotate({
+    message: 'contact.form.phone.required',
   }),
-  Schema.Struct({
-    method: Schema.Literal('phone'),
-    phone: Phone,
-    name: Name,
-    message: Message,
+}).check(
+  Schema.makeFilter((value) => {
+    const issues: Array<{ path: ReadonlyArray<PropertyKey>; issue: string }> =
+      [];
+    if (
+      (value.method === 'email' || value.method === 'both') &&
+      value.email === undefined
+    ) {
+      issues.push({ path: ['email'], issue: 'contact.form.email.required' });
+    }
+    if (
+      (value.method === 'phone' || value.method === 'both') &&
+      value.phone === undefined
+    ) {
+      issues.push({ path: ['phone'], issue: 'contact.form.phone.required' });
+    }
+    return issues.length === 0 ? undefined : issues;
   }),
-  Schema.Struct({
-    method: Schema.Literal('both'),
-    email: Email,
-    phone: Phone,
-    name: Name,
-    message: Message,
-  }),
-]);
+);
 
 const clientSchema = Schema.toStandardSchemaV1(schema);
 

@@ -88,6 +88,18 @@ form pipeline. Toast helpers are plain async + zod.
 - `dayjs`, `ts-pattern`, UI components beyond the conform bindings: untouched.
 - PR #11 (CMS, stacked) touches `runtime.ts`/`server.ts` — conflicts are expected
   and resolved at that PR's rebase, not here. Note it in the PR body.
+- **Invalid-type keys without a translation reuse `.required`.** The old zod
+  contact/volunteer schemas pointed several `invalid_type_error`s at `.error`
+  keys that never existed in `translations.ts`
+  (`volunteer.form.{name,age,location,background,why}.error`,
+  `contact.form.{message,phone}.error`, `volunteer.form.phone.error`). Those
+  rendered blank in the old UI (`FieldErrors` calls `translate()` on the raw
+  message). The Schema migration restores the discriminator/invalid-type hooks
+  via `message` + `messageMissingKey` annotations, but points the messages with
+  no dedicated `.error` key at the field's existing `.required` key instead of
+  re-introducing the dead keys — every emitted validation message is now a real
+  `TranslationKey` (guarded by the route-schema tests). Fields that DO have a
+  real `.error` key (`name`/`email` on contact, `email` on volunteer) keep it.
 
 ## Commit breakdown
 

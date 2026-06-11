@@ -21,27 +21,45 @@ import { Main } from '~/ui/main';
 import { Radio, RadioGroup, Radios } from '~/ui/radio';
 import { TextField } from '~/ui/text-field';
 
-const Name = Schema.String.check(
-  Schema.isMinLength(1, { message: 'volunteer.form.name.required' }),
-);
-const Email = Schema.String.check(
-  Schema.isMinLength(1, { message: 'volunteer.form.email.required' }),
-);
+// `invalid_type_error` keys from the old zod schema fired when a field's
+// submitted value was not a string (e.g. duplicate field names POST an array).
+// A node-level `message` annotation re-labels the resulting `InvalidType` issue
+// with a translation key. Every message must be a real `TranslationKey` —
+// `FieldErrors` renders it through `translate()`, so a key absent from
+// `translations.ts` would render `undefined`. Only `email` has a dedicated
+// `.error` key; the others reuse their `.required` key for the invalid-type case
+// (the old zod schema pointed those at `.error` keys that never existed in
+// `translations.ts` and so rendered blank — reusing `.required` is safe copy).
+// `.annotateKey({ messageMissingKey })` covers the absent-field case (the old
+// zod `required_error` fired for both empty and absent values); `.check` covers
+// the empty-string case; the node-level `message` covers the invalid-type case.
+const Name = Schema.String.annotate({ message: 'volunteer.form.name.required' })
+  .check(Schema.isMinLength(1, { message: 'volunteer.form.name.required' }))
+  .annotateKey({ messageMissingKey: 'volunteer.form.name.required' });
+const Email = Schema.String.annotate({
+  message: 'volunteer.form.email.error',
+}).check(Schema.isMinLength(1, { message: 'volunteer.form.email.required' }));
 const Phone = Schema.String.check(
   Schema.isMinLength(1, { message: 'volunteer.form.phone.required' }),
 );
-const Age = Schema.String.check(
-  Schema.isMinLength(1, { message: 'volunteer.form.age.required' }),
-);
-const Location = Schema.String.check(
-  Schema.isMinLength(1, { message: 'volunteer.form.location.required' }),
-);
-const Background = Schema.String.check(
-  Schema.isMinLength(1, { message: 'volunteer.form.background.required' }),
-);
-const Why = Schema.String.check(
-  Schema.isMinLength(1, { message: 'volunteer.form.why.required' }),
-);
+const Age = Schema.String.annotate({ message: 'volunteer.form.age.required' })
+  .check(Schema.isMinLength(1, { message: 'volunteer.form.age.required' }))
+  .annotateKey({ messageMissingKey: 'volunteer.form.age.required' });
+const Location = Schema.String.annotate({
+  message: 'volunteer.form.location.required',
+})
+  .check(Schema.isMinLength(1, { message: 'volunteer.form.location.required' }))
+  .annotateKey({ messageMissingKey: 'volunteer.form.location.required' });
+const Background = Schema.String.annotate({
+  message: 'volunteer.form.background.required',
+})
+  .check(
+    Schema.isMinLength(1, { message: 'volunteer.form.background.required' }),
+  )
+  .annotateKey({ messageMissingKey: 'volunteer.form.background.required' });
+const Why = Schema.String.annotate({ message: 'volunteer.form.why.required' })
+  .check(Schema.isMinLength(1, { message: 'volunteer.form.why.required' }))
+  .annotateKey({ messageMissingKey: 'volunteer.form.why.required' });
 // `positions` is a multi-checkbox group: when nothing is selected the form
 // submits no `positions` field at all (unchecked checkboxes do not submit).
 // Classic `parseWithZod` coerced that absent field to `[]`; replicate it with a
@@ -50,39 +68,55 @@ const Positions = Schema.optionalKey(Schema.Array(Schema.String)).pipe(
   Schema.withDecodingDefault(Effect.succeed([] as string[])),
 );
 
-const schema = Schema.Union([
-  Schema.Struct({
-    name: Name,
-    method: Schema.Literal('phone'),
-    phone: Phone,
-    age: Age,
-    location: Location,
-    background: Background,
-    why: Why,
-    positions: Positions,
+// The discriminator. Modeled as a single `Literals` field rather than per-member
+// `Schema.Literal`s inside a `Schema.Union`: a union whose members all fail
+// reports one top-level union-mismatch message (Effect v4 behavior), so the
+// discriminator error could not attach to the `method` field. The method
+// RadioGroup has no default selection, so submitting without choosing a method
+// is a real user path — a missing/invalid `method` must surface
+// `volunteer.form.method.required` on the method field, matching the old zod
+// `discriminatedUnion` behavior.
+const Method = Schema.Literals(['email', 'phone', 'both'])
+  .annotate({ message: 'volunteer.form.method.required' })
+  .annotateKey({ messageMissingKey: 'volunteer.form.method.required' });
+
+// Per-method requirements (email when email/both, phone when phone/both) are
+// expressed as a struct-level filter that attaches each issue to the relevant
+// field path, replacing the per-member required fields the union encoded.
+export const schema = Schema.Struct({
+  name: Name,
+  method: Method,
+  age: Age,
+  location: Location,
+  background: Background,
+  why: Why,
+  positions: Positions,
+  // Re-annotate the optional wrapper so a non-string (array) value still maps to
+  // a translation key instead of the wrapper's union-mismatch text. `phone` has
+  // no `.error` key, so reuse `.required` to keep real copy on screen.
+  email: Schema.optional(Email).annotate({ message: 'volunteer.form.email.error' }),
+  phone: Schema.optional(Phone).annotate({
+    message: 'volunteer.form.phone.required',
   }),
-  Schema.Struct({
-    name: Name,
-    method: Schema.Literal('email'),
-    email: Email,
-    age: Age,
-    location: Location,
-    background: Background,
-    why: Why,
-    positions: Positions,
+}).check(
+  Schema.makeFilter((value) => {
+    const issues: Array<{ path: ReadonlyArray<PropertyKey>; issue: string }> =
+      [];
+    if (
+      (value.method === 'email' || value.method === 'both') &&
+      value.email === undefined
+    ) {
+      issues.push({ path: ['email'], issue: 'volunteer.form.email.required' });
+    }
+    if (
+      (value.method === 'phone' || value.method === 'both') &&
+      value.phone === undefined
+    ) {
+      issues.push({ path: ['phone'], issue: 'volunteer.form.phone.required' });
+    }
+    return issues.length === 0 ? undefined : issues;
   }),
-  Schema.Struct({
-    name: Name,
-    method: Schema.Literal('both'),
-    email: Email,
-    phone: Phone,
-    age: Age,
-    location: Location,
-    background: Background,
-    why: Why,
-    positions: Positions,
-  }),
-]);
+);
 
 const clientSchema = Schema.toStandardSchemaV1(schema);
 
