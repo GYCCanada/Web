@@ -1,7 +1,7 @@
 import { Effect } from 'effect';
 import { type MetaFunction, useActionData } from 'react-router';
 
-import { getCurrentConference } from '~/lib/conference.server';
+import { Content } from '~/lib/content.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction, routeHandler } from '~/lib/effect/route';
 import { getLocale } from '~/lib/localization/localization';
@@ -32,7 +32,8 @@ export const meta: MetaFunction<typeof loader> = ({ params }) => {
 export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
-  const conference = getCurrentConference(locale);
+  const content = yield* Content.Service;
+  const conference = yield* content.getCurrentConference(locale);
   return { conference };
 });
 

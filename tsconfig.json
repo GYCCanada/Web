@@ -118,7 +118,7 @@
           },
           {
             "target": "error",
-            "pattern": "default",
+            "pattern": "namespace",
             "skipLeadingPath": ["app/"]
           }
         ],

@@ -1,0 +1,503 @@
+import { describe, expect, it } from 'effect-bun-test';
+import { Effect, Layer, Option, Ref, Schema } from 'effect';
+import { TestClock } from 'effect/testing';
+
+import {
+  Content,
+  SITE_CONTENT_DRAFT_KEY,
+  SITE_CONTENT_KEY,
+} from './content.server';
+import { defaultContent } from './content/defaults';
+import { HexColour, SiteContent } from './content/schema';
+import type { SiteContent as SiteContentType } from './content/schema';
+import { dayjs } from './dayjs';
+import { NotFound, Storage, StorageError } from './storage.server';
+import { layerTest } from './storage.test-helper';
+
+/**
+ * The `Content` service is the single read path for the public site (C3). These
+ * tests pin the behaviour the migrated routes depend on:
+ *   - it falls back to the bundled defaults when the bucket has no document, so
+ *     dev / a bucket-less prod render exactly like today (D3);
+ *   - it decodes a real published document at the boundary and converts it to
+ *     the legacy route shape (per-locale strings, `[start, end]` ms tuples,
+ *     leading-`/` image URLs) so component code is unchanged;
+ *   - the current-conference-by-date and by-year selection match today's
+ *     `conference.server.ts` semantics (`derive-dont-sync`);
+ *   - reads are cached within the TTL (same reference) and refreshed after it,
+ *     concurrent first-reads are single-flighted, and the editor's `bust` makes
+ *     a publish visible on the next read (`use-the-platform` — the built-in
+ *     `Effect.cachedInvalidateWithTTL`).
+ */
+
+const encode = Schema.encodeUnknownEffect(Schema.fromJsonString(SiteContent));
+
+/** A `Storage` with no document — every read reports `NotFound` (bucket-less). */
+const emptyStorage = Layer.succeed(
+  Storage.Service,
+  Storage.Service.of({
+    get: (key) => Effect.fail(new NotFound({ key })),
+    put: (key) =>
+      Effect.fail(
+        new StorageError({ key, op: 'put', cause: new Error('disabled') }),
+      ),
+    head: () => Effect.succeed(Option.none()),
+    list: () => Effect.succeed([]),
+    delete: () => Effect.void,
+  }),
+);
+
+/**
+ * Provide `Content` (with its `Storage` requirement satisfied) AND expose the
+ * SAME built `Storage` to the test effect: `Content.layer` keeps its `Storage`
+ * requirement open and is merged with the same `storageLayer` that is also
+ * exposed, so both resolve to the one built instance — a `put` from the test hits
+ * the same backing store `Content` reads (publish → bust → read).
+ *
+ * `it.effect` already provides a `Scope` and a `TestClock`, so this helper does
+ * neither — it is a pure layer provide.
+ */
+const provideContent =
+  (storageLayer: Layer.Layer<Storage.Service>) =>
+  <A, E>(effect: Effect.Effect<A, E, Content.Service | Storage.Service>) =>
+    effect.pipe(Effect.provide(Layer.provideMerge(Content.layer, storageLayer)));
+
+/**
+ * Build a `Storage` layer from a `SiteContent` doc encoded to its on-bucket JSON.
+ * The encode is an `Effect<string, SchemaError>`, so the layer is built via
+ * `Layer.unwrap`; a seed doc that won't encode is a test bug, not a tested
+ * failure path, so the `SchemaError` is promoted to a defect (`orDie`) — this
+ * keeps the resulting layer's error channel `never`, as `provideContent` requires.
+ */
+const seededStorage = (
+  doc: SiteContentType,
+  factory: (json: string) => Layer.Layer<Storage.Service>,
+): Layer.Layer<Storage.Service> =>
+  Layer.unwrap(encode(doc).pipe(Effect.orDie, Effect.map(factory)));
+
+/**
+ * Provide `Content` over a bucket pre-seeded with a single encoded `SiteContent`
+ * document at `content/site.json`. The test body just reads through `Content`,
+ * exactly as the public site does.
+ */
+const provideSeeded = (doc: SiteContentType) =>
+  provideContent(
+    seededStorage(doc, (json) =>
+      layerTest({ [SITE_CONTENT_KEY]: { body: json } }),
+    ),
+  );
+
+describe('Content fallback (no document in bucket)', () => {
+  it.effect('serves the bundled defaults when the document is absent', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const site = yield* content.getSiteContent();
+      expect(site).toEqual(defaultContent);
+    }).pipe(provideContent(emptyStorage)));
+
+  it.effect(
+    'derives the current conference from the defaults, before any conference starts',
+    () =>
+      Effect.gen(function* () {
+        // Pin "now" to a date before the earliest conference so the
+        // first-future-conference branch selects 2024 deterministically.
+        yield* TestClock.setTime(dayjs('2024-01-01').valueOf());
+        const content = yield* Content.Service;
+        const conference = yield* content.getCurrentConference('en');
+        // 2024 "While It Is Day" is the first conference whose start is in the future.
+        expect(conference.title).toBe('While It Is Day');
+        expect(conference.slug).toBe('/2024');
+        expect(conference.theme).toBe('#FFD6BA');
+      }).pipe(provideContent(emptyStorage)),
+  );
+
+  it.effect('falls back to the most recent conference once all have started', () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(dayjs('2030-01-01').valueOf());
+      const content = yield* Content.Service;
+      const conference = yield* content.getCurrentConference('en');
+      // All conferences are past → the last one (2026 "Speak") is current.
+      expect(conference.title).toBe('Speak');
+      expect(conference.slug).toBe('/2026');
+    }).pipe(provideContent(emptyStorage)));
+});
+
+describe('Content boundary conversion (decode → legacy shape)', () => {
+  it.effect(
+    'converts ISO dates to end-of-day-UTC ms tuples and keys to served URLs',
+    () =>
+      Effect.gen(function* () {
+        const content = yield* Content.Service;
+        const conference = yield* content.getConference('en', 2024);
+
+        // Dates widen to the exact end-of-day-UTC ms the route code formats.
+        expect(conference.dates).toEqual([
+          dayjs('2024-08-21').utc().endOf('day').valueOf(),
+          dayjs('2024-08-25').utc().endOf('day').valueOf(),
+        ]);
+        // Bucket keys resolve to the `/images/<key>` URL served by the C5 route.
+        expect(conference.hero.image.desktop).toBe('/images/2024/en/hero-desktop.jpg');
+        expect(conference.hero.image.mobile).toBe('/images/2024/en/hero-mobile.jpg');
+        expect(conference.speakers[0]?.img).toBe('/images/2024/speakers/matt.png');
+        // The 2024 registration windows survive as ms tuples (present, not none).
+        expect(conference.registration).toBeDefined();
+        expect(conference.registration?.early).toEqual([
+          dayjs('2024-05-19').utc().endOf('day').valueOf(),
+          dayjs('2024-06-22').utc().endOf('day').valueOf(),
+        ]);
+      }).pipe(provideSeeded(defaultContent)),
+  );
+
+  it.effect('selects per-locale hero art and text', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const fr = yield* content.getConference('fr', 2024);
+      expect(fr.title).toBe("Tant qu'il fait jour");
+      expect(fr.hero.image.desktop).toBe('/images/2024/fr/hero-desktop.jpg');
+      expect(fr.bible.book).toBe('Jean');
+    }).pipe(provideSeeded(defaultContent)));
+
+  it.effect('omits registration when the document has none (2026)', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const conference = yield* content.getConference('en', 2026);
+      expect(conference.registration).toBeUndefined();
+      expect(conference.title).toBe('Speak');
+    }).pipe(provideSeeded(defaultContent)));
+
+  it.effect('reflects an edited published document (publish without redeploy, D3)', () => {
+    // `edited` is a pure transform of the defaults — built outside the gen so the
+    // seed layer (`provideSeeded(edited)`) can reference it.
+    const edited: SiteContentType = {
+      ...defaultContent,
+      conferences: defaultContent.conferences.map((conference) =>
+        conference.slug === '/2026'
+          ? { ...conference, accentColor: HexColour.make('#123456') }
+          : conference,
+      ),
+    };
+    return Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const conference = yield* content.getConference('en', 2026);
+      expect(conference.theme).toBe('#123456');
+    }).pipe(provideSeeded(edited));
+  });
+});
+
+describe('Content fallback (semantically-invalid document)', () => {
+  /**
+   * A document whose `conferences` array decodes cleanly but is empty, or omits
+   * a slug the routes serve, is not a usable site: the selectors
+   * (`getCurrentConference`, `getConference(year)`) would throw downstream of the
+   * read pipeline. The `SiteContent` schema rejects such a document during
+   * decode so the `Content` read-path `catchCause` falls back to the bundled
+   * defaults — the public site is never 500'd by a bad bucket document (C3
+   * boundary contract).
+   */
+  const invalidJson = (
+    transform: (doc: SiteContentType) => SiteContentType,
+  ): string => JSON.stringify(transform(defaultContent));
+
+  it.effect('falls back to the defaults when the document has zero conferences', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const site = yield* content.getSiteContent();
+      // The selectors must not throw (they would 500 the public site).
+      const current = yield* content.getCurrentConference('en');
+      expect(site).toEqual(defaultContent);
+      // At the default TestClock time (epoch) every conference is still future, so
+      // the first one (2024) is current — the point is the selector returns a
+      // conference from the defaults instead of throwing.
+      expect(current.slug).toBe('/2024');
+    }).pipe(
+      provideContent(
+        layerTest({
+          [SITE_CONTENT_KEY]: {
+            body: invalidJson((doc) => ({ ...doc, conferences: [] })),
+          },
+        }),
+      ),
+    ));
+
+  it.effect('falls back to the defaults when a served year is missing', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const conference = yield* content.getConference('en', 2026);
+      // The defaults' 2026 conference is served, not a 500.
+      expect(conference.slug).toBe('/2026');
+      expect(conference.title).toBe('Speak');
+    }).pipe(
+      provideContent(
+        layerTest({
+          [SITE_CONTENT_KEY]: {
+            // Drop 2026 — `/`, `/2024`, `/2025` would still work, but `/2026` 500s.
+            body: invalidJson((doc) => ({
+              ...doc,
+              conferences: doc.conferences.filter(
+                (conference) => conference.slug !== '/2026',
+              ),
+            })),
+          },
+        }),
+      ),
+    ));
+});
+
+describe('Content translations + team selectors', () => {
+  it.effect('returns the locale translation map and the team / board', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const translations = yield* content.getTranslations('fr');
+      const team = yield* content.getTeam();
+
+      expect(translations['team.position.president']).toBe('Président');
+      expect(team.team[0]?.name).toBe('Elijah Duffy');
+      expect(team.team[0]?.position).toBe('team.position.president');
+      expect(team.team[0]?.image).toBe('/images/team/elijah.jpg');
+      expect(team.board).toContain('George Cho');
+    }).pipe(provideSeeded(defaultContent)));
+});
+
+describe('Content cache (TTL + single-flight)', () => {
+  /** A `Storage` whose `get` count is observable, to assert caching. */
+  const countingStorage = (json: string) =>
+    Layer.effect(
+      Storage.Service,
+      Effect.gen(function* () {
+        const calls = yield* Ref.make(0);
+        return Storage.Service.of({
+          get: (key) =>
+            key === SITE_CONTENT_KEY
+              ? Ref.update(calls, (n) => n + 1).pipe(
+                  Effect.as({
+                    stream:
+                      new Response(json).body ??
+                      new ReadableStream<Uint8Array>(),
+                    contentType: 'application/json',
+                    size: json.length,
+                  }),
+                )
+              : Effect.fail(new NotFound({ key })),
+          put: (key) =>
+            Effect.fail(
+              new StorageError({ key, op: 'put', cause: new Error('disabled') }),
+            ),
+          head: () => Effect.succeed(Option.none()),
+          list: () => Effect.succeed([]),
+          delete: () => Effect.void,
+        });
+      }),
+    );
+
+  /** Provide `Content` over a `countingStorage` seeded with the encoded doc. */
+  const provideCounting = (doc: SiteContentType) =>
+    provideContent(seededStorage(doc, countingStorage));
+
+  it.effect('reads once within the TTL and reloads after it expires', () =>
+    // We can't read the private call count from outside, so assert behaviour:
+    // two reads inside the TTL return the SAME decoded reference (the cache hit,
+    // not a re-decode), and a read after the TTL still works (a fresh load). The
+    // built-in `Effect.cachedInvalidateWithTTL` provides both contracts.
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const a = yield* content.getSiteContent();
+      const b = yield* content.getSiteContent(); // cached — same reference
+      yield* TestClock.adjust('31 seconds'); // past the 30s TTL
+      const c = yield* content.getSiteContent(); // reloaded
+      expect(a === b).toBe(true);
+      expect(c).toEqual(defaultContent);
+    }).pipe(provideCounting(defaultContent)));
+
+  /**
+   * A `Storage` whose published document can be swapped at runtime, to prove the
+   * publish→cache-bust→read path (C5, D3): after a publish writes a new document
+   * to the bucket, `bust()` makes the change visible on the very next read —
+   * before the TTL elapses, with no reload otherwise.
+   */
+  const mutableStorage = (initial: string) =>
+    Layer.effect(
+      Storage.Service,
+      Effect.gen(function* () {
+        const body = yield* Ref.make(initial);
+        return Storage.Service.of({
+          get: (key) =>
+            key === SITE_CONTENT_KEY
+              ? Ref.get(body).pipe(
+                  Effect.map((json) => ({
+                    stream:
+                      new Response(json).body ??
+                      new ReadableStream<Uint8Array>(),
+                    contentType: 'application/json',
+                    size: json.length,
+                  })),
+                )
+              : Effect.fail(new NotFound({ key })),
+          // `put(SITE_CONTENT_KEY, …)` simulates a publish swapping the document.
+          put: (key, value) =>
+            key === SITE_CONTENT_KEY && typeof value === 'string'
+              ? Ref.set(body, value)
+              : Effect.fail(
+                  new StorageError({
+                    key,
+                    op: 'put',
+                    cause: new Error('unsupported'),
+                  }),
+                ),
+          head: () => Effect.succeed(Option.none()),
+          list: () => Effect.succeed([]),
+          delete: () => Effect.void,
+        });
+      }),
+    );
+
+  /** Provide `Content` over a `mutableStorage` seeded with the encoded doc. */
+  const provideMutable = (doc: SiteContentType) =>
+    provideContent(seededStorage(doc, mutableStorage));
+
+  const accent2026 = (content: SiteContentType): string | undefined =>
+    content.conferences.find((c) => c.slug === '/2026')?.accentColor;
+
+  it.effect('bust() makes a publish visible on the next read, within the TTL (D3)', () =>
+    Effect.gen(function* () {
+      const editedDoc = SiteContent.make({
+        ...defaultContent,
+        conferences: defaultContent.conferences.map((conference) =>
+          conference.slug === '/2026'
+            ? { ...conference, accentColor: HexColour.make('#0a0a0a') }
+            : conference,
+        ),
+      });
+      const edited = yield* encode(editedDoc);
+
+      const content = yield* Content.Service;
+      const storage = yield* Storage.Service;
+
+      const before = yield* content.getSiteContent(); // caches the original
+      yield* storage.put(SITE_CONTENT_KEY, edited, 'application/json'); // publish
+      const stale = yield* content.getSiteContent(); // still the cached original
+      yield* content.bust(); // publish busts the cache
+      const after = yield* content.getSiteContent(); // re-reads the bucket
+
+      // No TestClock advance: the publish is invisible until the bust, then live.
+      expect(accent2026(before)).toBe('#D4A24E'); // bundled default
+      expect(accent2026(stale)).toBe('#D4A24E'); // cached — publish not yet seen
+      expect(accent2026(after)).toBe('#0a0a0a'); // bust → published value
+    }).pipe(provideMutable(defaultContent)));
+
+  /**
+   * Single-flight: concurrent first-reads must not stampede the bucket. The
+   * built-in `Effect.cachedInvalidateWithTTL` parks every reader on one
+   * in-flight `fetchDocument` and shares its result, so the bucket is read
+   * exactly once even when many fibers race the cold cache
+   * (`use-the-platform`). The `Storage.get` counts its calls so we can assert
+   * the single read directly.
+   */
+  it.effect('single-flights concurrent first-reads onto one bucket read', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      // Race many cold-cache reads at once; the built-in cache must collapse
+      // them onto a single `fetchDocument`.
+      const result = yield* Effect.all(
+        Array.from({ length: 8 }, () => content.getSiteContent()),
+        { concurrency: 'unbounded' },
+      );
+
+      // Every racer got the bundled defaults…
+      for (const doc of result) {
+        expect(doc).toEqual(defaultContent);
+      }
+      // …and they share ONE decoded reference (proves the single in-flight load,
+      // not eight independent decodes).
+      expect(result.every((doc) => doc === result[0])).toBe(true);
+    }).pipe(provideCounting(defaultContent)));
+});
+
+describe('Content admin read (draft → published → defaults)', () => {
+  const adminStorage = (objects: Record<string, string>) =>
+    layerTest(
+      Object.fromEntries(
+        Object.entries(objects).map(([key, body]) => [key, { body }]),
+      ),
+    );
+
+  it.effect('falls back to the bundled defaults when nothing is stored', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const result = yield* content.getAdminContent();
+      expect(result.source).toBe('defaults');
+      expect(result.content).toEqual(defaultContent);
+    }).pipe(provideContent(adminStorage({}))));
+
+  it.effect('prefers the published document over the defaults', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const result = yield* content.getAdminContent();
+      expect(result.source).toBe('published');
+    }).pipe(
+      provideContent(
+        seededStorage(defaultContent, (published) =>
+          adminStorage({ [SITE_CONTENT_KEY]: published }),
+        ),
+      ),
+    ));
+
+  it.effect(
+    'prefers a draft saved after the last publish over the published document',
+    () =>
+      Effect.gen(function* () {
+        const draftDoc = SiteContent.make({
+          ...defaultContent,
+          board: ['Only In The Draft'],
+        });
+        const draft = yield* encode(draftDoc);
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
+        // The published document is seeded at epoch; the draft is written through
+        // `Storage.put` AFTER advancing the clock so it is strictly newer — the
+        // real "I edited and saved a draft after the last publish" timeline.
+        yield* TestClock.adjust('1 second');
+        yield* storage.put(SITE_CONTENT_DRAFT_KEY, draft, 'application/json');
+        const result = yield* content.getAdminContent();
+        expect(result.source).toBe('draft');
+        expect(result.content.board).toEqual(['Only In The Draft']);
+      }).pipe(
+        provideContent(
+          seededStorage(defaultContent, (published) =>
+            adminStorage({ [SITE_CONTENT_KEY]: published }),
+          ),
+        ),
+      ),
+  );
+
+  it.effect(
+    'ignores a stale draft that predates the published document (failed-delete / pre-existing draft)',
+    () =>
+      // The bug this guards: a stale draft left intact after a publish (delete
+      // failed, or a pre-existing older draft) must NOT reopen as the edit source,
+      // or a later save/publish would overwrite the live content with stale values.
+      Effect.gen(function* () {
+        const staleDraftDoc = SiteContent.make({
+          ...defaultContent,
+          board: ['Stale Draft Values'],
+        });
+        const publishedDoc = SiteContent.make({
+          ...defaultContent,
+          board: ['Freshly Published'],
+        });
+        const staleDraft = yield* encode(staleDraftDoc);
+        const published = yield* encode(publishedDoc);
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
+        // Draft written first…
+        yield* storage.put(SITE_CONTENT_DRAFT_KEY, staleDraft, 'application/json');
+        // …then a later publish writes the live document (and would normally
+        // delete the draft, but here the delete is simulated as having failed —
+        // the draft is left intact).
+        yield* TestClock.adjust('1 second');
+        yield* storage.put(SITE_CONTENT_KEY, published, 'application/json');
+        const result = yield* content.getAdminContent();
+        expect(result.source).toBe('published');
+        expect(result.content.board).toEqual(['Freshly Published']);
+      }).pipe(provideContent(adminStorage({}))),
+  );
+});

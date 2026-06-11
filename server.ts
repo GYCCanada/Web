@@ -13,6 +13,8 @@ import {
   makeRequestRuntime,
   type RequestRuntime,
 } from './app/lib/effect/runtime.ts';
+import { imageKeyFromPath } from './app/lib/images.server.ts';
+import { Storage } from './app/lib/storage.server.ts';
 
 declare module 'react-router' {
   interface RouterContextProvider {
@@ -70,6 +72,58 @@ const fileResponse = Effect.fn('fileResponse')(function* (
     contentType,
     headers: { 'cache-control': cacheControl },
   });
+});
+
+// Stream a managed image from the bucket with a short public cache (mirrors
+// paulo-suzanne's `bucketResponse`). On a bucket miss (`NotFound`) the caller
+// falls back to the bundled `public/<key>` file; a real `StorageError` (bucket
+// unreachable) likewise falls back so a flaky bucket never blanks the site.
+const bucketImageResponse = Effect.fn('bucketImageResponse')(function* (
+  key: string,
+) {
+  const storage = yield* Storage.Service;
+  const obj = yield* storage.get(key);
+  return HttpServerResponse.raw(obj.stream, {
+    status: 200,
+    headers: {
+      'content-type': obj.contentType,
+      'content-length': String(obj.size),
+      'cache-control': 'public, max-age=300',
+    },
+  });
+});
+
+const imageResponse = Effect.fn('imageResponse')(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const webRequest = yield* HttpServerRequest.toWeb(request);
+  const url = new URL(webRequest.url);
+  const key = imageKeyFromPath(url.pathname);
+  if (key === null) return HttpServerResponse.empty({ status: 404 });
+
+  // Bucket first, then the bundled `public/<key>` file. A managed image
+  // uploaded to the bucket overrides today's `public/` art at the same key,
+  // while a bucket-less dev/prod still serves the defaults (D3).
+  const publicPath = `${isDev ? 'public' : CLIENT_PATH}/${key}`;
+  return yield* bucketImageResponse(key).pipe(
+    Effect.catchTag('Storage.NotFound', () =>
+      fileResponse(publicPath, mimeFor(key), 'public, max-age=300').pipe(
+        Effect.catchTag('gycc/server/FileMissing', () =>
+          Effect.succeed(HttpServerResponse.empty({ status: 404 })),
+        ),
+      ),
+    ),
+    Effect.catchTag('Storage.Error', (e) =>
+      Effect.logWarning('image bucket read failed, falling back to public', e).pipe(
+        Effect.flatMap(() =>
+          fileResponse(publicPath, mimeFor(key), 'public, max-age=300').pipe(
+            Effect.catchTag('gycc/server/FileMissing', () =>
+              Effect.succeed(HttpServerResponse.empty({ status: 404 })),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 });
 
 const reactRouterFallback = Effect.fn('reactRouterFallback')(function* () {
@@ -162,6 +216,12 @@ const HashedAssetsRoute = HttpRouter.add('GET', '/assets/*', (request) => {
   );
 });
 
+// Managed images (conference heroes, speaker / team photos) live in the bucket
+// under their object key and are served here (CMS plan §"Image serving", C5).
+// `Content` resolves every `ImageRef.key` to `/images/<key>`, so this one route
+// backs every managed `<img src>` on the public site.
+const ImagesRoute = HttpRouter.add('GET', '/images/*', () => imageResponse());
+
 const FallbackRoute = HttpRouter.add('*', '*', () =>
   isDev ?
     viteAssetResponse().pipe(
@@ -172,8 +232,13 @@ const FallbackRoute = HttpRouter.add('*', '*', () =>
     ),
 );
 
-const ProdRoutes = Layer.mergeAll(HealthRoute, HashedAssetsRoute, FallbackRoute);
-const DevRoutes = Layer.mergeAll(HealthRoute, FallbackRoute);
+const ProdRoutes = Layer.mergeAll(
+  HealthRoute,
+  HashedAssetsRoute,
+  ImagesRoute,
+  FallbackRoute,
+);
+const DevRoutes = Layer.mergeAll(HealthRoute, ImagesRoute, FallbackRoute);
 
 const RoutesLive = isDev ? DevRoutes : ProdRoutes;
 
@@ -183,12 +248,21 @@ const RoutesLive = isDev ? DevRoutes : ProdRoutes;
 // (ADR 0004:38-40). Providing `Env.layer` discharges the requirement, so a
 // missing secret fails `Layer.launch` and `BunRuntime.runMain` exits non-zero.
 // In dev / test the env vars are optional, so this is a cheap no-op.
-const StartupCheck = Layer.effectDiscard(Env.asEffect()).pipe(
+const StartupCheck = Layer.effectDiscard(Env.Service.asEffect()).pipe(
   Layer.provide(Env.layer),
 );
 
+// The `/images/*` route reads through `Storage`. `Storage.defaultLayer` never
+// fails to build (bucket-less it serves `NotFound`, which the route recovers by
+// falling back to the bundled `public/<key>` file), so providing it here keeps
+// the server booting identically with or without a bucket (D3). It is
+// `Storage.layerOptional` with its `Env` dependency pre-provided, so the
+// storage layer is self-contained.
+const StorageLive = Storage.defaultLayer;
+
 const ServerLive = HttpRouter.serve(RoutesLive).pipe(
-  Layer.provideMerge(StartupCheck),
+  Layer.provide(StorageLive),
+  Layer.provide(StartupCheck),
   Layer.provide(BunHttpServer.layer({ port: PORT })),
 );
 

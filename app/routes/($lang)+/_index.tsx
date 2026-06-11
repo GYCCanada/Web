@@ -12,7 +12,7 @@ import { match } from 'ts-pattern';
 
 import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
 import { FormProvider, useForm } from '~/lib/conform';
-import { getCurrentConference } from '~/lib/conference.server';
+import { Content } from '~/lib/content.server';
 import { dayjs } from '~/lib/dayjs';
 import { formValidationError } from '~/lib/effect/errors';
 import { routeFormAction, SubmissionContext } from '~/lib/effect/form';
@@ -48,15 +48,16 @@ export const meta: MetaFunction<typeof loader> = ({ data, params }) => {
 export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
+  const content = yield* Content.Service;
   return {
-    conference: getCurrentConference(locale),
+    conference: yield* content.getCurrentConference(locale),
   };
 });
 
 export const action = routeFormAction(function* () {
   const { url } = yield* ReactRouterContext;
   const submission = yield* SubmissionContext;
-  const mailchimp = yield* Mailchimp;
+  const mailchimp = yield* Mailchimp.Service;
   const toast = yield* Toast;
 
   const parsed = parseSchema(schema, submission.payload);
