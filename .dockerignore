@@ -1,0 +1,24 @@
+# VCS / CI / agent state
+.git
+.github
+.claude
+
+# Dependencies and build output (recreated inside the image)
+node_modules
+build
+
+# Docs and local-only files
+docs
+README.md
+*.md
+.env
+.env.*
+!.env.example
+
+# Tests never run in the image (and nothing in prod code imports them)
+**/*.test.ts
+**/*.test.tsx
+**/*.test-helper.ts
+
+Dockerfile
+.dockerignore
