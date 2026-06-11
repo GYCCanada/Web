@@ -40,7 +40,8 @@ ENV NODE_ENV=production
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
-COPY package.json server.ts ./
+# tsconfig.json: Bun resolves the `~/*` path alias from it at runtime
+COPY package.json tsconfig.json server.ts ./
 COPY app ./app
 
 USER bun
