@@ -1,5 +1,7 @@
+import { Effect } from 'effect';
 import { type MetaFunction, useLoaderData } from 'react-router';
 
+import { routeHandler } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import { Main } from '~/ui/main';
@@ -20,12 +22,14 @@ export const meta: MetaFunction = ({ params }) => {
   ];
 };
 
-export const loader = () => {
+export const loader = routeHandler(function* () {
+  // No request-scoped data; the team/board lists are static module data.
+  yield* Effect.void;
   return {
     team,
     board,
   };
-};
+});
 
 export default function Index() {
   const translate = useTranslate();

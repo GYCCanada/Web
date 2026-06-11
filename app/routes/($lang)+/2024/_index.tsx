@@ -1,5 +1,4 @@
 import {
-  type LoaderFunctionArgs,
   type MetaFunction,
   useLoaderData,
   useSearchParams,
@@ -20,6 +19,8 @@ import { match } from 'ts-pattern';
 import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
 import { getConferenceByYear } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
+import { ReactRouterContext } from '~/lib/effect/router-context';
+import { routeHandler } from '~/lib/effect/route';
 import { useLocale, useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import { buttonStyle } from '~/ui/button';
@@ -44,10 +45,11 @@ export const meta: MetaFunction = ({ params }) => {
   ];
 };
 
-export const loader = ({ params }: LoaderFunctionArgs) => {
+export const loader = routeHandler(function* () {
+  const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   return { conference: getConferenceByYear(locale, 2024) };
-};
+});
 
 export default function Registration() {
   return (

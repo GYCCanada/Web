@@ -17,6 +17,8 @@ const en = {
   'main.newsletter.name.placeholder': 'Full Name',
   'main.newsletter.email.label': 'Email',
   'main.newsletter.email.placeholder': 'Email',
+  'main.newsletter.email.error': 'Please enter a valid email address.',
+  'main.newsletter.name.required': 'Please enter your name.',
   'main.newsletter.submit': 'Sign up',
   'main.newsletter.error':
     'An error occurred while signing you up. Please try again later.',
@@ -350,6 +352,8 @@ const fr: Record<TranslationKey, string> = {
   'main.newsletter.name.placeholder': 'Nom complet',
   'main.newsletter.email.placeholder': 'Courriel',
   'main.newsletter.email.label': 'Courriel',
+  'main.newsletter.email.error': 'Veuillez entrer une adresse courriel valide.',
+  'main.newsletter.name.required': 'Veuillez entrer votre nom.',
   'main.newsletter.submit': "S'inscrire",
   'main.newsletter.error':
     "Une erreur s'est produite lors de votre inscription. Veuillez réessayer plus tard.",

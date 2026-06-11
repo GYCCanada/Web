@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import type * as React from 'react';
+import * as React from 'react';
 
 import { useTextField } from './text-field';
 
@@ -27,17 +27,25 @@ function TextArea({
   const { meta, control, variant: contextVariant, controlId } = useTextField();
   const resolvedVariant = variant ?? contextVariant ?? 'positive';
 
+  // The native textarea *is* conform's base control: `control.register` wires it
+  // so the submitted FormData carries this field's value and validation tracks it.
+  const setRef = React.useCallback(
+    (element: HTMLTextAreaElement | null) => {
+      control.register(element);
+      if (typeof ref === 'function') ref(element);
+      else if (ref) ref.current = element;
+    },
+    [control, ref],
+  );
+
   return (
     <textarea
       id={controlId}
+      defaultValue={meta.defaultValue}
       {...props}
-      ref={ref}
+      ref={setRef}
       name={meta.name}
-      value={(control.value as string) ?? ''}
-      onChange={(event) => control.change(event.target.value)}
-      onBlur={() => control.blur()}
-      onFocus={() => control.focus()}
-      aria-invalid={meta.errors && meta.errors.length > 0 ? true : undefined}
+      aria-invalid={meta.ariaInvalid}
       required={meta.required}
       className={clsx(base, variants[resolvedVariant], className)}
     />

@@ -2,9 +2,9 @@ import { useEffect } from 'react';
 import { toast as showToast } from 'sonner';
 
 import { useTranslate } from './localization/context.js';
-import type { Toast } from './toast.server.js';
+import type { ToastMessage } from './toast.server.js';
 
-export function useToast(toast?: Toast | null) {
+export function useToast(toast?: ToastMessage | null) {
   const translate = useTranslate();
   useEffect(() => {
     if (toast) {

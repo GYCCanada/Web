@@ -81,6 +81,9 @@ Architectural decisions are recorded as ADRs under `docs/adr/`:
 - **0002** — Replace React Aria with shadcn-on-base-ui; Tailwind v4 CSS-first; preserve identity.
 - **0003** — Effect v4 on Bun (paulo-suzanne pattern); oxlint + tsgo + bun test.
 - **0004** — Railway via Bun auto-detect; environment via Effect Config.
+- **0005** — Effect everywhere: Effect Schema is the sole validation layer, the Effect
+  runtime the sole loader/action path, conform `/future` + StandardSchema for forms, and a
+  tagged `Http.*` error taxonomy. Removes `zod` / `@conform-to/zod`.
 
 ## Notes for the revival
 

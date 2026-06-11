@@ -1,29 +1,29 @@
-import { FormProvider, useForm } from '@conform-to/react';
-import { parseWithZod } from '@conform-to/zod';
-import { Effect } from 'effect';
+import { Effect, Result, Schema } from 'effect';
 import clsx from 'clsx';
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import * as React from 'react';
 import {
   Form,
-  type LoaderFunctionArgs,
   type MetaFunction,
   useActionData,
   useLoaderData,
 } from 'react-router';
 import { match } from 'ts-pattern';
-import { z } from 'zod';
 
 import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
+import { FormProvider, useForm } from '~/lib/conform';
 import { getCurrentConference } from '~/lib/conference.server';
 import { dayjs } from '~/lib/dayjs';
+import { formValidationError } from '~/lib/effect/errors';
+import { routeFormAction, SubmissionContext } from '~/lib/effect/form';
+import { formatSchemaResult, parseSchema } from '~/lib/effect/form-schema';
 import { ReactRouterContext } from '~/lib/effect/router-context';
-import { routeAction } from '~/lib/effect/route';
+import { routeHandler } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import type { TranslationKey } from '~/lib/localization/translations';
 import { Mailchimp } from '~/lib/mailchimp.server';
-import { redirectWithToast } from '~/lib/toast.server';
+import { Toast } from '~/lib/toast.server';
 import { Button, buttonStyle } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
 import { Label } from '~/ui/label';
@@ -45,45 +45,40 @@ export const meta: MetaFunction<typeof loader> = ({ data, params }) => {
   ];
 };
 
-export const loader = ({ params }: LoaderFunctionArgs) => {
+export const loader = routeHandler(function* () {
+  const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   return {
     conference: getCurrentConference(locale),
   };
-};
+});
 
-export const action = routeAction(function* () {
-  const { request, url } = yield* ReactRouterContext;
+export const action = routeFormAction(function* () {
+  const { url } = yield* ReactRouterContext;
+  const submission = yield* SubmissionContext;
   const mailchimp = yield* Mailchimp;
+  const toast = yield* Toast;
 
-  const formData = yield* Effect.promise(() => request.formData());
-  const submission = parseWithZod(formData, { schema });
-
-  if (submission.status !== 'success') {
-    return submission.reply({
-      formErrors: ['main.newsletter.error' satisfies TranslationKey],
-    });
+  const parsed = parseSchema(schema, submission.payload);
+  if (Result.isFailure(parsed)) {
+    return yield* formValidationError(formatSchemaResult(parsed) ?? {});
   }
-
-  const data = submission.value;
+  const data = parsed.success;
 
   const result = yield* Effect.exit(mailchimp.subscribe(data.email, data.name));
   if (result._tag === 'Failure') {
     yield* Effect.logError('newsletter subscribe failed', result.cause);
-    return submission.reply({
+    return yield* formValidationError({
       formErrors: ['main.newsletter.error' satisfies TranslationKey],
     });
   }
 
-  return yield* Effect.promise(() =>
-    redirectWithToast(url.pathname, {
-      type: 'success',
-      title: 'main.newsletter.success.title' satisfies TranslationKey,
-      description:
-        'main.newsletter.success.description' satisfies TranslationKey,
-      form: 'newsletter-form',
-    }),
-  );
+  return yield* toast.redirect(url.pathname, {
+    type: 'success',
+    title: 'main.newsletter.success.title' satisfies TranslationKey,
+    description: 'main.newsletter.success.description' satisfies TranslationKey,
+    form: 'newsletter-form',
+  });
 });
 
 export default function Index() {
@@ -358,15 +353,28 @@ function GradientLine({
   );
 }
 
-const schema = z.object({
-  email: z.string().email(),
-  name: z.string(),
+// Match the previous zod `.email()` validation: a basic, permissive email shape.
+const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const schema = Schema.Struct({
+  email: Schema.String.check(
+    Schema.isPattern(EMAIL_REGEXP, {
+      message: 'main.newsletter.email.error' satisfies TranslationKey,
+    }),
+  ),
+  name: Schema.String.check(
+    Schema.isMinLength(1, {
+      message: 'main.newsletter.name.required' satisfies TranslationKey,
+    }),
+  ),
 });
+
+const clientSchema = Schema.toStandardSchemaV1(schema);
 
 function NewsletterForm() {
   const translate = useTranslate();
-  const lastResult = useActionData<typeof action>();
-  const [form, fields] = useForm({
+  const actionData = useActionData<typeof action>();
+  const { form, fields } = useForm(clientSchema, {
     id: 'newsletter-form',
     shouldValidate: 'onSubmit',
     shouldRevalidate: 'onInput',
@@ -374,10 +382,7 @@ function NewsletterForm() {
       name: '',
       email: '',
     },
-    lastResult,
-    onValidate({ formData }) {
-      return parseWithZod(formData, { schema });
-    },
+    lastResult: actionData?.result,
   });
 
   return (
@@ -399,7 +404,7 @@ function NewsletterForm() {
             <Form
               method="POST"
               className="flex flex-col gap-4"
-              id={form.id}
+              {...form.props}
             >
               <TextField name={fields.name.name}>
                 <Label>{translate('main.newsletter.name.label')}</Label>

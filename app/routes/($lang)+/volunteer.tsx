@@ -1,23 +1,19 @@
-import {
-  FormProvider,
-  FormStateInput,
-  getCollectionProps,
-  useForm,
-} from '@conform-to/react';
-import { parseWithZod } from '@conform-to/zod';
-import { Effect } from 'effect';
+import { Effect, Result, Schema } from 'effect';
 import { InfoIcon } from 'lucide-react';
 import { Form, type MetaFunction, useActionData, useLoaderData } from 'react-router';
 import { match } from 'ts-pattern';
-import { z } from 'zod';
 
+import { FormProvider, useForm, useFormData } from '~/lib/conform';
+import { formValidationError } from '~/lib/effect/errors';
+import { routeFormAction, SubmissionContext } from '~/lib/effect/form';
+import { formatSchemaResult, parseSchema } from '~/lib/effect/form-schema';
+import { routeHandler } from '~/lib/effect/route';
 import { ReactRouterContext } from '~/lib/effect/router-context';
-import { routeAction } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import type { TranslationKey } from '~/lib/localization/translations';
 import { Mailer } from '~/lib/mailer.server';
-import { redirectWithToast } from '~/lib/toast.server';
+import { Toast } from '~/lib/toast.server';
 import { Button } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
 import { Label } from '~/ui/label';
@@ -25,100 +21,104 @@ import { Main } from '~/ui/main';
 import { Radio, RadioGroup, Radios } from '~/ui/radio';
 import { TextField } from '~/ui/text-field';
 
-const schema = z.discriminatedUnion('method', [
-  z.object({
-    name: z.string({
-      required_error: 'volunteer.form.name.required',
-      invalid_type_error: 'volunteer.form.name.error',
-    }),
-    method: z.literal('phone', {
-      required_error: 'volunteer.form.method.required',
-    }),
-    phone: z.string({
-      required_error: 'volunteer.form.phone.required',
-    }),
-    age: z.string({
-      required_error: 'volunteer.form.age.required',
-      invalid_type_error: 'volunteer.form.age.error',
-    }),
-    location: z.string({
-      required_error: 'volunteer.form.location.required',
-      invalid_type_error: 'volunteer.form.location.error',
-    }),
-    background: z.string({
-      required_error: 'volunteer.form.background.required',
-      invalid_type_error: 'volunteer.form.background.error',
-    }),
-    why: z.string({
-      required_error: 'volunteer.form.why.required',
-      invalid_type_error: 'volunteer.form.why.error',
-    }),
-    positions: z.array(z.string()),
+// `invalid_type_error` keys from the old zod schema fired when a field's
+// submitted value was not a string (e.g. duplicate field names POST an array).
+// A node-level `message` annotation re-labels the resulting `InvalidType` issue
+// with a translation key. Every message must be a real `TranslationKey` —
+// `FieldErrors` renders it through `translate()`, so a key absent from
+// `translations.ts` would render `undefined`. Only `email` has a dedicated
+// `.error` key; the others reuse their `.required` key for the invalid-type case
+// (the old zod schema pointed those at `.error` keys that never existed in
+// `translations.ts` and so rendered blank — reusing `.required` is safe copy).
+// `.annotateKey({ messageMissingKey })` covers the absent-field case (the old
+// zod `required_error` fired for both empty and absent values); `.check` covers
+// the empty-string case; the node-level `message` covers the invalid-type case.
+const Name = Schema.String.annotate({ message: 'volunteer.form.name.required' })
+  .check(Schema.isMinLength(1, { message: 'volunteer.form.name.required' }))
+  .annotateKey({ messageMissingKey: 'volunteer.form.name.required' });
+const Email = Schema.String.annotate({
+  message: 'volunteer.form.email.error',
+}).check(Schema.isMinLength(1, { message: 'volunteer.form.email.required' }));
+const Phone = Schema.String.check(
+  Schema.isMinLength(1, { message: 'volunteer.form.phone.required' }),
+);
+const Age = Schema.String.annotate({ message: 'volunteer.form.age.required' })
+  .check(Schema.isMinLength(1, { message: 'volunteer.form.age.required' }))
+  .annotateKey({ messageMissingKey: 'volunteer.form.age.required' });
+const Location = Schema.String.annotate({
+  message: 'volunteer.form.location.required',
+})
+  .check(Schema.isMinLength(1, { message: 'volunteer.form.location.required' }))
+  .annotateKey({ messageMissingKey: 'volunteer.form.location.required' });
+const Background = Schema.String.annotate({
+  message: 'volunteer.form.background.required',
+})
+  .check(
+    Schema.isMinLength(1, { message: 'volunteer.form.background.required' }),
+  )
+  .annotateKey({ messageMissingKey: 'volunteer.form.background.required' });
+const Why = Schema.String.annotate({ message: 'volunteer.form.why.required' })
+  .check(Schema.isMinLength(1, { message: 'volunteer.form.why.required' }))
+  .annotateKey({ messageMissingKey: 'volunteer.form.why.required' });
+// `positions` is a multi-checkbox group: when nothing is selected the form
+// submits no `positions` field at all (unchecked checkboxes do not submit).
+// Classic `parseWithZod` coerced that absent field to `[]`; replicate it with a
+// decode-time default so an empty selection stays a valid submission.
+const Positions = Schema.optionalKey(Schema.Array(Schema.String)).pipe(
+  Schema.withDecodingDefault(Effect.succeed([] as string[])),
+);
+
+// The discriminator. Modeled as a single `Literals` field rather than per-member
+// `Schema.Literal`s inside a `Schema.Union`: a union whose members all fail
+// reports one top-level union-mismatch message (Effect v4 behavior), so the
+// discriminator error could not attach to the `method` field. The method
+// RadioGroup has no default selection, so submitting without choosing a method
+// is a real user path — a missing/invalid `method` must surface
+// `volunteer.form.method.required` on the method field, matching the old zod
+// `discriminatedUnion` behavior.
+const Method = Schema.Literals(['email', 'phone', 'both'])
+  .annotate({ message: 'volunteer.form.method.required' })
+  .annotateKey({ messageMissingKey: 'volunteer.form.method.required' });
+
+// Per-method requirements (email when email/both, phone when phone/both) are
+// expressed as a struct-level filter that attaches each issue to the relevant
+// field path, replacing the per-member required fields the union encoded.
+export const schema = Schema.Struct({
+  name: Name,
+  method: Method,
+  age: Age,
+  location: Location,
+  background: Background,
+  why: Why,
+  positions: Positions,
+  // Re-annotate the optional wrapper so a non-string (array) value still maps to
+  // a translation key instead of the wrapper's union-mismatch text. `phone` has
+  // no `.error` key, so reuse `.required` to keep real copy on screen.
+  email: Schema.optional(Email).annotate({ message: 'volunteer.form.email.error' }),
+  phone: Schema.optional(Phone).annotate({
+    message: 'volunteer.form.phone.required',
   }),
-  z.object({
-    name: z.string({
-      required_error: 'volunteer.form.name.required',
-      invalid_type_error: 'volunteer.form.name.error',
-    }),
-    method: z.literal('email', {
-      required_error: 'volunteer.form.method.required',
-    }),
-    email: z.string({
-      required_error: 'volunteer.form.email.required',
-      invalid_type_error: 'volunteer.form.email.error',
-    }),
-    age: z.string({
-      required_error: 'volunteer.form.age.required',
-      invalid_type_error: 'volunteer.form.age.error',
-    }),
-    location: z.string({
-      required_error: 'volunteer.form.location.required',
-      invalid_type_error: 'volunteer.form.location.error',
-    }),
-    background: z.string({
-      required_error: 'volunteer.form.background.required',
-      invalid_type_error: 'volunteer.form.background.error',
-    }),
-    why: z.string({
-      required_error: 'volunteer.form.why.required',
-      invalid_type_error: 'volunteer.form.why.error',
-    }),
-    positions: z.array(z.string()),
+}).check(
+  Schema.makeFilter((value) => {
+    const issues: Array<{ path: ReadonlyArray<PropertyKey>; issue: string }> =
+      [];
+    if (
+      (value.method === 'email' || value.method === 'both') &&
+      value.email === undefined
+    ) {
+      issues.push({ path: ['email'], issue: 'volunteer.form.email.required' });
+    }
+    if (
+      (value.method === 'phone' || value.method === 'both') &&
+      value.phone === undefined
+    ) {
+      issues.push({ path: ['phone'], issue: 'volunteer.form.phone.required' });
+    }
+    return issues.length === 0 ? undefined : issues;
   }),
-  z.object({
-    name: z.string({
-      required_error: 'volunteer.form.name.required',
-      invalid_type_error: 'volunteer.form.name.error',
-    }),
-    method: z.literal('both', {
-      required_error: 'volunteer.form.method.required',
-    }),
-    email: z.string({
-      required_error: 'volunteer.form.email.required',
-      invalid_type_error: 'volunteer.form.email.error',
-    }),
-    phone: z.string({
-      required_error: 'volunteer.form.phone.required',
-    }),
-    age: z.string({
-      required_error: 'volunteer.form.age.required',
-      invalid_type_error: 'volunteer.form.age.error',
-    }),
-    location: z.string({
-      required_error: 'volunteer.form.location.required',
-      invalid_type_error: 'volunteer.form.location.error',
-    }),
-    background: z.string({
-      required_error: 'volunteer.form.background.required',
-      invalid_type_error: 'volunteer.form.background.error',
-    }),
-    why: z.string({
-      required_error: 'volunteer.form.why.required',
-      invalid_type_error: 'volunteer.form.why.error',
-    }),
-    positions: z.array(z.string()),
-  }),
-]);
+);
+
+const clientSchema = Schema.toStandardSchemaV1(schema);
 
 export const meta: MetaFunction = ({ params }) => {
   const local = getLocale(params);
@@ -142,24 +142,25 @@ type Position = {
   team: string;
 };
 
-export const loader = () => {
+export const loader = routeHandler(function* () {
+  // No request-scoped data; `positions` is a static empty list.
+  yield* Effect.void;
   return {
     positions: [] as Position[],
   };
-};
+});
 
-export const action = routeAction(function* () {
-  const { request, url } = yield* ReactRouterContext;
+export const action = routeFormAction(function* () {
+  const { url } = yield* ReactRouterContext;
+  const submission = yield* SubmissionContext;
   const mailer = yield* Mailer;
+  const toast = yield* Toast;
 
-  const formData = yield* Effect.promise(() => request.formData());
-  const submission = parseWithZod(formData, { schema });
-
-  if (submission.status !== 'success') {
-    return submission.reply();
+  const parsed = parseSchema(schema, submission.payload);
+  if (Result.isFailure(parsed)) {
+    return yield* formValidationError(formatSchemaResult(parsed) ?? {});
   }
-
-  const data = submission.value;
+  const data = parsed.success;
 
   const result = yield* Effect.exit(
     mailer.send({
@@ -173,32 +174,30 @@ export const action = routeAction(function* () {
         \nBackground: ${data.background}
         \nAge: ${data.age}
         \nLocation: ${data.location}
-        \nPositions: ${data.positions.join(', ')}
+        \nPositions: ${(data.positions ?? []).join(', ')}
         `,
     }),
   );
   if (result._tag === 'Failure') {
     yield* Effect.logError('Error sending email', result.cause);
-    return submission.reply({
+    return yield* formValidationError({
       formErrors: ['contact.form.error'],
     });
   }
 
-  return yield* Effect.promise(() =>
-    redirectWithToast(url.pathname, {
-      description: 'volunteer.form.success.description' satisfies TranslationKey,
-      title: 'volunteer.form.success.title' satisfies TranslationKey,
-      type: 'success',
-      form: 'volunteer',
-    }),
-  );
+  return yield* toast.redirect(url.pathname, {
+    description: 'volunteer.form.success.description' satisfies TranslationKey,
+    title: 'volunteer.form.success.title' satisfies TranslationKey,
+    type: 'success',
+    form: 'volunteer',
+  });
 });
 
 export default function Index() {
   const translate = useTranslate();
   const data = useLoaderData<typeof loader>();
-  const lastResult = useActionData<typeof action>();
-  const [form, fields] = useForm({
+  const actionData = useActionData<typeof action>();
+  const { form, fields } = useForm(clientSchema, {
     id: 'volunteer',
     shouldValidate: 'onSubmit',
     shouldRevalidate: 'onInput',
@@ -213,13 +212,14 @@ export default function Index() {
       background: '',
       why: '',
     },
-    lastResult,
-    onValidate({ formData }) {
-      return parseWithZod(formData, { schema });
-    },
+    lastResult: actionData?.result,
   });
 
-  const method = fields.method.value;
+  const method = useFormData(
+    form.id,
+    (formData) => formData.get(fields.method.name) ?? 'email',
+    { fallback: 'email' },
+  ) as 'email' | 'phone' | 'both';
 
   return (
     <Main className="gap-10 px-4 py-12 text-2xl md:gap-16">
@@ -240,43 +240,36 @@ export default function Index() {
         <Form
           method="POST"
           className="flex flex-col gap-4"
-          id={form.id}
-          onSubmit={form.onSubmit}
+          {...form.props}
         >
-          <FormStateInput />
           {data.positions.length > 0 ? (
             <div className="flex flex-col gap-3">
               <h2>{translate('volunteer.directions')}</h2>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {getCollectionProps(fields.positions, {
-                  type: 'checkbox',
-                  options: data.positions.map((p) => p.title),
-                }).map((props, i) => {
-                  const position = data.positions[i];
-                  if (!position) return null;
-                  return (
-                    <div
-                      key={position.title}
-                      className="has-[input[checked]]:border-accent-600 flex flex-col gap-1.5 border-2 border-transparent"
-                    >
-                      <input
-                        className="sr-only"
-                        aria-label={position.title}
-                        {...props}
-                      />
-                      <h3 className="font-semibold">{position.title}</h3>
-                      <ul className="flex flex-col gap-1.5">
-                        {position.tasks.map((task) => (
-                          <li key={task}>{task}</li>
-                        ))}
-                      </ul>
-                      <p className="flex items-center gap-2">
-                        <InfoIcon />
-                        {position.team}
-                      </p>
-                    </div>
-                  );
-                })}
+                {data.positions.map((position) => (
+                  <div
+                    key={position.title}
+                    className="has-[input[checked]]:border-accent-600 flex flex-col gap-1.5 border-2 border-transparent"
+                  >
+                    <input
+                      className="sr-only"
+                      type="checkbox"
+                      aria-label={position.title}
+                      name={fields.positions.name}
+                      value={position.title}
+                    />
+                    <h3 className="font-semibold">{position.title}</h3>
+                    <ul className="flex flex-col gap-1.5">
+                      {position.tasks.map((task) => (
+                        <li key={task}>{task}</li>
+                      ))}
+                    </ul>
+                    <p className="flex items-center gap-2">
+                      <InfoIcon />
+                      {position.team}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
           ) : null}

@@ -1,7 +1,8 @@
-import { useField, useInputControl } from '@conform-to/react';
-import type { FieldMetadata } from '@conform-to/react';
+import type { Control, FieldMetadata } from '@conform-to/react/future';
 import clsx from 'clsx';
 import * as React from 'react';
+
+import { useControl, useField } from '~/lib/conform';
 
 import { Input } from './input';
 import type { InputVariant } from './input';
@@ -9,8 +10,8 @@ import { TextArea } from './text-area';
 
 export type TextFieldContextValue = {
   variant?: InputVariant;
-  meta: FieldMetadata;
-  control: ReturnType<typeof useInputControl>;
+  meta: FieldMetadata<string | string[]>;
+  control: Control<string | string[]>;
   /**
    * Shared id linking the field's `<label htmlFor>` to its control. Present for
    * single-control fields (text input / textarea / select); absent for grouped
@@ -51,8 +52,10 @@ function _TextField({
   children?: React.ReactNode;
   ref?: React.Ref<HTMLDivElement>;
 }) {
-  const [meta] = useField<string | string[]>(name ?? '');
-  const control = useInputControl(meta);
+  const meta = useField<string | string[]>(name ?? '');
+  const control = useControl<string | string[]>({
+    defaultValue: meta.defaultValue,
+  });
   const controlId = React.useId();
   const labelId = React.useId();
 
