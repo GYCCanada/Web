@@ -165,66 +165,149 @@ const Volunteer = Schema.Struct({
   roamingMic: OptionalFlag('registration.form.volunteer.required'),
 });
 
-const Attendee = Schema.Struct({
-  type: Schema.Literal('attendee'),
+// The registrant discriminator. Modeled as a single `Literals` field rather
+// than the per-member `Schema.Literal`s inside a `Schema.Union` it replaced: a
+// union whose members all fail reports one top-level union-mismatch message
+// (Effect v4 behavior) attached to the `registrants[n]` node, so a missing or
+// off-list `type` could only surface a key at the array element, never at the
+// `type` field the UI's RadioGroup renders — the error was a real key that
+// never displayed. As a struct field with `message` (off-list value) +
+// `messageMissingKey` (absent) annotations, a missing/invalid `type`
+// attributes cleanly to `registrants[n].type`. This mirrors the
+// contact.tsx/volunteer.tsx precedent (fab3d97) that solved the identical
+// problem on those forms' `method` discriminator.
+const Type = RequiredLiterals(
+  ['attendee', 'exhibitor'],
+  'registration.form.type.required',
+);
+
+const Outreach = Schema.mutable(
+  Schema.Array(
+    RequiredLiterals(
+      ['laws-of-health', 'homeless-carepacks', 'back-to-school', 'not-sure'],
+      'registration.form.outreach.required',
+    ),
+  ),
+).annotateKey({ messageMissingKey: 'registration.form.outreach.required' });
+
+const Meals = StringToBoolean('registration.form.meals.required').annotateKey({
+  messageMissingKey: 'registration.form.meals.required',
+});
+
+/**
+ * Single per-registrant struct, replacing the former `Schema.Union([Attendee,
+ * Exhibitor])`. The shared fields (`type`, `name`, `email`, `phone`) are always
+ * required; the variant-specific fields are `optional` so the off-variant never
+ * demands them at the struct level. Per-type requirements are enforced by the
+ * struct-level {@link Schema.makeFilter} below, which attaches each issue to its
+ * own field path (e.g. attendee-only `gender`, or the nested `extra.tos`) with
+ * the same translation key the field carried as a union member. A present
+ * variant field still validates its own format/literal/url checks; the filter
+ * only adds the per-type presence requirement.
+ */
+const Registrant = Schema.Struct({
+  type: Type,
   name: RequiredString('registration.form.name.required'),
   email: Email(
     'registration.form.email.error',
     'registration.form.email.required',
   ),
   phone: RequiredString('registration.form.phone.required'),
-  dateOfBirth: RequiredString('registration.form.date-of-birth.required'),
-  parent: Schema.optional(Parent),
-  gender: RequiredLiterals(
-    ['male', 'female'],
-    'registration.form.gender.required',
+  // Attendee-only fields. Optional at the struct level so exhibitors don't
+  // demand them; the filter requires them (at their own paths) when
+  // `type === 'attendee'`. A present value still runs its own checks.
+  dateOfBirth: Schema.optional(
+    RequiredString('registration.form.date-of-birth.required'),
   ),
-  meals: StringToBoolean('registration.form.meals.required').annotateKey({
-    messageMissingKey: 'registration.form.meals.required',
-  }),
+  parent: Schema.optional(Parent),
+  gender: Schema.optional(
+    RequiredLiterals(['male', 'female'], 'registration.form.gender.required'),
+  ),
+  meals: Schema.optional(Meals),
   dietaryRestrictions: OptionalString(
     'registration.form.dietary-restrictions.required',
   ),
-  outreach: Schema.mutable(
-    Schema.Array(
-      RequiredLiterals(
-        ['laws-of-health', 'homeless-carepacks', 'back-to-school', 'not-sure'],
-        'registration.form.outreach.required',
-      ),
-    ),
-  ).annotateKey({ messageMissingKey: 'registration.form.outreach.required' }),
-  extra: Extra,
-  volunteer: Volunteer,
-});
-
-const Exhibitor = Schema.Struct({
-  type: Schema.Literal('exhibitor'),
-  name: RequiredString('registration.form.name.required'),
-  email: Email(
-    'registration.form.email.error',
-    'registration.form.email.required',
-  ),
-  phone: RequiredString('registration.form.phone.required'),
-  synopsis: RequiredString('registration.form.synopsis.required'),
-  website: Url('registration.form.website.required'),
-  company: RequiredString('registration.form.company.required'),
-});
+  outreach: Schema.optional(Outreach),
+  extra: Schema.optional(Extra),
+  volunteer: Schema.optional(Volunteer),
+  // Exhibitor-only fields. Optional at the struct level so attendees don't
+  // demand them; the filter requires them (at their own paths) when
+  // `type === 'exhibitor'`.
+  synopsis: Schema.optional(RequiredString('registration.form.synopsis.required')),
+  website: Schema.optional(Url('registration.form.website.required')),
+  company: Schema.optional(RequiredString('registration.form.company.required')),
+}).check(
+  Schema.makeFilter((value) => {
+    const issues: Array<{ path: ReadonlyArray<PropertyKey>; issue: string }> =
+      [];
+    if (value.type === 'attendee') {
+      if (value.dateOfBirth === undefined) {
+        issues.push({
+          path: ['dateOfBirth'],
+          issue: 'registration.form.date-of-birth.required',
+        });
+      }
+      if (value.gender === undefined) {
+        issues.push({
+          path: ['gender'],
+          issue: 'registration.form.gender.required',
+        });
+      }
+      if (value.meals === undefined) {
+        issues.push({
+          path: ['meals'],
+          issue: 'registration.form.meals.required',
+        });
+      }
+      if (value.outreach === undefined) {
+        issues.push({
+          path: ['outreach'],
+          issue: 'registration.form.outreach.required',
+        });
+      }
+      // The nested attendee groups are always rendered (with defaults) when a
+      // registrant is an attendee, so a wholly-absent group is an out-of-form
+      // path. When present, the inner required-field annotations fire at their
+      // own nested paths; when absent, surface a real key at the group path
+      // rather than the raw `Missing key` the bare optional/required struct
+      // would emit.
+      if (value.extra === undefined) {
+        issues.push({
+          path: ['extra', 'tos'],
+          issue: 'registration.form.tos.required',
+        });
+      }
+    } else if (value.type === 'exhibitor') {
+      if (value.synopsis === undefined) {
+        issues.push({
+          path: ['synopsis'],
+          issue: 'registration.form.synopsis.required',
+        });
+      }
+      if (value.website === undefined) {
+        issues.push({
+          path: ['website'],
+          issue: 'registration.form.website.required',
+        });
+      }
+      if (value.company === undefined) {
+        issues.push({
+          path: ['company'],
+          issue: 'registration.form.company.required',
+        });
+      }
+    }
+    return issues.length === 0 ? undefined : issues;
+  }),
+);
 
 export const RegistrationSchema = Schema.Struct({
-  // A `Union` whose members all fail reports one top-level union-mismatch
-  // (Effect v4 behavior), so an empty registrant or an off-list `type`
-  // discriminator can only attach to the `registrants[n]` node, never to the
-  // inner `type` field. The node-level `message` re-labels that mismatch with a
-  // real key; once a member's discriminator matches, the inner field
-  // annotations attribute cleanly to their own paths. The array's
-  // `messageMissingKey` covers an absent `registrants` field.
-  registrants: Schema.mutable(
-    Schema.Array(
-      Schema.Union([Attendee, Exhibitor]).annotate({
-        message: 'registration.form.type.required',
-      }),
-    ),
-  ).annotateKey({ messageMissingKey: 'registration.form.type.required' }),
+  // The array's `messageMissingKey` covers an absent `registrants` field; each
+  // element is the discriminated {@link Registrant} struct, whose `type`
+  // discriminator now attributes a missing/invalid value to `registrants[n].type`.
+  registrants: Schema.mutable(Schema.Array(Registrant)).annotateKey({
+    messageMissingKey: 'registration.form.type.required',
+  }),
 });
 
 /** Standard Schema view consumed by `useForm` for client-side validation. */
@@ -237,7 +320,18 @@ type DeepPartial<T> = T extends object
   ? { [P in keyof T]?: DeepPartial<T[P]> }
   : T;
 
-export type Registrant = DeepPartial<RegistrationForm['registrants'][number]>;
+/**
+ * The form's initial/appended registrant value. Derived from the schema's
+ * **encoded** (form-input) shape rather than the decoded `.Type`: the default
+ * holds the raw string/absent values the browser submits (e.g. `meals: ''`,
+ * `extra.firstTimeAttending: undefined`), not decoded booleans, and is what
+ * conform's `defaultValue` consumes. Basing it on the decoded `.Type` would
+ * type the boolean fields as `boolean`, which `useForm`'s input-shaped
+ * `defaultValue` rejects.
+ */
+export type Registrant = DeepPartial<
+  (typeof RegistrationSchema.Encoded)['registrants'][number]
+>;
 
 /** Empty attendee used as the form's initial / appended registrant value. */
 export const makeDefaultRegistrant = (): Registrant => ({
