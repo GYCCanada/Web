@@ -16,8 +16,8 @@ app still ran two parallel validation/runtime stacks:
   Schema was already a dependency (it ships inside `effect`) but was unused for app data.
 - **Loaders / actions** — only 3 of 11 route modules ran through the Effect runtime
   (`routeHandler` / `routeAction`); the rest were plain `async` handlers typed with
-  `LoaderFunctionArgs`, reaching for `process.env`-adjacent globals and `redirectWithToast`
-  from `remix-utils` directly.
+  `LoaderFunctionArgs`, calling the plain-async `redirectWithToast` helper
+  (`app/lib/toast.server.ts`) outside the Effect failure channel.
 - **Forms** — conform's **classic v1 API** (`useInputControl`, `parseWithZod`, classic
   `FormProvider`), with UI primitives bound to the classic tuple shapes.
 
