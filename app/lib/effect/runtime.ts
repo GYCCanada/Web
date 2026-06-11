@@ -4,6 +4,7 @@ import { data, redirect } from 'react-router';
 import { Env } from '~/lib/env.server';
 import { Mailchimp, MailchimpDisabled, MailchimpError } from '~/lib/mailchimp.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
+import { Toast } from '~/lib/toast.server';
 
 import {
   BadRequestError,
@@ -14,7 +15,7 @@ import {
 } from './errors';
 import { ReactRouterContext, type RouteArgs } from './router-context';
 
-export type AppServices = Env | Mailer | Mailchimp;
+export type AppServices = Env | Mailer | Mailchimp | Toast;
 export type AppError =
   | Response
   | HttpError
@@ -22,7 +23,7 @@ export type AppError =
   | MailchimpError
   | MailchimpDisabled;
 
-const AppLayer = Layer.mergeAll(Mailer.layer, Mailchimp.layer).pipe(
+const AppLayer = Layer.mergeAll(Mailer.layer, Mailchimp.layer, Toast.layer).pipe(
   Layer.provideMerge(Env.layer),
 );
 const AppRuntime = ManagedRuntime.make(AppLayer);

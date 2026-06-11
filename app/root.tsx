@@ -1,37 +1,33 @@
-import {
-  data,
-  Links,
-  type LoaderFunctionArgs,
-  Meta,
-  Outlet,
-  Scripts,
-  useLoaderData,
-} from 'react-router';
+import { data, Links, Meta, Outlet, Scripts, useLoaderData } from 'react-router';
 
 import { ClientHintCheck, getHints } from './lib/client-hints';
+import { ReactRouterContext } from './lib/effect/router-context';
+import { routeHandler } from './lib/effect/route';
 import { Main } from './ui/main';
 
 import './tailwind.css';
 
 import { combineHeaders } from './lib/misc';
-import { getToast } from './lib/toast.server';
+import { Toast } from './lib/toast.server';
 import { Toaster } from './ui/toaster';
 
-export const loader = async ({ request, url }: LoaderFunctionArgs) => {
-  const { toast, headers: toastHeaders } = await getToast(request);
+export const loader = routeHandler(function* () {
+  const { request, url } = yield* ReactRouterContext;
+  const toast = yield* Toast;
+  const { toast: toastData, headers: toastHeaders } = yield* toast.get(request);
   return data(
     {
       requestInfo: {
         hints: getHints(request),
         path: url.pathname,
       },
-      toast,
+      toast: toastData,
     },
     {
       headers: combineHeaders(toastHeaders),
     },
   );
-};
+});
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const data = useLoaderData<typeof loader>();

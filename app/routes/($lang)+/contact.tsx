@@ -11,7 +11,7 @@ import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import type { TranslationKey } from '~/lib/localization/translations';
 import { Mailer } from '~/lib/mailer.server';
-import { redirectWithToast } from '~/lib/toast.server';
+import { Toast } from '~/lib/toast.server';
 import { Button } from '~/ui/button';
 import { ExternalLink } from '~/ui/external-link';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
@@ -103,6 +103,7 @@ export const meta: MetaFunction = ({ params }) => {
 export const action = routeAction(function* () {
   const { request, url } = yield* ReactRouterContext;
   const mailer = yield* Mailer;
+  const toast = yield* Toast;
 
   const formData = yield* Effect.promise(() => request.formData());
   const submission = parseWithZod(formData, { schema });
@@ -135,14 +136,12 @@ export const action = routeAction(function* () {
     });
   }
 
-  return yield* Effect.promise(() =>
-    redirectWithToast(url.pathname, {
-      description: 'contact.form.success.description' satisfies TranslationKey,
-      title: 'contact.form.success.title' satisfies TranslationKey,
-      type: 'success',
-      form: 'contact',
-    }),
-  );
+  return yield* toast.redirect(url.pathname, {
+    description: 'contact.form.success.description' satisfies TranslationKey,
+    title: 'contact.form.success.title' satisfies TranslationKey,
+    type: 'success',
+    form: 'contact',
+  });
 });
 
 export default function Index() {

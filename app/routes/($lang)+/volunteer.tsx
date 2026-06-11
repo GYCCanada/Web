@@ -17,7 +17,7 @@ import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import type { TranslationKey } from '~/lib/localization/translations';
 import { Mailer } from '~/lib/mailer.server';
-import { redirectWithToast } from '~/lib/toast.server';
+import { Toast } from '~/lib/toast.server';
 import { Button } from '~/ui/button';
 import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
 import { Label } from '~/ui/label';
@@ -151,6 +151,7 @@ export const loader = () => {
 export const action = routeAction(function* () {
   const { request, url } = yield* ReactRouterContext;
   const mailer = yield* Mailer;
+  const toast = yield* Toast;
 
   const formData = yield* Effect.promise(() => request.formData());
   const submission = parseWithZod(formData, { schema });
@@ -184,14 +185,12 @@ export const action = routeAction(function* () {
     });
   }
 
-  return yield* Effect.promise(() =>
-    redirectWithToast(url.pathname, {
-      description: 'volunteer.form.success.description' satisfies TranslationKey,
-      title: 'volunteer.form.success.title' satisfies TranslationKey,
-      type: 'success',
-      form: 'volunteer',
-    }),
-  );
+  return yield* toast.redirect(url.pathname, {
+    description: 'volunteer.form.success.description' satisfies TranslationKey,
+    title: 'volunteer.form.success.title' satisfies TranslationKey,
+    type: 'success',
+    form: 'volunteer',
+  });
 });
 
 export default function Index() {
