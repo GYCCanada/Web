@@ -159,6 +159,8 @@ const en = {
   'registration.form.title': 'Register for GYC Canada {{year}}',
   'registration.form.attendee': 'Attendee',
   'registration.form.exhibitor': 'Exhibitor',
+  'registration.form.type.required':
+    'Please select whether you are registering as an attendee or exhibitor',
   'registration.form.name.label': 'Full Name',
   'registration.form.name.placeholder': 'Enter your full name here',
   'registration.form.name.required': 'Please enter your name',
@@ -173,6 +175,7 @@ const en = {
   'registration.form.gender.label': 'Gender',
   'registration.form.gender.male': 'Male',
   'registration.form.gender.female': 'Female',
+  'registration.form.gender.required': 'Please select your gender',
   'registration.form.date-of-birth.label': 'Date of Birth',
   'registration.form.date-of-birth.placeholder': 'Enter your date of birth',
   'registration.form.date-of-birth.required': 'Please enter your date of birth',
@@ -208,6 +211,8 @@ const en = {
   'registration.form.dietary-restrictions.label': 'Dietary Restrictions',
   'registration.form.dietary-restrictions.placeholder':
     'Enter any dietary restrictions here',
+  'registration.form.dietary-restrictions.required':
+    'Please enter your dietary restrictions',
   'registration.form.outreach.label': 'Outreach',
   'registration.form.outreach.description': `What's your preference in terms of which outreach project you'd like to take part in? Outreach will happen Sabbath, August 19th after lunch. Transportation will be provided. Please note, picking one over another doesn't guarantee that you will be able to join in that specific outreach project, but there is a very large chance you will be able to. Please keep in mind that projects like these are very fluid and are subject to change.`,
   'registration.form.outreach.laws-of-health': '8 Laws of Health Fair',
@@ -215,14 +220,21 @@ const en = {
     'Summer Care Packs for the Homeless',
   'registration.form.outreach.back-to-school': 'Back to School Shoes Giveaway',
   'registration.form.outreach.not-sure': `I'm not sure`,
+  'registration.form.outreach.required':
+    'Please select an outreach preference',
   'registration.form.how-did-you-hear.label': 'How did you hear about us?',
   'registration.form.how-did-you-hear.placeholder':
     'Enter how you heard about us here',
+  'registration.form.how-did-you-hear.required':
+    'Please tell us how you heard about us',
   'registration.form.why-are-you-attending.label': 'Why are you attending?',
   'registration.form.why-are-you-attending.placeholder':
     'Enter why you are attending here',
+  'registration.form.why-are-you-attending.required':
+    'Please tell us why you are attending',
   'registration.form.what-are-you-excited-about.label': `What are you most excited for this conference?`,
   'registration.form.what-are-you-excited-about.placeholder': `Enter what you're excited about here`,
+  'registration.form.what-are-you-excited-about.required': `Please tell us what you are excited about`,
   'registration.form.first-time-attending.label': 'First Time Attending?',
   'registration.form.first-time-attending.yes': 'Yes',
   'registration.form.first-time-attending.no': 'No',
@@ -232,21 +244,27 @@ const en = {
     'Please select if this is your first time attending',
   'registration.form.church.label': 'Do you attend a church? If so, which one?',
   'registration.form.church.placeholder': 'Enter your church here',
+  'registration.form.church.required': 'Please enter your church',
   'registration.form.merch.label': 'Merchandise',
   'registration.form.merch.t-shirt': 'T-Shirt',
   'registration.form.merch.hoodie': 'Hoodie',
   'registration.form.merch.shirt': 'Long Sleeve Shirt',
   'registration.form.merch.none': `Merch isn't for me`,
+  'registration.form.merch.required': 'Please select a merchandise option',
   'registration.form.other.label': 'Other',
   'registration.form.other.placeholder': 'Enter any other notes here',
+  'registration.form.other.required': 'Please enter any other notes',
   'registration.form.tos.label': 'Terms of Service',
   'registration.form.tos.required': 'Please accept the terms of service',
   'registration.form.tos.error': 'Please accept the terms of service',
   'registration.form.tos.agree': 'I agree to the terms of service',
+  'registration.form.volunteer.required':
+    'Please select a valid volunteer option',
   'registration.form.song-leader.label': 'Song Service Leader',
   'registration.form.musician.label': 'Song Service Musician',
   'registration.form.instrument.label': 'Instrument',
   'registration.form.instrument.placeholder': 'Enter your instrument here',
+  'registration.form.instrument.required': 'Please enter your instrument',
   'registration.form.special-music.label': 'Special Music',
   'registration.form.hospitality.label': 'Hospitality',
   'registration.form.hospitality.description': 'Food prep, etc!',
@@ -496,6 +514,8 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.title': 'Inscrivez-vous à GYC Canada {{year}}',
   'registration.form.attendee': 'Participant',
   'registration.form.exhibitor': 'Exposant',
+  'registration.form.type.required':
+    'Veuillez indiquer si vous vous inscrivez comme participant ou exposant',
   'registration.form.name.label': 'Nom complet',
   'registration.form.name.placeholder': 'Entrez votre nom complet ici',
   'registration.form.name.required': 'Veuillez entrer votre nom',
@@ -513,6 +533,7 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.gender.label': 'Sexe',
   'registration.form.gender.male': 'Homme',
   'registration.form.gender.female': 'Femme',
+  'registration.form.gender.required': 'Veuillez sélectionner votre sexe',
   'registration.form.date-of-birth.label': 'Date de naissance',
   'registration.form.date-of-birth.placeholder':
     'Entrez votre date de naissance',
@@ -556,6 +577,8 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.dietary-restrictions.label': 'Restrictions alimentaires',
   'registration.form.dietary-restrictions.placeholder':
     'Entrez toutes les restrictions alimentaires ici',
+  'registration.form.dietary-restrictions.required':
+    'Veuillez entrer vos restrictions alimentaires',
   'registration.form.outreach.label': 'Rayonnement',
   'registration.form.outreach.description': `Quelle est votre préférence en termes de projet de rayonnement auquel vous aimeriez participer? Le rayonnement aura lieu le sabbat 19 août après le déjeuner. Le transport sera fourni. Veuillez noter que choisir un projet plutôt qu’un autre ne garantit pas que vous pourrez participer à ce projet de rayonnement spécifique, mais il y a une très grande chance que vous puissiez le faire. Veuillez garder à l’esprit que des projets comme ceux-ci sont très fluides et peuvent changer.`,
   'registration.form.outreach.laws-of-health': 'Salon des 8 lois de la santé',
@@ -564,15 +587,22 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.outreach.back-to-school':
     'Distribution de chaussures pour la rentrée scolaire',
   'registration.form.outreach.not-sure': `Je ne suis pas sûr`,
+  'registration.form.outreach.required':
+    'Veuillez sélectionner une préférence de rayonnement',
   'registration.form.how-did-you-hear.label':
     'Comment avez-vous entendu parler de nous?',
   'registration.form.how-did-you-hear.placeholder':
     'Entrez comment vous avez entendu parler de nous ici',
+  'registration.form.how-did-you-hear.required':
+    'Veuillez nous indiquer comment vous avez entendu parler de nous',
   'registration.form.why-are-you-attending.label': 'Pourquoi assistez-vous?',
   'registration.form.why-are-you-attending.placeholder':
     'Entrez pourquoi vous assistez ici',
+  'registration.form.why-are-you-attending.required':
+    'Veuillez nous indiquer pourquoi vous assistez',
   'registration.form.what-are-you-excited-about.label': `Qu’est-ce qui vous excite le plus pour cette conférence?`,
   'registration.form.what-are-you-excited-about.placeholder': `Entrez ce qui vous excite ici`,
+  'registration.form.what-are-you-excited-about.required': `Veuillez nous indiquer ce qui vous excite`,
   'registration.form.first-time-attending.label':
     'Première fois que vous assistez?',
   'registration.form.first-time-attending.yes': 'Oui',
@@ -584,23 +614,30 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.church.label':
     'Fréquentez-vous une église? Si oui, laquelle?',
   'registration.form.church.placeholder': 'Entrez votre église ici',
+  'registration.form.church.required': 'Veuillez entrer votre église',
   'registration.form.merch.label': 'Marchandise',
   'registration.form.merch.t-shirt': 'T-Shirt',
   'registration.form.merch.hoodie': 'Chandail à capuchon',
   'registration.form.merch.shirt': 'Chandail à manches longues',
   'registration.form.merch.none': `La marchandise n’est pas pour moi`,
+  'registration.form.merch.required':
+    'Veuillez sélectionner une option de marchandise',
   'registration.form.other.label': 'Autre',
   'registration.form.other.placeholder': 'Entrez toutes autres notes ici',
+  'registration.form.other.required': 'Veuillez entrer toutes autres notes',
   'registration.form.tos.label': 'Conditions d’utilisation',
   'registration.form.tos.required':
     'Veuillez accepter les conditions d’utilisation',
   'registration.form.tos.error':
     'Veuillez accepter les conditions d’utilisation',
   'registration.form.tos.agree': 'J’accepte les conditions d’utilisation',
+  'registration.form.volunteer.required':
+    'Veuillez sélectionner une option de bénévolat valide',
   'registration.form.song-leader.label': 'Chef du service de chant',
   'registration.form.musician.label': 'Musicien du service de chant',
   'registration.form.instrument.label': 'Instrument',
   'registration.form.instrument.placeholder': 'Entrez votre instrument ici',
+  'registration.form.instrument.required': 'Veuillez entrer votre instrument',
   'registration.form.special-music.label': 'Musique spéciale',
   'registration.form.hospitality.label': 'Hospitalité',
   'registration.form.hospitality.description': 'Préparation des repas, etc!',

@@ -153,7 +153,7 @@ export const loader = routeHandler(function* () {
 export const action = routeFormAction(function* () {
   const { url } = yield* ReactRouterContext;
   const submission = yield* SubmissionContext;
-  const mailer = yield* Mailer;
+  const mailer = yield* Mailer.Service;
   const toast = yield* Toast;
 
   const parsed = parseSchema(schema, submission.payload);
