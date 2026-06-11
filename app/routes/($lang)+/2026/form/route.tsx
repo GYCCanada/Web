@@ -1,10 +1,4 @@
-import {
-  FormProvider,
-  getFieldsetProps,
-  getFormProps,
-  useForm,
-} from '@conform-to/react';
-import { parseWithZod } from '@conform-to/zod';
+import { coerceFormValue } from '@conform-to/zod/v3/future';
 import {
   type ActionFunctionArgs,
   Form,
@@ -15,6 +9,7 @@ import {
 import dayjs from 'dayjs';
 import { z } from 'zod';
 
+import { FormProvider, useForm, useFormData } from '~/lib/conform';
 import { getCurrentConference } from '~/lib/conference.server';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
@@ -175,24 +170,38 @@ export const makeDefaultRegistrant = (): Registrant => ({
   },
 });
 
+const clientSchema = coerceFormValue(RegistrationSchema);
+
 export default function RegistrationForm() {
   const translate = useTranslate();
-  const lastResult = useActionData<typeof action>();
+  const actionData = useActionData<typeof action>();
 
-  const [form, fields] = useForm({
+  const { form, fields, intent } = useForm(clientSchema, {
     shouldValidate: 'onSubmit',
     shouldRevalidate: 'onInput',
     defaultValue: {
       registrants: [makeDefaultRegistrant()],
     },
-
-    lastResult,
-    onValidate({ formData }) {
-      return parseWithZod(formData, { schema: RegistrationSchema });
-    },
+    lastResult: actionData,
   });
 
   const registrants = fields.registrants.getFieldList();
+
+  // `/future` field metadata exposes no live `.value`; read the current `type`
+  // and `dateOfBirth` for each registrant from the live form data instead.
+  const names = registrants.map((registrant) => {
+    const set = registrant.getFieldset();
+    return { type: set.type.name, dateOfBirth: set.dateOfBirth.name };
+  });
+  const liveValues = useFormData(
+    form.id,
+    (formData) =>
+      names.map((n) => ({
+        type: formData.get(n.type),
+        dateOfBirth: formData.get(n.dateOfBirth),
+      })),
+    { fallback: [] as Array<{ type: string | null; dateOfBirth: string | null }> },
+  );
 
   return (
     <Main className="gap-10 px-3 py-12 text-2xl md:px-16">
@@ -201,16 +210,13 @@ export default function RegistrationForm() {
         <Form
           method="POST"
           className="flex flex-col gap-4"
-          {...getFormProps(form)}
+          {...form.props}
         >
           {registrants.map((registrant, index) => {
-            const type = (form.value?.registrants?.[index] as any)?.type as
-              | 'attendee'
-              | 'exhibitor';
+            const type = liveValues[index]?.type as 'attendee' | 'exhibitor';
 
             const fields = registrant.getFieldset();
-            const dateOfBirth = (form.value?.registrants?.[index] as any)
-              ?.dateOfBirth;
+            const dateOfBirth = liveValues[index]?.dateOfBirth;
             const age = dayjs().diff(dayjs(dateOfBirth), 'year');
             const isMinor = age < 18;
             const parent = fields.parent.getFieldset();
@@ -221,7 +227,7 @@ export default function RegistrationForm() {
               <>
                 <fieldset
                   key={registrant.key}
-                  {...getFieldsetProps(registrant)}
+                  name={registrant.name}
                   className="flex flex-col gap-4"
                 >
                   <RadioGroup name={fields.type.name}>
@@ -672,7 +678,7 @@ export default function RegistrationForm() {
             <Button
               type="button"
               onClick={() => {
-                form.insert({ name: 'registrants' });
+                intent.insert({ name: fields.registrants.name });
               }}
             >
               Add Registrant

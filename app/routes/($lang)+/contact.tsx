@@ -1,12 +1,12 @@
-import { FormProvider, FormStateInput, useForm } from '@conform-to/react';
-import { parseWithZod } from '@conform-to/zod';
-import { Effect } from 'effect';
+import { Effect, Result, Schema } from 'effect';
 import { Form, type MetaFunction, useActionData } from 'react-router';
 import { match } from 'ts-pattern';
-import { z } from 'zod';
 
+import { FormProvider, useForm, useFormData } from '~/lib/conform';
+import { formValidationError } from '~/lib/effect/errors';
+import { routeFormAction, SubmissionContext } from '~/lib/effect/form';
+import { formatSchemaResult, parseSchema } from '~/lib/effect/form-schema';
 import { ReactRouterContext } from '~/lib/effect/router-context';
-import { routeAction } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import type { TranslationKey } from '~/lib/localization/translations';
@@ -20,66 +20,46 @@ import { Main } from '~/ui/main';
 import { Radio, RadioGroup, Radios } from '~/ui/radio';
 import { TextField } from '~/ui/text-field';
 
-export const schema = z.discriminatedUnion('method', [
-  z.object({
-    method: z.literal('email', {
-      invalid_type_error: 'contact.form.contact-method.required',
-      required_error: 'contact.form.contact-method.required',
-    }),
-    email: z
-      .string({
-        required_error: 'contact.form.email.required',
-        invalid_type_error: 'contact.form.email.error',
-      })
-      .email({
-        message: 'contact.form.email.error',
-      }),
-    name: z.string({
-      required_error: 'contact.form.name.required',
-      invalid_type_error: 'contact.form.name.error',
-    }),
-    message: z.string({
-      required_error: 'contact.form.message.required',
-    }),
+// Match the previous zod `.email()` validation: a basic, permissive email shape.
+const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const Name = Schema.String.check(
+  Schema.isMinLength(1, { message: 'contact.form.name.required' }),
+);
+const Message = Schema.String.check(
+  Schema.isMinLength(1, { message: 'contact.form.message.required' }),
+);
+const Email = Schema.String.check(
+  Schema.isMinLength(1, { message: 'contact.form.email.required' }),
+  Schema.isPattern(EMAIL_REGEXP, { message: 'contact.form.email.error' }),
+);
+const Phone = Schema.String.check(
+  Schema.isMinLength(1, { message: 'contact.form.phone.required' }),
+);
+
+export const schema = Schema.Union([
+  Schema.Struct({
+    method: Schema.Literal('email'),
+    email: Email,
+    name: Name,
+    message: Message,
   }),
-  z.object({
-    method: z.literal('phone', {
-      invalid_type_error: 'contact.form.contact-method.required',
-      required_error: 'contact.form.contact-method.required',
-    }),
-    phone: z.string({
-      required_error: 'contact.form.phone.required',
-    }),
-    name: z.string({
-      required_error: 'contact.form.name.required',
-      invalid_type_error: 'contact.form.name.error',
-    }),
-    message: z.string({
-      required_error: 'contact.form.message.required',
-    }),
+  Schema.Struct({
+    method: Schema.Literal('phone'),
+    phone: Phone,
+    name: Name,
+    message: Message,
   }),
-  z.object({
-    method: z.literal('both'),
-    email: z
-      .string({
-        required_error: 'contact.form.email.required',
-        invalid_type_error: 'contact.form.email.error',
-      })
-      .email({
-        message: 'contact.form.email.error',
-      }),
-    phone: z.string({
-      required_error: 'contact.form.phone.required',
-    }),
-    name: z.string({
-      required_error: 'contact.form.name.required',
-      invalid_type_error: 'contact.form.name.error',
-    }),
-    message: z.string({
-      required_error: 'contact.form.message.required',
-    }),
+  Schema.Struct({
+    method: Schema.Literal('both'),
+    email: Email,
+    phone: Phone,
+    name: Name,
+    message: Message,
   }),
 ]);
+
+const clientSchema = Schema.toStandardSchemaV1(schema);
 
 export const meta: MetaFunction = ({ params }) => {
   const locale = getLocale(params);
@@ -100,19 +80,17 @@ export const meta: MetaFunction = ({ params }) => {
   ];
 };
 
-export const action = routeAction(function* () {
-  const { request, url } = yield* ReactRouterContext;
+export const action = routeFormAction(function* () {
+  const { url } = yield* ReactRouterContext;
+  const submission = yield* SubmissionContext;
   const mailer = yield* Mailer;
   const toast = yield* Toast;
 
-  const formData = yield* Effect.promise(() => request.formData());
-  const submission = parseWithZod(formData, { schema });
-
-  if (submission.status !== 'success') {
-    return submission.reply();
+  const parsed = parseSchema(schema, submission.payload);
+  if (Result.isFailure(parsed)) {
+    return yield* formValidationError(formatSchemaResult(parsed) ?? {});
   }
-
-  const data = submission.value;
+  const data = parsed.success;
 
   const result = yield* Effect.exit(
     mailer.send({
@@ -131,7 +109,7 @@ export const action = routeAction(function* () {
   );
   if (result._tag === 'Failure') {
     yield* Effect.logError('Error sending email', result.cause);
-    return submission.reply({
+    return yield* formValidationError({
       formErrors: ['contact.form.error'],
     });
   }
@@ -146,15 +124,12 @@ export const action = routeAction(function* () {
 
 export default function Index() {
   const translate = useTranslate();
-  const lastResult = useActionData<typeof action>();
-  const [f, fields] = useForm({
+  const actionData = useActionData<typeof action>();
+  const { form: f, fields } = useForm(clientSchema, {
     id: 'contact',
     shouldValidate: 'onSubmit',
     shouldRevalidate: 'onInput',
-    lastResult,
-    onValidate({ formData }) {
-      return parseWithZod(formData, { schema });
-    },
+    lastResult: actionData?.result,
     defaultValue: {
       method: 'email',
       name: '',
@@ -164,7 +139,11 @@ export default function Index() {
     },
   });
 
-  const method = fields.method.value as 'email' | 'phone' | 'both';
+  const method = useFormData(
+    f.id,
+    (formData) => formData.get(fields.method.name) ?? 'email',
+    { fallback: 'email' },
+  ) as 'email' | 'phone' | 'both';
 
   return (
     <Main className="gap-10 px-3 py-4 text-2xl md:py-16">
@@ -185,10 +164,8 @@ export default function Index() {
         <Form
           className="flex flex-col gap-4"
           method="POST"
-          id={f.id}
-          onSubmit={f.onSubmit}
+          {...f.props}
         >
-          <FormStateInput />
           <TextField name={fields.name.name}>
             <Label>{translate('contact.form.name')}</Label>
             <TextField.Input

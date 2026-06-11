@@ -19,7 +19,7 @@ export function FieldError({ children }: { children: React.ReactNode }) {
 export function FieldErrors() {
   const translate = useTranslate();
   const { meta } = useTextField();
-  const errors = meta.errors;
+  const errors = meta.errors as string[] | undefined;
 
   if (!errors || errors.length === 0) return null;
   return (

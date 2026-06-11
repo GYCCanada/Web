@@ -103,4 +103,9 @@ export const useField = forms.useField as typeof Conform.useField;
 export const useIntent = forms.useIntent as typeof Conform.useIntent;
 export const FormProvider = forms.FormProvider as typeof Conform.FormProvider;
 
-export { parseSubmission, report, useControl } from '@conform-to/react/future';
+export {
+  parseSubmission,
+  report,
+  useControl,
+  useFormData,
+} from '@conform-to/react/future';

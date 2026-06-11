@@ -1,8 +1,9 @@
 import { Radio as BaseRadio } from '@base-ui/react/radio';
 import { RadioGroup as BaseRadioGroup } from '@base-ui/react/radio-group';
-import { useField, useInputControl } from '@conform-to/react';
 import clsx from 'clsx';
 import * as React from 'react';
+
+import { useControl, useField } from '~/lib/conform';
 
 import type { InputVariant } from './input';
 import { TextFieldContext } from './text-field';
@@ -23,8 +24,10 @@ function _RadioGroup({
   value?: string;
   ref?: React.Ref<HTMLDivElement>;
 }) {
-  const [meta] = useField<string | string[]>(props.name ?? '');
-  const control = useInputControl(meta);
+  const meta = useField<string | string[]>(props.name ?? '');
+  const control = useControl<string | string[]>({
+    defaultValue: meta.defaultValue || defaultValue || value,
+  });
   const labelId = React.useId();
 
   return (
@@ -36,6 +39,15 @@ function _RadioGroup({
         labelId,
       }}
     >
+      {/* Hidden base control: conform reads the submitted value here and
+          `control.change` keeps it in sync with the Base UI radio group. */}
+      <input
+        ref={control.register}
+        name={meta.name}
+        defaultValue={meta.defaultValue}
+        hidden
+        aria-hidden
+      />
       <BaseRadioGroup
         ref={ref}
         className={clsx('group grid gap-2.5', className)}
@@ -46,8 +58,8 @@ function _RadioGroup({
         aria-orientation={orientation ?? 'horizontal'}
         aria-labelledby={labelId}
         {...props}
-        name={meta.name}
-        value={(control.value as string) ?? defaultValue ?? value ?? ''}
+        name={undefined}
+        value={control.value ?? defaultValue ?? value ?? ''}
         onValueChange={(next) => control.change(next as string)}
         onBlur={() => control.blur()}
         required={meta.required}

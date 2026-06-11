@@ -1,8 +1,9 @@
 import { Select as BaseSelect } from '@base-ui/react/select';
-import { useField, useInputControl } from '@conform-to/react';
 import clsx from 'clsx';
 import { Check, ChevronDown } from 'lucide-react';
 import * as React from 'react';
+
+import { useControl, useField } from '~/lib/conform';
 
 import { TextFieldContext } from './text-field';
 
@@ -10,11 +11,31 @@ const _Select = <Value, Multiple extends boolean | undefined = false>(
   props: BaseSelect.Root.Props<Value, Multiple>,
 ) => {
   const name = typeof props.name === 'string' ? props.name : '';
-  const [meta] = useField<string | string[]>(name);
-  const control = useInputControl(meta);
+  const meta = useField<string | string[]>(name);
+  const control = useControl<string | string[]>({
+    defaultValue: meta.defaultValue,
+  });
   return (
     <TextFieldContext.Provider value={{ meta, control }}>
-      <BaseSelect.Root {...props} />
+      {/* Hidden base control: conform reads the submitted value here and
+          `control.change` keeps it in sync with the Base UI select. */}
+      {name ? (
+        <input
+          ref={control.register}
+          name={meta.name}
+          defaultValue={meta.defaultValue}
+          hidden
+          aria-hidden
+        />
+      ) : null}
+      <BaseSelect.Root
+        {...props}
+        name={undefined}
+        onValueChange={(value, eventDetails) => {
+          if (name) control.change(value == null ? null : String(value));
+          props.onValueChange?.(value, eventDetails);
+        }}
+      />
     </TextFieldContext.Provider>
   );
 };
