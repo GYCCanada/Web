@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { Result } from 'effect';
 
 import { formatSchemaResult, parseSchema } from '~/lib/effect/form-schema';
+import { expectOnlyTranslationKeys } from '~/lib/effect/form-schema.test-helper';
 
 import { RegistrationSchema } from './registration-schema';
 
@@ -104,6 +105,57 @@ describe('RegistrationSchema (form-data codec)', () => {
     const formatted = formatSchemaResult(result);
     expect(formatted?.fieldErrors?.['registrants[0].website']).toEqual([
       'registration.form.website.required',
+    ]);
+  });
+
+  // Guards against emitting a message that `FieldErrors` would render as
+  // `undefined`: every validation message must be a real `en` translation key.
+  // Covers the union mismatch (empty/bad discriminator), invalid-type (array),
+  // pattern/url checks, missing required literals/booleans, and a bad literal
+  // member.
+  it('only ever emits real translation keys for representative failures', () => {
+    expectOnlyTranslationKeys(RegistrationSchema, [
+      {}, // registrants field missing
+      { registrants: [{}] }, // empty registrant: union mismatch
+      // off-list `type` discriminator: union mismatch
+      { registrants: [{ type: 'bogus', name: 'Ada', email: 'a@b.co' }] },
+      // duplicate `name` field POSTs an array → invalid-type
+      { registrants: [attendee({ name: ['a', 'b'] })] },
+      { registrants: [attendee({ email: 'not-an-email' })] }, // pattern check
+      // exhibitor with an unparseable website url
+      {
+        registrants: [
+          {
+            type: 'exhibitor',
+            name: 'Acme',
+            email: 'sales@acme.com',
+            phone: '555-0101',
+            synopsis: 'We sell things',
+            website: 'not a url',
+            company: 'Acme Inc',
+          },
+        ],
+      },
+      // attendee missing tos / meals / gender (absent required fields)
+      {
+        registrants: [
+          attendee({
+            gender: undefined,
+            meals: undefined,
+            extra: {
+              howDidYouHear: 'friend',
+              whyAreYouAttending: 'growth',
+              whatAreYouExcitedAbout: 'seminars',
+              firstTimeAttending: 'false',
+              merch: ['t-shirt'],
+              other: '',
+              // tos absent
+            },
+          }),
+        ],
+      },
+      // attendee with a bogus outreach member
+      { registrants: [attendee({ outreach: ['bogus'] })] },
     ]);
   });
 });

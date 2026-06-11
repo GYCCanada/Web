@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import { Result, Schema } from 'effect';
+import { Result } from 'effect';
 
 import { formatSchemaResult, parseSchema } from '~/lib/effect/form-schema';
-import { root } from '~/lib/localization/translations';
+import {
+  clientMessages,
+  expectOnlyTranslationKeys,
+} from '~/lib/effect/form-schema.test-helper';
 
 import { schema } from './contact';
-
-const isTranslationKey = (key: string): boolean => key in root.en;
 
 /** A minimal valid email-method payload as the form submits it (all strings). */
 const valid = (overrides: Record<string, unknown> = {}) => ({
@@ -16,15 +17,6 @@ const valid = (overrides: Record<string, unknown> = {}) => ({
   message: 'hello',
   ...overrides,
 });
-
-/** Issue messages the client Standard Schema reports for a payload. */
-const clientMessages = (payload: unknown): string[] => {
-  const std = Schema.toStandardSchemaV1(schema);
-  const result = std['~standard'].validate(payload) as {
-    issues?: ReadonlyArray<{ message: string }>;
-  };
-  return (result.issues ?? []).map((i) => i.message);
-};
 
 describe('contact schema (discriminated method)', () => {
   it('decodes a valid email-method payload', () => {
@@ -56,7 +48,7 @@ describe('contact schema (discriminated method)', () => {
 
   it('attaches the method translation key when method is missing (client)', () => {
     expect(
-      clientMessages({
+      clientMessages(schema, {
         name: 'Ada',
         email: 'ada@example.com',
         message: 'hello',
@@ -65,7 +57,7 @@ describe('contact schema (discriminated method)', () => {
   });
 
   it('attaches the method translation key when method is invalid (client)', () => {
-    expect(clientMessages(valid({ method: 'bogus' }))).toContain(
+    expect(clientMessages(schema, valid({ method: 'bogus' }))).toContain(
       'contact.form.contact-method.required',
     );
   });
@@ -87,7 +79,7 @@ describe('contact schema (discriminated method)', () => {
   // Guards against emitting a message that `FieldErrors` would render as
   // `undefined`: every validation message must be a real `en` translation key.
   it('only ever emits real translation keys for representative failures', () => {
-    const payloads: unknown[] = [
+    expectOnlyTranslationKeys(schema, [
       {}, // everything missing
       valid({ method: 'bogus' }),
       valid({ method: 'both', email: undefined, phone: undefined }),
@@ -95,20 +87,7 @@ describe('contact schema (discriminated method)', () => {
       valid({ method: 'both', message: ['a', 'b'] }),
       valid({ method: 'both', phone: ['a', 'b'] }),
       valid({ email: 'not-an-email' }),
-    ];
-    for (const payload of payloads) {
-      const formatted = formatSchemaResult(parseSchema(schema, payload));
-      const messages = [
-        ...(formatted?.formErrors ?? []),
-        ...Object.values(formatted?.fieldErrors ?? {}).flat(),
-      ];
-      for (const message of messages) {
-        expect({ message, isKey: isTranslationKey(message) }).toEqual({
-          message,
-          isKey: true,
-        });
-      }
-    }
+    ]);
   });
 
   it('requires email at the email path when method needs it', () => {
