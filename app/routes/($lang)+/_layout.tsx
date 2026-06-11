@@ -1,5 +1,4 @@
 import {
-  type LoaderFunctionArgs,
   Outlet,
   Link as RLink,
   useLoaderData,
@@ -15,6 +14,8 @@ import { match } from 'ts-pattern';
 
 import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
 import { getCurrentConference } from '~/lib/conference.server';
+import { ReactRouterContext } from '~/lib/effect/router-context';
+import { routeHandler } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getTranslation, Locale } from '~/lib/localization/localization';
 import { LocalizationProvider } from '~/lib/localization/provider';
@@ -26,13 +27,14 @@ import { CloseIcon, LanguageIcon, MenuIcon } from '~/ui/icon';
 import { Link } from '~/ui/link';
 import { Portal } from '~/ui/portal';
 
-export const loader = ({ params }: LoaderFunctionArgs) => {
+export const loader = routeHandler(function* () {
+  const { params } = yield* ReactRouterContext;
   const translation = getTranslation(params, root);
   const currentConference = getCurrentConference(
     ((params['lang'] as Locale) || undefined) ?? Locale.En,
   );
   return { ...translation, currentConference };
-};
+});
 
 export default function Layout() {
   const { translation } = useLoaderData<typeof loader>();

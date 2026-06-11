@@ -4,7 +4,6 @@ import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
 import * as React from 'react';
 import {
   Form,
-  type LoaderFunctionArgs,
   type MetaFunction,
   useActionData,
   useLoaderData,
@@ -19,6 +18,7 @@ import { formValidationError } from '~/lib/effect/errors';
 import { routeFormAction, SubmissionContext } from '~/lib/effect/form';
 import { formatSchemaResult, parseSchema } from '~/lib/effect/form-schema';
 import { ReactRouterContext } from '~/lib/effect/router-context';
+import { routeHandler } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
 import { getLocale } from '~/lib/localization/localization';
 import type { TranslationKey } from '~/lib/localization/translations';
@@ -45,12 +45,13 @@ export const meta: MetaFunction<typeof loader> = ({ data, params }) => {
   ];
 };
 
-export const loader = ({ params }: LoaderFunctionArgs) => {
+export const loader = routeHandler(function* () {
+  const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   return {
     conference: getCurrentConference(locale),
   };
-};
+});
 
 export const action = routeFormAction(function* () {
   const { url } = yield* ReactRouterContext;
