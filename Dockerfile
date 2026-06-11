@@ -15,8 +15,12 @@
 FROM oven/bun:1.3-alpine AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
-# --ignore-scripts skips `prepare` (effect-tsgo patch) — typecheck-only tooling
-RUN bun install --frozen-lockfile --ignore-scripts
+# --ignore-scripts skips `prepare` (effect-tsgo patch) — typecheck-only tooling.
+# It also skips the npm `bun` package's binary download (auto-installed as
+# effect-bun-test's peer dep); `bun run` puts node_modules/.bin first on PATH,
+# so remove the broken shim to fall back to the image's own bun.
+RUN bun install --frozen-lockfile --ignore-scripts \
+ && rm -rf node_modules/bun node_modules/.bin/bun node_modules/.bin/bunx
 
 # ---- build: client + server bundles ----
 FROM deps AS build
