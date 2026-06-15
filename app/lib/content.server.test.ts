@@ -379,8 +379,9 @@ describe('Content cache (TTL + single-flight)', () => {
       const after = yield* content.getSiteContent(); // re-reads the bucket
 
       // No TestClock advance: the publish is invisible until the bust, then live.
-      expect(accent2026(before)).toBe('#D4A24E'); // bundled default
-      expect(accent2026(stale)).toBe('#D4A24E'); // cached — publish not yet seen
+      const bundledAccent = accent2026(defaultContent);
+      expect(accent2026(before)).toBe(bundledAccent); // bundled default
+      expect(accent2026(stale)).toBe(bundledAccent); // cached — publish not yet seen
       expect(accent2026(after)).toBe('#0a0a0a'); // bust → published value
     }).pipe(provideMutable(defaultContent)));
 

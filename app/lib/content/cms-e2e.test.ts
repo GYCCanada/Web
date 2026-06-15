@@ -92,7 +92,9 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
     );
 
     expect(result.before.title).toBe('Speak');
-    expect(result.before.theme).toBe('#D4A24E');
+    expect(result.before.theme).toBe(
+      String(defaultContent.conferences.find((c) => c.slug === '/2026')?.accentColor),
+    );
     expect(result.after.title).toBe('Speak Boldly');
     expect(result.after.theme).toBe('#112233');
   });
