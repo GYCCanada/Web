@@ -135,11 +135,11 @@ export default function Index() {
               {translate("main.read_our_story")}
             </Link>
           </div>
-          <div>
+          {/* <div>
             <Link to="/team" className={buttonStyle} data-variant="positive">
               {translate("main.meet_the_team")}
             </Link>
-          </div>
+          </div> */}
         </div>
       </section>
       <NewsletterForm />
