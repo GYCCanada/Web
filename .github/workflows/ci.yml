@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read #  to fetch code (actions/checkout)
+  packages: write # to push the image to GHCR (docker job, main only)
 
 jobs:
   build:
@@ -45,21 +46,50 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    # ghcr.io/gyccanada/web — owner lowercased (GHCR rejects mixed-case repo
+    # names). github.repository_owner is "GYCCanada", so lowercase it here.
+    env:
+      IMAGE: ghcr.io/gyccanada/web
+
     steps:
       - uses: actions/checkout@v4
 
+      - uses: docker/setup-buildx-action@v3
+
+      # Tags: `:sha-<short>` always; add `:latest` only on a push to main.
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      # Build once, load into the local daemon so the smoke test runs on the
+      # exact image we publish. Pushing happens in a later step (main only).
       - name: Build image
-        run: docker build -t gycc:ci .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # Production boot fail-fasts without MAIL_* (ADR 0004); dummies let the
       # container boot — nothing sends mail during the smoke.
+      # `meta.outputs.version` is the primary tag name the metadata-action chose
+      # (e.g. sha-d5e414a) — a single value, unlike outputs.tags which is
+      # multiline on main. Run the exact image we just loaded.
       - name: Boot + smoke (/healthz, /, /fr)
         run: |
           docker run -d --name gycc -p 3000:3000 \
             -e MAIL_HOST=smtp.example.com -e MAIL_PORT=587 \
             -e MAIL_USER=ci -e MAIL_PASS=ci \
             -e MAIL_FROM=ci@example.com -e MAIL_TO=ci@example.com \
-            gycc:ci
+            "${{ env.IMAGE }}:${{ steps.meta.outputs.version }}"
           for i in $(seq 1 30); do
             curl -sf -o /dev/null http://localhost:3000/healthz && break
             sleep 1
@@ -72,3 +102,25 @@ jobs:
       - name: Container logs
         if: always()
         run: docker logs gycc || true
+
+      # Publish only after the smoke test passes, and only on main. PRs build +
+      # smoke-test but never push. Reuses the gha cache, so this is a near-instant
+      # re-export of the layers we just built.
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
