@@ -1,44 +1,44 @@
-import { Effect, Result, Schema } from 'effect';
-import clsx from 'clsx';
-import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
-import * as React from 'react';
+import { Effect, Result, Schema } from "effect";
+import clsx from "clsx";
+import { FacebookIcon, InstagramIcon, YoutubeIcon } from "lucide-react";
+import * as React from "react";
 import {
   Form,
   type MetaFunction,
   useActionData,
   useLoaderData,
-} from 'react-router';
-import { match } from 'ts-pattern';
+} from "react-router";
+import { match } from "ts-pattern";
 
-import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
-import { FormProvider, useForm } from '~/lib/conform';
-import { Content } from '~/lib/content.server';
-import { dayjs } from '~/lib/dayjs';
-import { formValidationError } from '~/lib/effect/errors';
-import { routeFormAction, SubmissionContext } from '~/lib/effect/form';
-import { formatSchemaResult, parseSchema } from '~/lib/effect/form-schema';
-import { ReactRouterContext } from '~/lib/effect/router-context';
-import { routeHandler } from '~/lib/effect/route';
-import { useTranslate } from '~/lib/localization/context';
-import { getLocale } from '~/lib/localization/localization';
-import type { TranslationKey } from '~/lib/localization/translations';
-import { Mailchimp } from '~/lib/mailchimp.server';
-import { Toast } from '~/lib/toast.server';
-import { Button, buttonStyle } from '~/ui/button';
-import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
-import { Label } from '~/ui/label';
-import { Link } from '~/ui/link';
-import { Main } from '~/ui/main';
-import { TextField } from '~/ui/text-field';
+import { Breakpoint, useBreakpoint } from "~/lib/client-hints";
+import { FormProvider, useForm } from "~/lib/conform";
+import { Content } from "~/lib/content.server";
+import { dayjs } from "~/lib/dayjs";
+import { formValidationError } from "~/lib/effect/errors";
+import { routeFormAction, SubmissionContext } from "~/lib/effect/form";
+import { formatSchemaResult, parseSchema } from "~/lib/effect/form-schema";
+import { ReactRouterContext } from "~/lib/effect/router-context";
+import { routeHandler } from "~/lib/effect/route";
+import { useTranslate } from "~/lib/localization/context";
+import { getLocale } from "~/lib/localization/localization";
+import type { TranslationKey } from "~/lib/localization/translations";
+import { Mailchimp } from "~/lib/mailchimp.server";
+import { Toast } from "~/lib/toast.server";
+import { Button, buttonStyle } from "~/ui/button";
+import { FieldErrors, fieldErrorStyle } from "~/ui/field-error";
+import { Label } from "~/ui/label";
+import { Link } from "~/ui/link";
+import { Main } from "~/ui/main";
+import { TextField } from "~/ui/text-field";
 
 export const meta: MetaFunction<typeof loader> = ({ data, params }) => {
   const locale = getLocale(params);
   return [
     { title: `${data?.conference.title} | GYCC` },
     {
-      name: 'description',
+      name: "description",
       content:
-        locale === 'fr'
+        locale === "fr"
           ? `Détails de la conférence ${new Date().getFullYear()}`
           : `${new Date().getFullYear()} Conference details`,
     },
@@ -67,18 +67,18 @@ export const action = routeFormAction(function* () {
   const data = parsed.success;
 
   const result = yield* Effect.exit(mailchimp.subscribe(data.email, data.name));
-  if (result._tag === 'Failure') {
-    yield* Effect.logError('newsletter subscribe failed', result.cause);
+  if (result._tag === "Failure") {
+    yield* Effect.logError("newsletter subscribe failed", result.cause);
     return yield* formValidationError({
-      formErrors: ['main.newsletter.error' satisfies TranslationKey],
+      formErrors: ["main.newsletter.error" satisfies TranslationKey],
     });
   }
 
   return yield* toast.redirect(url.pathname, {
-    type: 'success',
-    title: 'main.newsletter.success.title' satisfies TranslationKey,
-    description: 'main.newsletter.success.description' satisfies TranslationKey,
-    form: 'newsletter-form',
+    type: "success",
+    title: "main.newsletter.success.title" satisfies TranslationKey,
+    description: "main.newsletter.success.description" satisfies TranslationKey,
+    form: "newsletter-form",
   });
 });
 
@@ -90,17 +90,17 @@ export default function Index() {
       <TimeLeft />
       <section className="flex flex-col px-3 py-12 text-5xl md:hidden">
         <h3 className="text-5xl">
-          {translate('main.gyc_tagline', {
+          {translate("main.gyc_tagline", {
             movement: (
               <span className="inline-block w-max italic">
                 <GradientLine className="absolute inset-x-0 bottom-2" />
-                <span>{translate('main.gyc_tagline.movement')}</span>
+                <span>{translate("main.gyc_tagline.movement")}</span>
               </span>
             ),
             for: (
               <span className="inline-block w-max italic">
                 <GradientLine className="absolute inset-x-0 bottom-2" />
-                <span>{translate('main.gyc_tagline.for')}</span>
+                <span>{translate("main.gyc_tagline.for")}</span>
               </span>
             ),
           })}
@@ -114,37 +114,29 @@ export default function Index() {
         />
         <div className="flex flex-col gap-6 p-3 max-md:absolute max-md:top-0 md:flex-1">
           <h3 className="text-5xl max-md:hidden">
-            {translate('main.gyc_tagline', {
+            {translate("main.gyc_tagline", {
               movement: (
                 <span className="inline-block w-max italic">
                   <GradientLine className="absolute inset-x-0 bottom-2" />
-                  <span>{translate('main.gyc_tagline.movement')}</span>
+                  <span>{translate("main.gyc_tagline.movement")}</span>
                 </span>
               ),
               for: (
                 <span className="inline-block w-max italic">
                   <GradientLine className="absolute inset-x-0 bottom-2" />
-                  <span>{translate('main.gyc_tagline.for')}</span>
+                  <span>{translate("main.gyc_tagline.for")}</span>
                 </span>
               ),
             })}
           </h3>
           <div>
-            <Link
-              to="/about"
-              className={buttonStyle}
-              data-variant="accent"
-            >
-              {translate('main.read_our_story')}
+            <Link to="/about" className={buttonStyle} data-variant="accent">
+              {translate("main.read_our_story")}
             </Link>
           </div>
           <div>
-            <Link
-              to="/team"
-              className={buttonStyle}
-              data-variant="positive"
-            >
-              {translate('main.meet_the_team')}
+            <Link to="/team" className={buttonStyle} data-variant="positive">
+              {translate("main.meet_the_team")}
             </Link>
           </div>
         </div>
@@ -159,10 +151,10 @@ export default function Index() {
         />
         <div className="flex flex-col gap-6 md:flex-1">
           <h2 className="text-accent-600 text-4xl font-bold">
-            {translate('main.join.title')}
+            {translate("main.join.title")}
           </h2>
           <p>
-            {translate('main.join.subtitle', {
+            {translate("main.join.subtitle", {
               br: (
                 <>
                   <br />
@@ -173,12 +165,8 @@ export default function Index() {
           </p>
           <div className="flex flex-col gap-4">
             <div>
-              <Link
-                to="/give"
-                className={buttonStyle}
-                data-variant="accent"
-              >
-                {translate('main.donate.link')}
+              <Link to="/give" className={buttonStyle} data-variant="accent">
+                {translate("main.donate.link")}
               </Link>
             </div>
             <div>
@@ -187,7 +175,7 @@ export default function Index() {
                 className={buttonStyle}
                 data-variant="default"
               >
-                {translate('main.join.link')}
+                {translate("main.join.link")}
               </Link>
             </div>
           </div>
@@ -214,7 +202,7 @@ function MobileHero() {
     <section
       style={
         {
-          '--bg': conference.theme,
+          "--bg": conference.theme,
         } as any
       }
       className="flex flex-col gap-10 bg-(--bg) p-3 pb-16 text-black"
@@ -225,13 +213,6 @@ function MobileHero() {
           alt={conference.hero.alt}
           className="aspect-auto w-full"
         />
-        <Link
-          to={conference.slug}
-          className={clsx(buttonStyle, 'absolute -bottom-6 right-4')}
-          data-variant="accent"
-        >
-          {translate('main.reserve')}
-        </Link>
       </div>
       <div className="flex flex-col gap-1 text-4xl">
         <h2>
@@ -239,10 +220,10 @@ function MobileHero() {
           {conference.bible.verse}
         </h2>
         <h2>
-          {dayjs(conference.dates[0]).utc().format('MMM')}{' '}
-          {dayjs(conference.dates[0]).utc().format('D')}-
-          {dayjs(conference.dates[1]).utc().format('D')},{' '}
-          {dayjs(conference.dates[0]).utc().format('YYYY')}
+          {dayjs(conference.dates[0]).utc().format("MMM")}{" "}
+          {dayjs(conference.dates[0]).utc().format("D")}-
+          {dayjs(conference.dates[1]).utc().format("D")},{" "}
+          {dayjs(conference.dates[0]).utc().format("YYYY")}
         </h2>
         <h3>{conference.location}</h3>
       </div>
@@ -258,7 +239,7 @@ function DesktopHero() {
     <section
       style={
         {
-          '--bg': conference.theme,
+          "--bg": conference.theme,
         } as any
       }
       className="full-bleed flex flex-col gap-10 bg-(--bg) p-3 pb-16 text-black"
@@ -276,7 +257,7 @@ function DesktopHero() {
           <div
             className="flex flex-col justify-end uppercase"
             style={{
-              writingMode: 'vertical-rl',
+              writingMode: "vertical-rl",
             }}
           >
             <h1 className="text-[96px] font-black leading-tight tracking-tight">
@@ -289,10 +270,10 @@ function DesktopHero() {
           <div className="flex flex-col gap-10">
             <div className="flex flex-col gap-6">
               <h2 className="text-5xl">
-                {dayjs(conference.dates[0]).utc().format('MMM')}{' '}
-                {dayjs(conference.dates[0]).utc().format('D')}-
-                {dayjs(conference.dates[1]).utc().format('D')},{' '}
-                {dayjs(conference.dates[0]).utc().format('YYYY')}
+                {dayjs(conference.dates[0]).utc().format("MMM")}{" "}
+                {dayjs(conference.dates[0]).utc().format("D")}-
+                {dayjs(conference.dates[1]).utc().format("D")},{" "}
+                {dayjs(conference.dates[0]).utc().format("YYYY")}
               </h2>
               <h3 className="text-5xl">{conference.location}</h3>
             </div>
@@ -316,7 +297,7 @@ function TimeLeft() {
   const { conference } = useLoaderData<typeof loader>();
   const translate = useTranslate();
 
-  const days = dayjs(conference.dates[0]).utc().diff(dayjs().utc(), 'days');
+  const days = dayjs(conference.dates[0]).utc().diff(dayjs().utc(), "days");
 
   if (days < 0) {
     return null;
@@ -324,7 +305,7 @@ function TimeLeft() {
 
   return (
     <section className="flex flex-col items-center justify-center gap-6 p-3 py-16 text-center text-4xl lg:h-screen lg:gap-12 lg:text-[64px]">
-      {translate('main.time_left', {
+      {translate("main.time_left", {
         days: (
           <p className="py-10 text-[144px] tabular-nums lg:py-20 lg:text-[256px]">
             {days}
@@ -345,7 +326,7 @@ function GradientLine({
   return (
     <div
       className={clsx(
-        'to-link-700 h-2 w-full bg-gradient-to-r from-transparent',
+        "to-link-700 h-2 w-full bg-gradient-to-r from-transparent",
         className,
       )}
     >
@@ -360,12 +341,12 @@ const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const schema = Schema.Struct({
   email: Schema.String.check(
     Schema.isPattern(EMAIL_REGEXP, {
-      message: 'main.newsletter.email.error' satisfies TranslationKey,
+      message: "main.newsletter.email.error" satisfies TranslationKey,
     }),
   ),
   name: Schema.String.check(
     Schema.isMinLength(1, {
-      message: 'main.newsletter.name.required' satisfies TranslationKey,
+      message: "main.newsletter.name.required" satisfies TranslationKey,
     }),
   ),
 });
@@ -376,12 +357,12 @@ function NewsletterForm() {
   const translate = useTranslate();
   const actionData = useActionData<typeof action>();
   const { form, fields } = useForm(clientSchema, {
-    id: 'newsletter-form',
-    shouldValidate: 'onSubmit',
-    shouldRevalidate: 'onInput',
+    id: "newsletter-form",
+    shouldValidate: "onSubmit",
+    shouldRevalidate: "onInput",
     defaultValue: {
-      name: '',
-      email: '',
+      name: "",
+      email: "",
     },
     lastResult: actionData?.result,
   });
@@ -396,49 +377,42 @@ function NewsletterForm() {
       <div className="flex flex-col gap-4 md:flex-row-reverse">
         <div className="flex flex-col gap-4 md:flex-1">
           <h2 className="text-accent-600 text-4xl font-bold">
-            {translate('main.newsletter.title')}
+            {translate("main.newsletter.title")}
             <PaperPlane className="inline size-20" />
           </h2>
 
-          <p>{translate('main.newsletter.subtitle')}</p>
+          <p>{translate("main.newsletter.subtitle")}</p>
           <FormProvider context={form.context}>
-            <Form
-              method="POST"
-              className="flex flex-col gap-4"
-              {...form.props}
-            >
+            <Form method="POST" className="flex flex-col gap-4" {...form.props}>
               <TextField name={fields.name.name}>
-                <Label>{translate('main.newsletter.name.label')}</Label>
+                <Label>{translate("main.newsletter.name.label")}</Label>
 
                 <TextField.Input
                   type="text"
                   placeholder={
-                    translate('main.newsletter.name.placeholder') as string
+                    translate("main.newsletter.name.placeholder") as string
                   }
                 />
                 <FieldErrors />
               </TextField>
               <TextField name={fields.email.name}>
-                <Label>{translate('main.newsletter.email.label')}</Label>
+                <Label>{translate("main.newsletter.email.label")}</Label>
                 <TextField.Input
                   type="email"
                   placeholder={
-                    translate('main.newsletter.email.placeholder') as string
+                    translate("main.newsletter.email.placeholder") as string
                   }
                 />
                 <FieldErrors />
               </TextField>
 
               <div className="flex flex-col gap-4">
-                <Button
-                  type="submit"
-                  variant="accent"
-                >
-                  {translate('main.newsletter.submit')}
+                <Button type="submit" variant="accent">
+                  {translate("main.newsletter.submit")}
                 </Button>
                 {form.errors && form.errors.length > 0 ? (
                   <p className={fieldErrorStyle}>
-                    {translate('main.newsletter.error')}
+                    {translate("main.newsletter.error")}
                   </p>
                 ) : null}
               </div>
@@ -447,7 +421,7 @@ function NewsletterForm() {
         </div>
       </div>
       <div className="flex flex-col gap-6">
-        <p>{translate('main.socials.title')}</p>
+        <p>{translate("main.socials.title")}</p>
         <div className="flex items-center gap-2.5">
           <a
             href="https://www.instagram.com/gyccanada"
