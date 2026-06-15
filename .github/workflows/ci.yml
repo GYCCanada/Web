@@ -51,15 +51,14 @@ jobs:
       - name: Build image
         run: docker build -t gycc:ci .
 
-      # Production boot fail-fasts without MAIL_* / MAILCHIMP_* (ADR 0004);
-      # dummies let the container boot — nothing sends mail during the smoke.
+      # Production boot fail-fasts without MAIL_* (ADR 0004); dummies let the
+      # container boot — nothing sends mail during the smoke.
       - name: Boot + smoke (/healthz, /, /fr)
         run: |
           docker run -d --name gycc -p 3000:3000 \
             -e MAIL_HOST=smtp.example.com -e MAIL_PORT=587 \
             -e MAIL_USER=ci -e MAIL_PASS=ci \
             -e MAIL_FROM=ci@example.com -e MAIL_TO=ci@example.com \
-            -e MAILCHIMP_API_KEY=ci-us1 -e MAILCHIMP_LIST_ID=ci \
             gycc:ci
           for i in $(seq 1 30); do
             curl -sf -o /dev/null http://localhost:3000/healthz && break

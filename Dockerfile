@@ -7,9 +7,10 @@
 #   - app/          server.ts imports app/lib TS (env, runtime, services) at
 #                   runtime, outside the server bundle
 #
-# Production boot REQUIRES MAIL_* + MAILCHIMP_* env vars (fail-fast env Layer,
-# ADR 0004); bucket (BUCKET_*) and admin (ADMIN_PASSWORD/COOKIE_SECRET) env are
-# optional — without them the site serves bundled content and /admin 404s.
+# Production boot REQUIRES MAIL_* env vars (fail-fast env Layer, ADR 0004);
+# sendgrid (SENDGRID_*), bucket (BUCKET_*), and admin (ADMIN_PASSWORD/COOKIE_SECRET)
+# are optional — without sendgrid the newsletter form is hidden, without bucket
+# the site serves bundled content, and without admin /admin 404s.
 
 # ---- deps: full install for the vite/react-router build ----
 FROM oven/bun:1.3-alpine AS deps

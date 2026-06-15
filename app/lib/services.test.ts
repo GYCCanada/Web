@@ -9,7 +9,7 @@ import {
 } from 'effect';
 
 import { Env } from './env.server';
-import { Mailchimp, MailchimpDisabled } from './mailchimp.server';
+import { Sendgrid, SendgridDisabled } from './sendgrid.server';
 import { Mailer } from './mailer.server';
 
 const envLayer = (env: Record<string, string>) =>
@@ -26,36 +26,47 @@ const PROD_ENV = {
   MAIL_PASS: 'secret',
   MAIL_FROM: 'from@example.com',
   MAIL_TO: 'to@example.com',
-  MAILCHIMP_API_KEY: 'key-us10',
-  MAILCHIMP_LIST_ID: 'list-123',
+};
+
+const PROD_ENV_WITH_SENDGRID = {
+  ...PROD_ENV,
+  SENDGRID_API_KEY: 'sg-key',
+  SENDGRID_LIST_ID: 'list-uuid-123',
 };
 
 describe('Env config', () => {
-  it.effect('treats every mail/mailchimp var as optional in development', () =>
+  it.effect('treats mail as optional and sendgrid as absent in development', () =>
     Effect.gen(function* () {
       const env = yield* Env.Service;
       expect(env.isProduction).toBe(false);
       expect(Option.isNone(env.mail)).toBe(true);
-      expect(Option.isNone(env.mailchimp)).toBe(true);
+      expect(Option.isNone(env.sendgrid)).toBe(true);
       expect(Option.isNone(env.bucket)).toBe(true);
     }).pipe(provideEnv({ NODE_ENV: 'development' })));
 
-  it.effect('requires every mail/mailchimp var in production and redacts secrets', () =>
+  it.effect('requires mail in production and keeps sendgrid optional', () =>
     Effect.gen(function* () {
       const env = yield* Env.Service;
       expect(env.isProduction).toBe(true);
       expect(Option.isSome(env.mail)).toBe(true);
-      expect(Option.isSome(env.mailchimp)).toBe(true);
+      expect(Option.isNone(env.sendgrid)).toBe(true);
       if (Option.isSome(env.mail)) {
         expect(env.mail.value.host).toBe('smtp.example.com');
         expect(env.mail.value.port).toBe(465);
         expect(Redacted.value(env.mail.value.pass)).toBe('secret');
       }
-      if (Option.isSome(env.mailchimp)) {
-        expect(env.mailchimp.value.listId).toBe('list-123');
-        expect(Redacted.value(env.mailchimp.value.apiKey)).toBe('key-us10');
-      }
     }).pipe(provideEnv(PROD_ENV)));
+
+  it.effect('resolves sendgrid when configured and redacts the API key', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(env.isProduction).toBe(true);
+      expect(Option.isSome(env.sendgrid)).toBe(true);
+      if (Option.isSome(env.sendgrid)) {
+        expect(env.sendgrid.value.listId).toBe('list-uuid-123');
+        expect(Redacted.value(env.sendgrid.value.apiKey)).toBe('sg-key');
+      }
+    }).pipe(provideEnv(PROD_ENV_WITH_SENDGRID)));
 
   it.effect('fails fast in production when a required mail var is missing', () =>
     Effect.gen(function* () {
@@ -72,6 +83,18 @@ describe('Env config', () => {
       expect(env.isProduction).toBe(true);
       expect(Option.isNone(env.bucket)).toBe(true);
     }).pipe(provideEnv(PROD_ENV)));
+
+  it.effect('treats present-but-blank sendgrid vars as absent', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.sendgrid)).toBe(true);
+    }).pipe(
+      provideEnv({
+        ...PROD_ENV,
+        SENDGRID_API_KEY: '',
+        SENDGRID_LIST_ID: '',
+      }),
+    ));
 
   it.effect('resolves the bucket, redacts the secret, and defaults region to auto', () =>
     Effect.gen(function* () {
@@ -171,17 +194,17 @@ describe('Mailer', () => {
     ));
 });
 
-describe('Mailchimp', () => {
-  it.effect('fails with MailchimpDisabled when unconfigured', () =>
+describe('Sendgrid', () => {
+  it.effect('fails with SendgridDisabled when unconfigured', () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(
         Effect.gen(function* () {
-          const mailchimp = yield* Mailchimp.Service;
-          yield* mailchimp.subscribe('a@b.com', 'Ada Lovelace');
+          const sendgrid = yield* Sendgrid.Service;
+          yield* sendgrid.subscribe('a@b.com', 'Ada Lovelace');
         }),
       );
-      expect(error).toBeInstanceOf(MailchimpDisabled);
+      expect(error).toBeInstanceOf(SendgridDisabled);
     }).pipe(
-      Effect.provide(Layer.provide(Mailchimp.layer, envLayer({ NODE_ENV: 'development' }))),
+      Effect.provide(Layer.provide(Sendgrid.layer, envLayer({ NODE_ENV: 'development' }))),
     ));
 });

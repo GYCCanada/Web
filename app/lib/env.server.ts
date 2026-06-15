@@ -6,19 +6,16 @@ import { Config, Context, Effect, Layer, Option, Redacted } from 'effect';
  * Environment configuration, ported from the former Zod-over-`process.env`
  * discriminated union to Effect `Config` (ADR 0004).
  *
- * Behaviour preserved exactly:
- *   - In `production` every mail / mailchimp variable is **required**; a
- *     missing one fails the layer at boot (the old code `throw`-ed on an
- *     invalid `process.env`).
- *   - In `development` / `test` every variable is **optional**; the mailer is
- *     a no-op and mailchimp is unconfigured, matching the old optional schema.
+ *   - In `production` every mail variable is **required**; a missing one fails
+ *     the layer at boot.
+ *   - In `development` / `test` mail is **optional**; the mailer is a no-op.
  *
- * The object-storage **bucket** is **optional everywhere** (dev AND prod): the
- * CMS degrades to bundled defaults when no bucket is configured, so a missing
- * bucket must never fail the layer at boot. Only mail/mailchimp keep their
- * dev-optional / prod-required behaviour.
+ * The object-storage **bucket** and **sendgrid** newsletter integration are
+ * **optional everywhere** (dev AND prod): the CMS degrades to bundled defaults
+ * when no bucket is configured, and the newsletter form is hidden when sendgrid
+ * is unconfigured.
  *
- * Secrets (`MAIL_PASS`, `MAILCHIMP_API_KEY`, `BUCKET_SECRET_KEY`) flow through
+ * Secrets (`MAIL_PASS`, `SENDGRID_API_KEY`, `BUCKET_SECRET_KEY`) flow through
  * `Config.redacted` so they are never accidentally logged.
  */
 
@@ -31,7 +28,7 @@ export interface MailConfig {
   readonly to: string;
 }
 
-export interface MailchimpConfig {
+export interface SendgridConfig {
   readonly apiKey: Redacted.Redacted<string>;
   readonly listId: string;
 }
@@ -53,13 +50,32 @@ const mailConfigRequired = Config.all({
   to: Config.string('MAIL_TO'),
 });
 
-const mailchimpConfigRequired = Config.all({
-  apiKey: Config.redacted('MAILCHIMP_API_KEY'),
-  listId: Config.string('MAILCHIMP_LIST_ID'),
-});
-
 const isBlankRedacted = (value: Redacted.Redacted<string>): boolean =>
   Redacted.value(value).trim().length === 0;
+
+/**
+ * SendGrid newsletter config. Both `SENDGRID_API_KEY` and `SENDGRID_LIST_ID`
+ * must be non-blank for the integration to be considered configured (same
+ * blank-collapse pattern as the bucket).
+ */
+const sendgridConfig: Config.Config<Option.Option<SendgridConfig>> = Config.all({
+  apiKey: Config.redacted('SENDGRID_API_KEY').pipe(
+    Config.withDefault(Redacted.make('')),
+  ),
+  listId: Config.string('SENDGRID_LIST_ID').pipe(
+    Config.map((value) => value.trim()),
+    Config.withDefault(''),
+  ),
+}).pipe(
+  Config.map((group) =>
+    !isBlankRedacted(group.apiKey) && group.listId.length > 0
+      ? Option.some<SendgridConfig>({
+          apiKey: group.apiKey,
+          listId: group.listId,
+        })
+      : Option.none(),
+  ),
+);
 
 /**
  * Bucket config. `endpoint` / `accessKeyId` / `secretAccessKey` / `bucket` are
@@ -117,7 +133,7 @@ export class Service extends Context.Service<
   {
     readonly isProduction: boolean;
     readonly mail: Option.Option<MailConfig>;
-    readonly mailchimp: Option.Option<MailchimpConfig>;
+    readonly sendgrid: Option.Option<SendgridConfig>;
     readonly bucket: Option.Option<BucketConfig>;
   }
 >()('gycc/lib/env.server/Service') {}
@@ -137,26 +153,21 @@ export const layer = Layer.effect(
     );
     const isProduction = nodeEnv === 'production';
 
-    // Bucket is optional in dev AND prod: a bucket-less prod still serves the
-    // bundled defaults, so it must never fail the layer at boot. `bucketConfig`
-    // already yields `Option.none()` whenever any required key is missing OR
-    // present-but-blank.
     const bucket = yield* bucketConfig;
+    const sendgrid = yield* sendgridConfig;
 
     if (isProduction) {
       const mail = yield* mailConfigRequired;
-      const mailchimp = yield* mailchimpConfigRequired;
       return Service.of({
         isProduction,
         mail: Option.some(mail),
-        mailchimp: Option.some(mailchimp),
+        sendgrid,
         bucket,
       });
     }
 
     const mail = yield* Config.option(mailConfigRequired);
-    const mailchimp = yield* Config.option(mailchimpConfigRequired);
-    return Service.of({ isProduction, mail, mailchimp, bucket });
+    return Service.of({ isProduction, mail, sendgrid, bucket });
   }),
 );
 

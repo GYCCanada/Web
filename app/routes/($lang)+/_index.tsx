@@ -1,4 +1,4 @@
-import { Effect, Result, Schema } from "effect";
+import { Effect, Option, Result, Schema } from "effect";
 import clsx from "clsx";
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from "lucide-react";
 import * as React from "react";
@@ -14,15 +14,16 @@ import { Breakpoint, useBreakpoint } from "~/lib/client-hints";
 import { FormProvider, useForm } from "~/lib/conform";
 import { Content } from "~/lib/content.server";
 import { dayjs } from "~/lib/dayjs";
-import { formValidationError } from "~/lib/effect/errors";
+import { formValidationError, notFound } from "~/lib/effect/errors";
 import { routeFormAction, SubmissionContext } from "~/lib/effect/form";
 import { formatSchemaResult, parseSchema } from "~/lib/effect/form-schema";
 import { ReactRouterContext } from "~/lib/effect/router-context";
 import { routeHandler } from "~/lib/effect/route";
 import { useTranslate } from "~/lib/localization/context";
 import { getLocale } from "~/lib/localization/localization";
+import { Env } from "~/lib/env.server";
 import type { TranslationKey } from "~/lib/localization/translations";
-import { Mailchimp } from "~/lib/mailchimp.server";
+import { Sendgrid } from "~/lib/sendgrid.server";
 import { Toast } from "~/lib/toast.server";
 import { Button, buttonStyle } from "~/ui/button";
 import { HoneypotField } from "~/ui/honeypot-field";
@@ -50,15 +51,21 @@ export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   const content = yield* Content.Service;
+  const env = yield* Env.Service;
   return {
     conference: yield* content.getCurrentConference(locale),
+    newsletterEnabled: Option.isSome(env.sendgrid),
   };
 });
 
 export const action = routeFormAction(function* () {
   const { url } = yield* ReactRouterContext;
   const submission = yield* SubmissionContext;
-  const mailchimp = yield* Mailchimp.Service;
+  const env = yield* Env.Service;
+  if (Option.isNone(env.sendgrid)) {
+    return yield* notFound();
+  }
+  const sendgrid = yield* Sendgrid.Service;
   const toast = yield* Toast;
 
   const parsed = parseSchema(schema, submission.payload);
@@ -67,7 +74,7 @@ export const action = routeFormAction(function* () {
   }
   const data = parsed.success;
 
-  const result = yield* Effect.exit(mailchimp.subscribe(data.email, data.name));
+  const result = yield* Effect.exit(sendgrid.subscribe(data.email, data.name));
   if (result._tag === "Failure") {
     yield* Effect.logError("newsletter subscribe failed", result.cause);
     return yield* formValidationError({
@@ -85,6 +92,7 @@ export const action = routeFormAction(function* () {
 
 export default function Index() {
   const translate = useTranslate();
+  const { newsletterEnabled } = useLoaderData<typeof loader>();
   return (
     <Main>
       <Hero />
@@ -142,7 +150,7 @@ export default function Index() {
           </div> */}
         </div>
       </section>
-      <NewsletterForm />
+      {newsletterEnabled ? <NewsletterForm /> : null}
 
       <section className="flex flex-col gap-6 overflow-hidden p-3 md:h-[800px] md:flex-row-reverse md:py-32">
         <img

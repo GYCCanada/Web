@@ -89,7 +89,7 @@ const validationResult = (
  * {@link RedirectError} re-fails so the runtime maps it to a redirect
  * `Response` (C1), letting a successful submit redirect with a flash toast.
  * Validation / request errors become form-level (or field-level) error reports.
- * Anything else (mailer/mailchimp failures, raw `Response`) re-fails to the
+ * Anything else (mailer/sendgrid failures, raw `Response`) re-fails to the
  * runtime's generic handling.
  */
 const handleFormError = (

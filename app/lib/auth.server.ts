@@ -23,7 +23,7 @@ import {
  * `ADMIN_PASSWORD` and `COOKIE_SECRET` are **optional everywhere** (CMS plan
  * §"Env wiring"): like the bucket, the admin area degrades to *disabled* when
  * unconfigured rather than failing the layer at boot, so dev and a
- * prod-without-admin both 404 the admin area while mail/mailchimp keep their
+ * prod-without-admin both 404 the admin area while mail keeps its
  * own fail-fast. The admin is enabled only when BOTH `ADMIN_PASSWORD` and
  * `COOKIE_SECRET` are set; if either is unset/blank the admin is DISABLED:
  * `verifyPassword` and `checkCookie` both fail with `AdminDisabled`, which the

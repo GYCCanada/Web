@@ -4,7 +4,7 @@ import { data, redirect } from 'react-router';
 import { AdminDisabled, Auth, BadPassword, Unauthorized } from '~/lib/auth.server';
 import { Content } from '~/lib/content.server';
 import { Env } from '~/lib/env.server';
-import { Mailchimp, MailchimpDisabled, MailchimpError } from '~/lib/mailchimp.server';
+import { Sendgrid, SendgridDisabled, SendgridError } from '~/lib/sendgrid.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
 import { NotFound, Storage, StorageError } from '~/lib/storage.server';
 import { Toast } from '~/lib/toast.server';
@@ -21,7 +21,7 @@ import { ReactRouterContext, type RouteArgs } from './router-context';
 export type AppServices =
   | Env.Service
   | Mailer.Service
-  | Mailchimp.Service
+  | Sendgrid.Service
   | Content.Service
   | Auth.Service
   | Storage.Service
@@ -30,8 +30,8 @@ export type AppError =
   | Response
   | HttpError
   | MailError
-  | MailchimpError
-  | MailchimpDisabled
+  | SendgridError
+  | SendgridDisabled
   | AdminDisabled
   | Unauthorized
   | BadPassword
@@ -58,7 +58,7 @@ export type AppError =
 // builds a disabled instance (admin 404s), so it never fails to build either.
 const AppLayer = Layer.mergeAll(
   Mailer.layer,
-  Mailchimp.layer,
+  Sendgrid.layer,
   Toast.layer,
   Content.defaultLayer,
   Storage.layerOptional,

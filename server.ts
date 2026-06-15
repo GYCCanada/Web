@@ -243,7 +243,7 @@ const DevRoutes = Layer.mergeAll(HealthRoute, ImagesRoute, FallbackRoute);
 const RoutesLive = isDev ? DevRoutes : ProdRoutes;
 
 // Fail fast at boot: forcing `Env` here makes its layer validate the required
-// mail / mailchimp secrets (in `NODE_ENV=production`) when the server layer is
+// mail secrets (in `NODE_ENV=production`) when the server layer is
 // built, instead of lazily on the first Effect-wrapped form action
 // (ADR 0004:38-40). Providing `Env.layer` discharges the requirement, so a
 // missing secret fails `Layer.launch` and `BunRuntime.runMain` exits non-zero.
