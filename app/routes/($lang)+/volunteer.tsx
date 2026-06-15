@@ -20,6 +20,7 @@ import type { TranslationKey } from "~/lib/localization/translations";
 import { Mailer } from "~/lib/mailer.server";
 import { Toast } from "~/lib/toast.server";
 import { Button } from "~/ui/button";
+import { HoneypotField } from "~/ui/honeypot-field";
 import { FieldErrors, fieldErrorStyle } from "~/ui/field-error";
 import { Label } from "~/ui/label";
 import { Main } from "~/ui/main";
@@ -367,6 +368,8 @@ export default function Index() {
             />
             <FieldErrors />
           </TextField>
+          <HoneypotField />
+
           <div>
             <Button variant="accent" type="submit">
               {translate("volunteer.form.submit")}

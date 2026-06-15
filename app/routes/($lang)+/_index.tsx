@@ -25,6 +25,7 @@ import type { TranslationKey } from "~/lib/localization/translations";
 import { Mailchimp } from "~/lib/mailchimp.server";
 import { Toast } from "~/lib/toast.server";
 import { Button, buttonStyle } from "~/ui/button";
+import { HoneypotField } from "~/ui/honeypot-field";
 import { FieldErrors, fieldErrorStyle } from "~/ui/field-error";
 import { Label } from "~/ui/label";
 import { Link } from "~/ui/link";
@@ -405,6 +406,8 @@ function NewsletterForm() {
                 />
                 <FieldErrors />
               </TextField>
+
+              <HoneypotField />
 
               <div className="flex flex-col gap-4">
                 <Button type="submit" variant="accent">

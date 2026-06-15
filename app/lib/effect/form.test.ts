@@ -3,6 +3,7 @@ import { RouterContextProvider } from 'react-router';
 
 import { BadRequestError, formValidationError, redirect } from './errors';
 import { routeFormAction, SubmissionContext, type FormSuccess } from './form';
+import { HONEYPOT_FIELD } from '../honeypot';
 import { makeRequestRuntime } from './runtime';
 import type { RouteArgs } from './router-context';
 
@@ -96,5 +97,39 @@ describe('routeFormAction', () => {
 
     expect(result.status).toBe('error');
     expect(result.result.error?.formErrors).toEqual(['too big']);
+  });
+
+  it('returns silent success when the honeypot field is filled', async () => {
+    let bodyRan = false;
+    const action = routeFormAction(function* () {
+      bodyRan = true;
+      yield* formValidationError({ formErrors: ['should not run'] });
+      return { reset: false } satisfies FormSuccess;
+    });
+
+    const result = await action(
+      makeFormArgs({ email: 'ada@example.com', [HONEYPOT_FIELD]: 'https://spam.example' }),
+    );
+
+    expect(bodyRan).toBe(false);
+    expect(result.status).toBe('success');
+    expect(result.result.reset).toBe(true);
+    expect(result.result.error).toBeUndefined();
+  });
+
+  it('runs the body when the honeypot field is empty', async () => {
+    let bodyRan = false;
+    const action = routeFormAction(function* () {
+      bodyRan = true;
+      return { reset: true } satisfies FormSuccess;
+    });
+
+    const result = await action(
+      makeFormArgs({ email: 'ada@example.com', [HONEYPOT_FIELD]: '' }),
+    );
+
+    expect(bodyRan).toBe(true);
+    expect(result.status).toBe('success');
+    expect(result.result.reset).toBe(true);
   });
 });

@@ -13,6 +13,7 @@ import type { TranslationKey } from "~/lib/localization/translations";
 import { Mailer } from "~/lib/mailer.server";
 import { Toast } from "~/lib/toast.server";
 import { Button } from "~/ui/button";
+import { HoneypotField } from "~/ui/honeypot-field";
 import { ExternalLink } from "~/ui/external-link";
 import { FieldErrors, fieldErrorStyle } from "~/ui/field-error";
 import { Label } from "~/ui/label";
@@ -262,6 +263,8 @@ export default function Index() {
             />
             <FieldErrors />
           </TextField>
+
+          <HoneypotField />
 
           <div>
             <Button type="submit" variant="accent">

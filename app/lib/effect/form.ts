@@ -2,6 +2,7 @@ import type { Submission, SubmissionResult } from '@conform-to/react/future';
 import { parseSubmission, report } from '@conform-to/react/future';
 import { Context, Effect } from 'effect';
 
+import { isHoneypotTriggered } from '../honeypot';
 import {
   BadRequestError,
   FormValidationError,
@@ -157,6 +158,11 @@ export const routeFormAction =
                 : 'Unable to parse form submission',
           }),
       });
+
+      if (isHoneypotTriggered(formData)) {
+        yield* Effect.logInfo('Honeypot triggered');
+        return successResult(submission, true);
+      }
 
       const bodyEffect = Effect.gen(body) as Effect.Effect<
         FormSuccess,
