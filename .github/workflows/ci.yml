@@ -57,6 +57,8 @@ jobs:
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       # Tags: `:sha-<short>` always; add `:latest` only on a push to main.
+      # Explicit labels override the ones metadata-action infers from the repo —
+      # the GitHub description is still the stale monorepo blurb.
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
@@ -65,6 +67,8 @@ jobs:
           tags: |
             type=sha
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.description=GYC Canada site
 
       # Build once, load into the local daemon so the smoke test runs on the
       # exact image we publish. Pushing happens in a later step (main only).
