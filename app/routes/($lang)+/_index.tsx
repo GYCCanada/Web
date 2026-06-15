@@ -216,16 +216,16 @@ function MobileHero() {
       </div>
       <div className="flex flex-col gap-1 text-4xl">
         <h2>
-          {conference.bible.book} {conference.bible.chapter}:
-          {conference.bible.verse}
-        </h2>
-        <h2>
           {dayjs(conference.dates[0]).utc().format("MMM")}{" "}
           {dayjs(conference.dates[0]).utc().format("D")}-
           {dayjs(conference.dates[1]).utc().format("D")},{" "}
           {dayjs(conference.dates[0]).utc().format("YYYY")}
         </h2>
         <h3>{conference.location}</h3>
+        <h2 className="mt-4">
+          {conference.bible.book} {conference.bible.chapter}:
+          {conference.bible.verse}
+        </h2>
       </div>
       <p className="text-xl italic">{conference.tagline}</p>
     </section>
@@ -251,6 +251,15 @@ function DesktopHero() {
             alt={conference.hero.alt}
             className="aspect-auto w-full"
           />
+          <div className="flex flex-col gap-6">
+            <h2 className="text-5xl">
+              {dayjs(conference.dates[0]).utc().format("MMM")}{" "}
+              {dayjs(conference.dates[0]).utc().format("D")}-
+              {dayjs(conference.dates[1]).utc().format("D")},{" "}
+              {dayjs(conference.dates[0]).utc().format("YYYY")}
+            </h2>
+            <h3 className="text-5xl">{conference.location}</h3>
+          </div>
           <p className="text-2xl italic">{conference.tagline}</p>
         </div>
         <div className="flex w-1/4 flex-col justify-between gap-6">
@@ -268,15 +277,6 @@ function DesktopHero() {
             </h1>
           </div>
           <div className="flex flex-col gap-10">
-            <div className="flex flex-col gap-6">
-              <h2 className="text-5xl">
-                {dayjs(conference.dates[0]).utc().format("MMM")}{" "}
-                {dayjs(conference.dates[0]).utc().format("D")}-
-                {dayjs(conference.dates[1]).utc().format("D")},{" "}
-                {dayjs(conference.dates[0]).utc().format("YYYY")}
-              </h2>
-              <h3 className="text-5xl">{conference.location}</h3>
-            </div>
             <div>
               {/* <Link
                 to={conference.slug}
