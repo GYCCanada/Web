@@ -1,25 +1,30 @@
-import { Effect, Result, Schema } from 'effect';
-import { InfoIcon } from 'lucide-react';
-import { Form, type MetaFunction, useActionData, useLoaderData } from 'react-router';
-import { match } from 'ts-pattern';
+import { Effect, Result, Schema } from "effect";
+import { InfoIcon } from "lucide-react";
+import {
+  Form,
+  type MetaFunction,
+  useActionData,
+  useLoaderData,
+} from "react-router";
+import { match } from "ts-pattern";
 
-import { FormProvider, useForm, useFormData } from '~/lib/conform';
-import { formValidationError } from '~/lib/effect/errors';
-import { routeFormAction, SubmissionContext } from '~/lib/effect/form';
-import { formatSchemaResult, parseSchema } from '~/lib/effect/form-schema';
-import { routeHandler } from '~/lib/effect/route';
-import { ReactRouterContext } from '~/lib/effect/router-context';
-import { useTranslate } from '~/lib/localization/context';
-import { getLocale } from '~/lib/localization/localization';
-import type { TranslationKey } from '~/lib/localization/translations';
-import { Mailer } from '~/lib/mailer.server';
-import { Toast } from '~/lib/toast.server';
-import { Button } from '~/ui/button';
-import { FieldErrors, fieldErrorStyle } from '~/ui/field-error';
-import { Label } from '~/ui/label';
-import { Main } from '~/ui/main';
-import { Radio, RadioGroup, Radios } from '~/ui/radio';
-import { TextField } from '~/ui/text-field';
+import { FormProvider, useForm, useFormData } from "~/lib/conform";
+import { formValidationError } from "~/lib/effect/errors";
+import { routeFormAction, SubmissionContext } from "~/lib/effect/form";
+import { formatSchemaResult, parseSchema } from "~/lib/effect/form-schema";
+import { routeHandler } from "~/lib/effect/route";
+import { ReactRouterContext } from "~/lib/effect/router-context";
+import { useTranslate } from "~/lib/localization/context";
+import { getLocale } from "~/lib/localization/localization";
+import type { TranslationKey } from "~/lib/localization/translations";
+import { Mailer } from "~/lib/mailer.server";
+import { Toast } from "~/lib/toast.server";
+import { Button } from "~/ui/button";
+import { FieldErrors, fieldErrorStyle } from "~/ui/field-error";
+import { Label } from "~/ui/label";
+import { Main } from "~/ui/main";
+import { Radio, RadioGroup, Radios } from "~/ui/radio";
+import { TextField } from "~/ui/text-field";
 
 // `invalid_type_error` keys from the old zod schema fired when a field's
 // submitted value was not a string (e.g. duplicate field names POST an array).
@@ -33,33 +38,33 @@ import { TextField } from '~/ui/text-field';
 // `.annotateKey({ messageMissingKey })` covers the absent-field case (the old
 // zod `required_error` fired for both empty and absent values); `.check` covers
 // the empty-string case; the node-level `message` covers the invalid-type case.
-const Name = Schema.String.annotate({ message: 'volunteer.form.name.required' })
-  .check(Schema.isMinLength(1, { message: 'volunteer.form.name.required' }))
-  .annotateKey({ messageMissingKey: 'volunteer.form.name.required' });
+const Name = Schema.String.annotate({ message: "volunteer.form.name.required" })
+  .check(Schema.isMinLength(1, { message: "volunteer.form.name.required" }))
+  .annotateKey({ messageMissingKey: "volunteer.form.name.required" });
 const Email = Schema.String.annotate({
-  message: 'volunteer.form.email.error',
-}).check(Schema.isMinLength(1, { message: 'volunteer.form.email.required' }));
+  message: "volunteer.form.email.error",
+}).check(Schema.isMinLength(1, { message: "volunteer.form.email.required" }));
 const Phone = Schema.String.check(
-  Schema.isMinLength(1, { message: 'volunteer.form.phone.required' }),
+  Schema.isMinLength(1, { message: "volunteer.form.phone.required" }),
 );
-const Age = Schema.String.annotate({ message: 'volunteer.form.age.required' })
-  .check(Schema.isMinLength(1, { message: 'volunteer.form.age.required' }))
-  .annotateKey({ messageMissingKey: 'volunteer.form.age.required' });
+const Age = Schema.String.annotate({ message: "volunteer.form.age.required" })
+  .check(Schema.isMinLength(1, { message: "volunteer.form.age.required" }))
+  .annotateKey({ messageMissingKey: "volunteer.form.age.required" });
 const Location = Schema.String.annotate({
-  message: 'volunteer.form.location.required',
+  message: "volunteer.form.location.required",
 })
-  .check(Schema.isMinLength(1, { message: 'volunteer.form.location.required' }))
-  .annotateKey({ messageMissingKey: 'volunteer.form.location.required' });
+  .check(Schema.isMinLength(1, { message: "volunteer.form.location.required" }))
+  .annotateKey({ messageMissingKey: "volunteer.form.location.required" });
 const Background = Schema.String.annotate({
-  message: 'volunteer.form.background.required',
+  message: "volunteer.form.background.required",
 })
   .check(
-    Schema.isMinLength(1, { message: 'volunteer.form.background.required' }),
+    Schema.isMinLength(1, { message: "volunteer.form.background.required" }),
   )
-  .annotateKey({ messageMissingKey: 'volunteer.form.background.required' });
-const Why = Schema.String.annotate({ message: 'volunteer.form.why.required' })
-  .check(Schema.isMinLength(1, { message: 'volunteer.form.why.required' }))
-  .annotateKey({ messageMissingKey: 'volunteer.form.why.required' });
+  .annotateKey({ messageMissingKey: "volunteer.form.background.required" });
+const Why = Schema.String.annotate({ message: "volunteer.form.why.required" })
+  .check(Schema.isMinLength(1, { message: "volunteer.form.why.required" }))
+  .annotateKey({ messageMissingKey: "volunteer.form.why.required" });
 // `positions` is a multi-checkbox group: when nothing is selected the form
 // submits no `positions` field at all (unchecked checkboxes do not submit).
 // Classic `parseWithZod` coerced that absent field to `[]`; replicate it with a
@@ -76,9 +81,9 @@ const Positions = Schema.optionalKey(Schema.Array(Schema.String)).pipe(
 // is a real user path — a missing/invalid `method` must surface
 // `volunteer.form.method.required` on the method field, matching the old zod
 // `discriminatedUnion` behavior.
-const Method = Schema.Literals(['email', 'phone', 'both'])
-  .annotate({ message: 'volunteer.form.method.required' })
-  .annotateKey({ messageMissingKey: 'volunteer.form.method.required' });
+const Method = Schema.Literals(["email", "phone", "both"])
+  .annotate({ message: "volunteer.form.method.required" })
+  .annotateKey({ messageMissingKey: "volunteer.form.method.required" });
 
 // Per-method requirements (email when email/both, phone when phone/both) are
 // expressed as a struct-level filter that attaches each issue to the relevant
@@ -94,25 +99,27 @@ export const schema = Schema.Struct({
   // Re-annotate the optional wrapper so a non-string (array) value still maps to
   // a translation key instead of the wrapper's union-mismatch text. `phone` has
   // no `.error` key, so reuse `.required` to keep real copy on screen.
-  email: Schema.optional(Email).annotate({ message: 'volunteer.form.email.error' }),
+  email: Schema.optional(Email).annotate({
+    message: "volunteer.form.email.error",
+  }),
   phone: Schema.optional(Phone).annotate({
-    message: 'volunteer.form.phone.required',
+    message: "volunteer.form.phone.required",
   }),
 }).check(
   Schema.makeFilter((value) => {
     const issues: Array<{ path: ReadonlyArray<PropertyKey>; issue: string }> =
       [];
     if (
-      (value.method === 'email' || value.method === 'both') &&
+      (value.method === "email" || value.method === "both") &&
       value.email === undefined
     ) {
-      issues.push({ path: ['email'], issue: 'volunteer.form.email.required' });
+      issues.push({ path: ["email"], issue: "volunteer.form.email.required" });
     }
     if (
-      (value.method === 'phone' || value.method === 'both') &&
+      (value.method === "phone" || value.method === "both") &&
       value.phone === undefined
     ) {
-      issues.push({ path: ['phone'], issue: 'volunteer.form.phone.required' });
+      issues.push({ path: ["phone"], issue: "volunteer.form.phone.required" });
     }
     return issues.length === 0 ? undefined : issues;
   }),
@@ -123,16 +130,16 @@ const clientSchema = Schema.toStandardSchemaV1(schema);
 export const meta: MetaFunction = ({ params }) => {
   const local = getLocale(params);
 
-  if (local === 'fr') {
+  if (local === "fr") {
     return [
-      { title: 'Bénévolat | GYCC' },
-      { name: 'description', content: 'Bénévolez avec GYCC' },
+      { title: "Bénévolat | GYCC" },
+      { name: "description", content: "Bénévolez avec GYCC" },
     ];
   }
 
   return [
-    { title: 'Volunteer | GYCC' },
-    { name: 'description', content: 'Volunteer with GYCC' },
+    { title: "Volunteer | GYCC" },
+    { name: "description", content: "Volunteer with GYCC" },
   ];
 };
 
@@ -166,30 +173,30 @@ export const action = routeFormAction(function* () {
     mailer.send({
       subject: `[!] Volunteer Request from ${data.name}`,
       content: `Name: ${data.name}\n${match(data)
-        .with({ method: 'email' }, (d) => `Email: ${d.email}`)
-        .with({ method: 'phone' }, (d) => `Phone: ${d.phone}`)
-        .with({ method: 'both' }, (d) => `Email: ${d.email}\nPhone: ${d.phone}`)
+        .with({ method: "email" }, (d) => `Email: ${d.email}`)
+        .with({ method: "phone" }, (d) => `Phone: ${d.phone}`)
+        .with({ method: "both" }, (d) => `Email: ${d.email}\nPhone: ${d.phone}`)
         .exhaustive()}
         \nMessage: ${data.why}
         \nBackground: ${data.background}
         \nAge: ${data.age}
         \nLocation: ${data.location}
-        \nPositions: ${(data.positions ?? []).join(', ')}
+        \nPositions: ${(data.positions ?? []).join(", ")}
         `,
     }),
   );
-  if (result._tag === 'Failure') {
-    yield* Effect.logError('Error sending email', result.cause);
+  if (result._tag === "Failure") {
+    yield* Effect.logError("Error sending email", result.cause);
     return yield* formValidationError({
-      formErrors: ['contact.form.error'],
+      formErrors: ["contact.form.error"],
     });
   }
 
   return yield* toast.redirect(url.pathname, {
-    description: 'volunteer.form.success.description' satisfies TranslationKey,
-    title: 'volunteer.form.success.title' satisfies TranslationKey,
-    type: 'success',
-    form: 'volunteer',
+    description: "volunteer.form.success.description" satisfies TranslationKey,
+    title: "volunteer.form.success.title" satisfies TranslationKey,
+    type: "success",
+    form: "volunteer",
   });
 });
 
@@ -198,53 +205,49 @@ export default function Index() {
   const data = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const { form, fields } = useForm(clientSchema, {
-    id: 'volunteer',
-    shouldValidate: 'onSubmit',
-    shouldRevalidate: 'onInput',
+    id: "volunteer",
+    shouldValidate: "onSubmit",
+    shouldRevalidate: "onInput",
     defaultValue: {
-      name: '',
-      method: 'email',
+      name: "",
+      method: "email",
       email: undefined,
       phone: undefined,
-      age: '',
-      location: '',
+      age: "",
+      location: "",
       positions: [] as string[],
-      background: '',
-      why: '',
+      background: "",
+      why: "",
     },
     lastResult: actionData?.result,
   });
 
   const method = useFormData(
     form.id,
-    (formData) => formData.get(fields.method.name) ?? 'email',
-    { fallback: 'email' },
-  ) as 'email' | 'phone' | 'both';
+    (formData) => formData.get(fields.method.name) ?? "email",
+    { fallback: "email" },
+  ) as "email" | "phone" | "both";
 
   return (
-    <Main className="gap-10 px-4 py-12 text-2xl md:gap-16">
+    <Main className="gap-10 px-4 py-12 text-2xl md:gap-16 md:px-16">
       <div className="flex flex-col gap-4 md:gap-16">
         <h1 className="text-5xl">
-          {translate('volunteer.title', {
+          {translate("volunteer.title", {
             movement: (
               <span className="italic">
-                {translate('volunteer.title.movement')}
+                {translate("volunteer.title.movement")}
               </span>
             ),
           })}
         </h1>
-        <p>{translate('volunteer.subtitle')}</p>
+        <p>{translate("volunteer.subtitle")}</p>
       </div>
 
       <FormProvider context={form.context}>
-        <Form
-          method="POST"
-          className="flex flex-col gap-4"
-          {...form.props}
-        >
+        <Form method="POST" className="flex flex-col gap-4" {...form.props}>
           {data.positions.length > 0 ? (
             <div className="flex flex-col gap-3">
-              <h2>{translate('volunteer.directions')}</h2>
+              <h2>{translate("volunteer.directions")}</h2>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {data.positions.map((position) => (
                   <div
@@ -275,105 +278,102 @@ export default function Index() {
           ) : null}
 
           <TextField name={fields.name.name}>
-            <Label>{translate('volunteer.form.name.label')}</Label>
+            <Label>{translate("volunteer.form.name.label")}</Label>
             <TextField.Input
               type="text"
               placeholder={
-                translate('volunteer.form.name.placeholder') as string
+                translate("volunteer.form.name.placeholder") as string
               }
             />
             <FieldErrors />
           </TextField>
 
           <RadioGroup name={fields.method.name}>
-            <Label>{translate('volunteer.form.method.label')}</Label>
+            <Label>{translate("volunteer.form.method.label")}</Label>
             <Radios>
               <Radio value="phone">
-                {translate('volunteer.form.method.phone')}
+                {translate("volunteer.form.method.phone")}
               </Radio>
               <Radio value="email">
-                {translate('volunteer.form.method.email')}
+                {translate("volunteer.form.method.email")}
               </Radio>
               <Radio value="both">
-                {translate('volunteer.form.method.both')}
+                {translate("volunteer.form.method.both")}
               </Radio>
             </Radios>
             <FieldErrors />
           </RadioGroup>
-          {method === 'email' || method === 'both' ? (
+          {method === "email" || method === "both" ? (
             <TextField name={fields.email.name}>
-              <Label>{translate('volunteer.form.email.label')}</Label>
+              <Label>{translate("volunteer.form.email.label")}</Label>
               <TextField.Input
                 type="email"
                 placeholder={
-                  translate('volunteer.form.email.placeholder') as string
+                  translate("volunteer.form.email.placeholder") as string
                 }
               />
               <FieldErrors />
             </TextField>
           ) : null}
-          {method === 'phone' || method === 'both' ? (
+          {method === "phone" || method === "both" ? (
             <TextField name={fields.phone.name}>
-              <Label>{translate('volunteer.form.phone.label')}</Label>
+              <Label>{translate("volunteer.form.phone.label")}</Label>
               <TextField.Input
                 type="tel"
                 placeholder={
-                  translate('volunteer.form.phone.placeholder') as string
+                  translate("volunteer.form.phone.placeholder") as string
                 }
               />
               <FieldErrors />
             </TextField>
           ) : null}
           <TextField name={fields.age.name}>
-            <Label>{translate('volunteer.form.age.label')}</Label>
+            <Label>{translate("volunteer.form.age.label")}</Label>
             <TextField.Input
               type="number"
               placeholder={
-                translate('volunteer.form.age.placeholder') as string
+                translate("volunteer.form.age.placeholder") as string
               }
             />
             <FieldErrors />
           </TextField>
           <TextField name={fields.location.name}>
-            <Label>{translate('volunteer.form.location.label')}</Label>
+            <Label>{translate("volunteer.form.location.label")}</Label>
             <TextField.Input
               type="text"
               placeholder={
-                translate('volunteer.form.location.placeholder') as string
+                translate("volunteer.form.location.placeholder") as string
               }
             />
             <FieldErrors />
           </TextField>
           <TextField name={fields.background.name}>
-            <Label>{translate('volunteer.form.background.label')}</Label>
+            <Label>{translate("volunteer.form.background.label")}</Label>
             <TextField.TextArea
               rows={5}
               placeholder={
-                translate('volunteer.form.background.placeholder') as string
+                translate("volunteer.form.background.placeholder") as string
               }
             />
             <FieldErrors />
           </TextField>
           <TextField name={fields.why.name}>
-            <Label>{translate('volunteer.form.why.label')}</Label>
+            <Label>{translate("volunteer.form.why.label")}</Label>
             <TextField.TextArea
               rows={5}
               placeholder={
-                translate('volunteer.form.why.placeholder') as string
+                translate("volunteer.form.why.placeholder") as string
               }
             />
             <FieldErrors />
           </TextField>
           <div>
-            <Button
-              variant="accent"
-              type="submit"
-            >
-              {translate('volunteer.form.submit')}
+            <Button variant="accent" type="submit">
+              {translate("volunteer.form.submit")}
             </Button>
             {form.errors && form.errors.length > 0 ? (
               <p className={fieldErrorStyle}>
-                {translate('volunteer.form.error')}
+                {translate("volunteer.form.error")}
               </p>
             ) : null}
           </div>
