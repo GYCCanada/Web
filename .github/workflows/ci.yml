@@ -19,9 +19,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -52,14 +52,14 @@ jobs:
       IMAGE: ghcr.io/gyccanada/web
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       # Tags: `:sha-<short>` always; add `:latest` only on a push to main.
       - name: Image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -69,7 +69,7 @@ jobs:
       # Build once, load into the local daemon so the smoke test runs on the
       # exact image we publish. Pushing happens in a later step (main only).
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           load: true
@@ -108,15 +108,16 @@ jobs:
       # re-export of the layers we just built.
       - name: Log in to GHCR
         if: github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push image
+        id: push
         if: github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           push: true
@@ -124,3 +125,25 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Surface the deployable refs in the run's Summary tab so the exact tag +
+      # immutable digest are one click away — no log-digging. meta.outputs.tags
+      # is newline-separated (`:sha-<short>` + `:latest` on main).
+      - name: Image summary
+        if: github.ref == 'refs/heads/main'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo "## Published image"
+            echo
+            echo "Pull a tag, or pin the digest for an immutable deploy:"
+            echo
+            echo '| Ref | |'
+            echo '| --- | --- |'
+            while IFS= read -r tag; do
+              [ -n "$tag" ] && echo "| \`$tag\` | tag |"
+            done <<< "$TAGS"
+            echo "| \`${IMAGE}@${DIGEST}\` | digest |"
+          } >> "$GITHUB_STEP_SUMMARY"
