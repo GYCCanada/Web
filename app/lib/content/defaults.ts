@@ -1,7 +1,7 @@
-import { Schema } from 'effect';
+import { Schema } from "effect";
 
-import { root } from '../localization/translations';
-import { SiteContent } from './schema';
+import { root } from "../localization/translations";
+import { SiteContent } from "./schema";
 
 /**
  * The bundled-default `SiteContent` document (CMS plan §"Defaults / seed",
@@ -43,7 +43,9 @@ import { SiteContent } from './schema';
  * `make-impossible-states-unrepresentable`). `decodeUnknownSync` throws on a
  * malformed default, so a transcription typo fails fast at module load.
  */
-export const defaultContent: SiteContent = Schema.decodeUnknownSync(SiteContent)({
+export const defaultContent: SiteContent = Schema.decodeUnknownSync(
+  SiteContent,
+)({
   meta: { schemaVersion: 1 },
 
   conferences: [
@@ -51,59 +53,59 @@ export const defaultContent: SiteContent = Schema.decodeUnknownSync(SiteContent)
     // 2024 — "While It Is Day" (Kelowna, BC)
     // -------------------------------------------------------------------
     {
-      slug: '/2024',
-      themeName: { en: 'While It Is Day', fr: "Tant qu'il fait jour" },
-      accentColor: '#FFD6BA',
+      slug: "/2024",
+      themeName: { en: "While It Is Day", fr: "Tant qu'il fait jour" },
+      accentColor: "#FFD6BA",
       hero: {
         desktop: {
           // Per-locale hero art (today rendered by the 2024 route's localized
           // <img srcs={{en,fr}}>; both files exist on disk).
           key: {
-            en: '2024/en/hero-desktop.jpg',
-            fr: '2024/fr/hero-desktop.jpg',
+            en: "2024/en/hero-desktop.jpg",
+            fr: "2024/fr/hero-desktop.jpg",
           },
           alt: {
-            en: 'GYC Canada 2024 — While It Is Day conference hero',
-            fr: 'GYC Canada 2024 — bannière de la conférence Tant qu’il fait jour',
+            en: "GYC Canada 2024 — While It Is Day conference hero",
+            fr: "GYC Canada 2024 — bannière de la conférence Tant qu’il fait jour",
           },
         },
         mobile: {
           key: {
-            en: '2024/en/hero-mobile.jpg',
-            fr: '2024/fr/hero-mobile.jpg',
+            en: "2024/en/hero-mobile.jpg",
+            fr: "2024/fr/hero-mobile.jpg",
           },
           alt: {
-            en: 'GYC Canada 2024 — While It Is Day conference hero',
-            fr: 'GYC Canada 2024 — bannière de la conférence Tant qu’il fait jour',
+            en: "GYC Canada 2024 — While It Is Day conference hero",
+            fr: "GYC Canada 2024 — bannière de la conférence Tant qu’il fait jour",
           },
         },
       },
-      dates: { start: '2024-08-21', end: '2024-08-25' },
+      dates: { start: "2024-08-21", end: "2024-08-25" },
       registration: {
-        early: { start: '2024-05-19', end: '2024-06-22' },
-        regular: { start: '2024-06-23', end: '2024-07-20' },
-        late: { start: '2024-07-21', end: '2024-08-25' },
+        early: { start: "2024-05-19", end: "2024-06-22" },
+        regular: { start: "2024-06-23", end: "2024-07-20" },
+        late: { start: "2024-07-21", end: "2024-08-25" },
       },
       location: {
-        en: '130 Gerstmar Rd, Kelowna, BC V1X 4A7',
-        fr: '130 Gerstmar Rd, Kelowna, BC V1X 4A7',
+        en: "130 Gerstmar Rd, Kelowna, BC V1X 4A7",
+        fr: "130 Gerstmar Rd, Kelowna, BC V1X 4A7",
       },
       tagline: {
-        en: '“I must work the works of Him who sent Me while it is day; the night is coming when no one can work.”',
-        fr: '“Il faut que je fasse, tandis qu’il est jour, les œuvres de celui qui m’a envoyé; la nuit vient, où personne ne peut travailler.”',
+        en: "“I must work the works of Him who sent Me while it is day; the night is coming when no one can work.”",
+        fr: "“Il faut que je fasse, tandis qu’il est jour, les œuvres de celui qui m’a envoyé; la nuit vient, où personne ne peut travailler.”",
       },
       bible: {
-        book: { en: 'John', fr: 'Jean' },
+        book: { en: "John", fr: "Jean" },
         chapter: 9,
         verse: 4,
       },
       speakers: [
         {
-          name: { en: 'Matt Parra', fr: 'Matt Para' },
-          activity: { en: 'Morning Plenary', fr: 'Plénière du matin' },
+          name: { en: "Matt Parra", fr: "Matt Para" },
+          activity: { en: "Morning Plenary", fr: "Plénière du matin" },
           photo: {
-            key: '2024/speakers/matt.png',
-            alt: { en: 'Matt Parra', fr: 'Matt Para' },
+            key: "2024/speakers/matt.png",
+            alt: { en: "Matt Parra", fr: "Matt Para" },
           },
           bio: {
             en: `Matt Parra is the lead Pastor of the Chehalis Seventh day Adentist
@@ -121,11 +123,11 @@ family, getting old, and teaching scripture.`,
           },
         },
         {
-          name: { en: 'Alex Niculaescu', fr: 'Alex Niculaescu' },
-          activity: { en: 'Evening Plenary', fr: 'Plénière du soir' },
+          name: { en: "Alex Niculaescu", fr: "Alex Niculaescu" },
+          activity: { en: "Evening Plenary", fr: "Plénière du soir" },
           photo: {
-            key: '2024/speakers/alex.jpeg',
-            alt: { en: 'Alex Niculaescu', fr: 'Alex Niculaescu' },
+            key: "2024/speakers/alex.jpeg",
+            alt: { en: "Alex Niculaescu", fr: "Alex Niculaescu" },
           },
           bio: {
             en: `Alex has worked in various mission fields over the past 13 years and
@@ -147,14 +149,14 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       seminars: [
         {
           title: {
-            en: 'Apologetics Seminar',
-            fr: 'Séminaire d’apologétique',
+            en: "Apologetics Seminar",
+            fr: "Séminaire d’apologétique",
           },
           speaker: {
-            name: { en: 'Andrew Bikichky', fr: 'Andrew Bikichky' },
+            name: { en: "Andrew Bikichky", fr: "Andrew Bikichky" },
             photo: {
-              key: '2024/speakers/andrew.jpg',
-              alt: { en: 'Andrew Bikichky', fr: 'Andrew Bikichky' },
+              key: "2024/speakers/andrew.jpg",
+              alt: { en: "Andrew Bikichky", fr: "Andrew Bikichky" },
             },
             bio: {
               en: `Andrew Bikichky was raised a 5th generation Seventh-day Adventist. At the age of 16 he left the church to pursue worldly ambitions in the entertainment industry. After spending 25 years as a Hollywood cameraman, he was drawn back by the Holy Spirit to the faith of his childhood, and started working as a Bible Worker, accepting speaking invitations in churches. After living almost 3 decades in the world, the profound truths Andrew rediscovered in the Word of God and the testimony of Jesus Christ captivated his whole being, becoming a burning fire in his heart. Of particular interest in his focus on the great light we've been given about the ministry of Christ in the heavenly sanctuary, and how He is right now seeking to prepare a people to meet Him face to face.`,
@@ -162,20 +164,20 @@ lives in Michigan with his wife and daughter where he works as a pastor.
             },
           },
           description: {
-            en: 'Seminar Description',
-            fr: 'Seminar Description',
+            en: "Seminar Description",
+            fr: "Seminar Description",
           },
         },
         {
           title: {
-            en: 'Personal Study Workshop',
-            fr: 'Atelier d’étude personnelle',
+            en: "Personal Study Workshop",
+            fr: "Atelier d’étude personnelle",
           },
           speaker: {
-            name: { en: 'James Niyomugabo', fr: 'James Niyomugabo' },
+            name: { en: "James Niyomugabo", fr: "James Niyomugabo" },
             photo: {
-              key: '2024/speakers/james.png',
-              alt: { en: 'James Niyomugabo', fr: 'James Niyomugabo' },
+              key: "2024/speakers/james.png",
+              alt: { en: "James Niyomugabo", fr: "James Niyomugabo" },
             },
             bio: {
               en: `James Niyomugabo is a dedicated creator coach and entrepreneur aiming to empower 1 million Christian creators, companies, and churches with the Genesis blueprint for creation and operation. He has been an elder at Westminster SDA Church for over three years and serves as a Bible worker at Grace Church Company. James is spearheading a digital evangelism initiative, "This Gospel Must Go Viral," to spread the Gospel globally. He is also the author of “How to Create Like God Does - God’s Success Blueprint for Creators, Companies, and Churches” and leads the "Journal through the Bible in a Year" challenge to inspire deeper engagement with Scripture.`,
@@ -183,20 +185,20 @@ lives in Michigan with his wife and daughter where he works as a pastor.
             },
           },
           description: {
-            en: 'Seminar Description',
-            fr: 'Seminar Description',
+            en: "Seminar Description",
+            fr: "Seminar Description",
           },
         },
         {
           title: {
-            en: 'Medical Missionary Seminar',
-            fr: 'Séminaire de mission médicale',
+            en: "Medical Missionary Seminar",
+            fr: "Séminaire de mission médicale",
           },
           speaker: {
-            name: { en: 'Dave Fiedler', fr: 'Dave Fiedler' },
+            name: { en: "Dave Fiedler", fr: "Dave Fiedler" },
             photo: {
-              key: '2024/speakers/dave.jpg',
-              alt: { en: 'Dave Fiedler', fr: 'Dave Fiedler' },
+              key: "2024/speakers/dave.jpg",
+              alt: { en: "Dave Fiedler", fr: "Dave Fiedler" },
             },
             bio: {
               en: `Dave Fiedler has bucked logs, farmed carrots, tomato seed, and hay, run a print shop, been an editor, a classroom teacher (elementary to college), a boys’ dean, a school principal, a vegan restaurant manager, and written five books. His goal and privilege, in print and in person, is to share a vision of Christ’s own approach to the gospel that heals bodies and souls, and will—as surely as it is practiced—end the conflict. Currently, he supports this addiction to teaching, preaching, and writing, by providing IT Services to dentists in “Beautiful British Columbia” where he lives with his wife, Clarissa.`,
@@ -204,8 +206,8 @@ lives in Michigan with his wife and daughter where he works as a pastor.
             },
           },
           description: {
-            en: 'Seminar Description',
-            fr: 'Seminar Description',
+            en: "Seminar Description",
+            fr: "Seminar Description",
           },
         },
       ],
@@ -216,45 +218,45 @@ lives in Michigan with his wife and daughter where he works as a pastor.
     // 2025 — "A Still Small Voice" (Montreal, QC) — cancelled / archived
     // -------------------------------------------------------------------
     {
-      slug: '/2025',
+      slug: "/2025",
       themeName: {
-        en: 'A Still Small Voice',
-        fr: 'Une Voix Douce et Légère',
+        en: "A Still Small Voice",
+        fr: "Une Voix Douce et Légère",
       },
-      accentColor: '#FFD6BA',
+      accentColor: "#FFD6BA",
       hero: {
         // Per-locale hero art (EN/FR are distinct files on disk); mobile reuses
         // the desktop crop in each locale, exactly as today's data did.
         desktop: {
           key: {
-            en: '2025/en/hero-desktop.jpg',
-            fr: '2025/fr/hero-desktop.jpg',
+            en: "2025/en/hero-desktop.jpg",
+            fr: "2025/fr/hero-desktop.jpg",
           },
           alt: {
-            en: 'GYC Canada 2025 — A Still Small Voice conference hero',
-            fr: 'GYC Canada 2025 — bannière de la conférence Une Voix Douce et Légère',
+            en: "GYC Canada 2025 — A Still Small Voice conference hero",
+            fr: "GYC Canada 2025 — bannière de la conférence Une Voix Douce et Légère",
           },
         },
         mobile: {
           key: {
-            en: '2025/en/hero-desktop.jpg',
-            fr: '2025/fr/hero-desktop.jpg',
+            en: "2025/en/hero-desktop.jpg",
+            fr: "2025/fr/hero-desktop.jpg",
           },
           alt: {
-            en: 'GYC Canada 2025 — A Still Small Voice conference hero',
-            fr: 'GYC Canada 2025 — bannière de la conférence Une Voix Douce et Légère',
+            en: "GYC Canada 2025 — A Still Small Voice conference hero",
+            fr: "GYC Canada 2025 — bannière de la conférence Une Voix Douce et Légère",
           },
         },
       },
-      dates: { start: '2025-08-20', end: '2025-08-24' },
+      dates: { start: "2025-08-20", end: "2025-08-24" },
       // No pricing for 2025 — omit `registration` (decodes to `Option.none()`).
-      location: { en: 'Montreal, QC', fr: 'Montréal, QC' },
+      location: { en: "Montreal, QC", fr: "Montréal, QC" },
       tagline: {
         en: '"And after the earthquake a fire, but the Lord was not in the fire; and after the fire a still small voice."',
         fr: '"Après le tremblement de terre, un feu; mais l’Éternel n’était pas dans le feu. Et après le feu, un murmure doux et léger."',
       },
       bible: {
-        book: { en: '1 Kings', fr: '1 Rois' },
+        book: { en: "1 Kings", fr: "1 Rois" },
         chapter: 19,
         verse: 12,
       },
@@ -267,47 +269,47 @@ lives in Michigan with his wife and daughter where he works as a pastor.
     // 2026 — "Speak" (Calgary, AB) — the return conference
     // -------------------------------------------------------------------
     {
-      slug: '/2026',
-      themeName: { en: 'Speak', fr: 'Parle' },
+      slug: "/2026",
+      themeName: { en: "Speak", fr: "Parle" },
       // Gold/amber accent sampled from the dark SPEAK hero art.
-      accentColor: '#D4A24E',
+      accentColor: "#EFCB9A",
       hero: {
         // Per-locale hero art (EN/FR are distinct files on disk). Mobile
         // temporarily reuses each locale's landscape desktop image (portrait
         // crop still owed — a product deferral, not a CMS gap).
         desktop: {
           key: {
-            en: '2026/en/hero-desktop.png',
-            fr: '2026/fr/hero-desktop.png',
+            en: "2026/en/hero-desktop.png",
+            fr: "2026/fr/hero-desktop.png",
           },
           alt: {
-            en: 'GYC Canada 2026 — Speak conference hero',
-            fr: 'GYC Canada 2026 — bannière de la conférence Parle',
+            en: "GYC Canada 2026 — Speak conference hero",
+            fr: "GYC Canada 2026 — bannière de la conférence Parle",
           },
         },
         mobile: {
           key: {
-            en: '2026/en/hero-desktop.png',
-            fr: '2026/fr/hero-desktop.png',
+            en: "2026/en/hero-desktop.png",
+            fr: "2026/fr/hero-desktop.png",
           },
           alt: {
-            en: 'GYC Canada 2026 — Speak conference hero',
-            fr: 'GYC Canada 2026 — bannière de la conférence Parle',
+            en: "GYC Canada 2026 — Speak conference hero",
+            fr: "GYC Canada 2026 — bannière de la conférence Parle",
           },
         },
       },
-      dates: { start: '2026-08-05', end: '2026-08-09' },
+      dates: { start: "2026-08-05", end: "2026-08-09" },
       // Pricing not set yet — omit `registration` (decodes to `Option.none()`).
       location: {
-        en: 'Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB',
-        fr: 'Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB',
+        en: "Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB",
+        fr: "Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB",
       },
       tagline: {
-        en: 'But the Lord said to me, "Do not say, \'I am too young.\' You must go to everyone I send you to and say whatever I command you."',
-        fr: '“Et l’Éternel me dit: Ne dis pas: Je suis un enfant. Car tu iras vers tous ceux auprès de qui je t’enverrai, et tu diras tout ce que je t’ordonnerai.”',
+        en: "But the Lord said to me, \"Do not say, 'I am too young.' You must go to everyone I send you to and say whatever I command you.\"",
+        fr: "“Et l’Éternel me dit: Ne dis pas: Je suis un enfant. Car tu iras vers tous ceux auprès de qui je t’enverrai, et tu diras tout ce que je t’ordonnerai.”",
       },
       bible: {
-        book: { en: 'Jeremiah', fr: 'Jérémie' },
+        book: { en: "Jeremiah", fr: "Jérémie" },
         chapter: 1,
         verse: 7,
       },
@@ -319,39 +321,39 @@ lives in Michigan with his wife and daughter where he works as a pastor.
 
   team: [
     {
-      name: 'Elijah Duffy',
-      position: 'team.position.president',
+      name: "Elijah Duffy",
+      position: "team.position.president",
       photo: {
-        key: 'team/elijah.jpg',
-        alt: { en: 'Elijah Duffy', fr: 'Elijah Duffy' },
+        key: "team/elijah.jpg",
+        alt: { en: "Elijah Duffy", fr: "Elijah Duffy" },
       },
     },
     {
-      name: 'Sebastian Elias',
-      position: 'team.position.vice-president',
+      name: "Sebastian Elias",
+      position: "team.position.vice-president",
       photo: {
-        key: 'team/sebastian.jpg',
-        alt: { en: 'Sebastian Elias', fr: 'Sebastian Elias' },
+        key: "team/sebastian.jpg",
+        alt: { en: "Sebastian Elias", fr: "Sebastian Elias" },
       },
     },
     {
-      name: 'Lillian Wheeler',
-      position: 'team.position.secretary',
+      name: "Lillian Wheeler",
+      position: "team.position.secretary",
       photo: {
-        key: 'team/lillian.jpg',
-        alt: { en: 'Lillian Wheeler', fr: 'Lillian Wheeler' },
+        key: "team/lillian.jpg",
+        alt: { en: "Lillian Wheeler", fr: "Lillian Wheeler" },
       },
     },
   ],
 
   board: [
-    'Virginia Polihronova',
-    'George Cho',
-    'Dominique Wheeler',
-    'Daniel Cho',
-    'Craig Cleveland',
-    'Rudy Harnisch',
-    'Abubacar Camara',
+    "Virginia Polihronova",
+    "George Cho",
+    "Dominique Wheeler",
+    "Daniel Cho",
+    "Craig Cleveland",
+    "Rudy Harnisch",
+    "Abubacar Camara",
   ],
 
   // Spread the live UI translation tables verbatim so the defaults can never
