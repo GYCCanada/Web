@@ -1,4 +1,12 @@
-import { data, Links, Meta, Outlet, Scripts, useLoaderData } from 'react-router';
+import {
+  data,
+  type LinksFunction,
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  useLoaderData,
+} from 'react-router';
 
 import { ClientHintCheck, getHints } from './lib/client-hints';
 import { ReactRouterContext } from './lib/effect/router-context';
@@ -10,6 +18,10 @@ import './tailwind.css';
 import { combineHeaders } from './lib/misc';
 import { Toast } from './lib/toast.server';
 import { Toaster } from './ui/toaster';
+
+export const links: LinksFunction = () => [
+  { rel: 'icon', href: '/favicon.ico', type: 'image/x-icon' },
+];
 
 export const loader = routeHandler(function* () {
   const { request, url } = yield* ReactRouterContext;
