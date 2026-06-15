@@ -3,28 +3,28 @@ import {
   Link as RLink,
   useLoaderData,
   useLocation,
-} from 'react-router';
-import dayjs from 'dayjs';
-import { AnimatePresence, motion } from 'framer-motion';
-import { FacebookIcon, InstagramIcon, YoutubeIcon } from 'lucide-react';
-import * as React from 'react';
-import { Button } from '@base-ui/react/button';
-import { ClientOnly } from 'remix-utils/client-only';
-import { match } from 'ts-pattern';
+} from "react-router";
+import dayjs from "dayjs";
+import { AnimatePresence, motion } from "framer-motion";
+import { FacebookIcon, InstagramIcon, YoutubeIcon } from "lucide-react";
+import * as React from "react";
+import { Button } from "@base-ui/react/button";
+import { ClientOnly } from "remix-utils/client-only";
+import { match } from "ts-pattern";
 
-import { Breakpoint, useBreakpoint } from '~/lib/client-hints';
-import { Content } from '~/lib/content.server';
-import { ReactRouterContext } from '~/lib/effect/router-context';
-import { routeHandler } from '~/lib/effect/route';
-import { useTranslate } from '~/lib/localization/context';
-import { getLocale, Locale } from '~/lib/localization/localization';
-import { LocalizationProvider } from '~/lib/localization/provider';
-import { useRootLoader } from '~/lib/root-loader';
-import { useToast } from '~/lib/toast';
-import { ExternalLink, linkStyle } from '~/ui/external-link';
-import { CloseIcon, LanguageIcon, MenuIcon } from '~/ui/icon';
-import { Link } from '~/ui/link';
-import { Portal } from '~/ui/portal';
+import { Breakpoint, useBreakpoint } from "~/lib/client-hints";
+import { Content } from "~/lib/content.server";
+import { ReactRouterContext } from "~/lib/effect/router-context";
+import { routeHandler } from "~/lib/effect/route";
+import { useTranslate } from "~/lib/localization/context";
+import { getLocale, Locale } from "~/lib/localization/localization";
+import { LocalizationProvider } from "~/lib/localization/provider";
+import { useRootLoader } from "~/lib/root-loader";
+import { useToast } from "~/lib/toast";
+import { ExternalLink, linkStyle } from "~/ui/external-link";
+import { CloseIcon, LanguageIcon, MenuIcon } from "~/ui/icon";
+import { Link } from "~/ui/link";
+import { Portal } from "~/ui/portal";
 
 export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
@@ -90,16 +90,16 @@ function TopNav() {
             className="size-[44px]"
           />
         </Link>
-        <NavItem to={`/${new Date().getFullYear()}`}>
-          {translate('nav.home', {
+        <NavItem to={`/`}>
+          {translate("nav.home", {
             year: new Date().getFullYear(),
           })}
         </NavItem>
-        <NavItem to="/about">{translate('nav.about')}</NavItem>
-        <NavItem to="/team">{translate('nav.team')}</NavItem>
-        <NavItem to="/contact">{translate('nav.contact')}</NavItem>
-        <NavItem to="/give">{translate('nav.give')}</NavItem>
-        <NavItem to="/volunteer">{translate('nav.volunteer')}</NavItem>
+        <NavItem to="/about">{translate("nav.about")}</NavItem>
+        {/* <NavItem to="/team">{translate('nav.team')}</NavItem> */}
+        <NavItem to="/contact">{translate("nav.contact")}</NavItem>
+        <NavItem to="/give">{translate("nav.give")}</NavItem>
+        <NavItem to="/volunteer">{translate("nav.volunteer")}</NavItem>
         <Language />
       </nav>
     </header>
@@ -153,15 +153,15 @@ function PopupNav() {
                   {[
                     {
                       to: `/${new Date().getFullYear()}`,
-                      label: translate('nav.home', {
+                      label: translate("nav.home", {
                         year: new Date().getFullYear(),
                       }),
                     },
-                    { to: '/about', label: translate('nav.about') },
-                    { to: '/team', label: translate('nav.team') },
-                    { to: '/contact', label: translate('nav.contact') },
-                    { to: '/give', label: translate('nav.give') },
-                    { to: '/volunteer', label: translate('nav.volunteer') },
+                    { to: "/about", label: translate("nav.about") },
+                    { to: "/team", label: translate("nav.team") },
+                    { to: "/contact", label: translate("nav.contact") },
+                    { to: "/give", label: translate("nav.give") },
+                    { to: "/volunteer", label: translate("nav.volunteer") },
                   ].map((item, index) => (
                     <NavItem
                       key={item.to}
@@ -186,7 +186,7 @@ function Language() {
   const location = useLocation();
 
   return match(lang)
-    .with('en', () => (
+    .with("en", () => (
       <RLink
         className="flex items-center gap-2"
         to={getNextLocalePath(location.pathname, Locale.Fr)}
@@ -194,7 +194,7 @@ function Language() {
         Français <LanguageIcon />
       </RLink>
     ))
-    .with('fr', () => (
+    .with("fr", () => (
       <RLink
         className="flex items-center gap-2"
         to={getNextLocalePath(location.pathname, Locale.En)}
@@ -207,11 +207,11 @@ function Language() {
 
 function getNextLocalePath(path: string, nextLocale: Locale): string {
   return match(nextLocale)
-    .with('en', () => path.replace(/^\/fr/, ''))
-    .with('fr', () => {
-      const parts = path.split('/');
-      parts.splice(1, 0, 'fr');
-      return parts.join('/');
+    .with("en", () => path.replace(/^\/fr/, ""))
+    .with("fr", () => {
+      const parts = path.split("/");
+      parts.splice(1, 0, "fr");
+      return parts.join("/");
     })
     .exhaustive();
 }
@@ -248,7 +248,7 @@ function NavItem({
   onClick?: () => void;
 }) {
   const location = useLocation();
-  const splitPathname = location.pathname.split('/');
+  const splitPathname = location.pathname.split("/");
 
   // sometimes the path may have the locale in it, so we need to remove it
   const filteredPath = splitPathname.filter(
@@ -259,9 +259,9 @@ function NavItem({
   );
 
   const isActive =
-    to === '/'
-      ? filteredPath.every((part) => part === '')
-      : filteredPath.join('/').startsWith(to);
+    to === "/"
+      ? filteredPath.every((part) => part === "")
+      : filteredPath.join("/").startsWith(to);
 
   return (
     <MotionLink
@@ -271,13 +271,17 @@ function NavItem({
         ? {
             initial: { opacity: 0, y: -10 },
             animate: { opacity: 1, y: 0 },
-            transition: { delay: revealDelay, duration: 0.2, ease: 'easeInOut' },
+            transition: {
+              delay: revealDelay,
+              duration: 0.2,
+              ease: "easeInOut",
+            },
           }
         : {})}
       className={
-        'data-[active]:text-accent-600 hover:text-accent-500 active:text-accent-700 text-5xl font-medium duration-200 max-xl:uppercase xl:text-base'
+        "data-[active]:text-accent-600 hover:text-accent-500 active:text-accent-700 text-5xl font-medium duration-200 max-xl:uppercase xl:text-base"
       }
-      data-active={isActive ? '' : undefined}
+      data-active={isActive ? "" : undefined}
     >
       {children}
     </MotionLink>
@@ -292,7 +296,7 @@ function Footer() {
       <div className="mx-auto flex w-(--width) flex-col gap-12 px-4 py-10">
         <div className="flex flex-col gap-12 md:flex-row">
           <div className="flex flex-col gap-3 md:flex-1">
-            <p>{translate('footer.copy')}</p>
+            <p>{translate("footer.copy")}</p>
             <div className="flex items-center gap-4">
               <a
                 href="https://www.instagram.com/gyccanada"
@@ -320,44 +324,29 @@ function Footer() {
 
           <div className="flex flex-col gap-2 md:flex-1">
             <p className="text-neutral-50 dark:text-neutral-500">
-              {translate('footer.links')}
+              {translate("footer.links")}
             </p>
-            <Link
-              to={`/`}
-              className={linkStyle}
-            >
-              {currentConference.title}{' '}
-              {dayjs(currentConference.dates[0]).format('YYYY')}
+            <Link to={`/`} className={linkStyle}>
+              {currentConference.title}{" "}
+              {dayjs(currentConference.dates[0]).format("YYYY")}
             </Link>
-            <Link
-              to="/about"
-              className={linkStyle}
-            >
-              {translate('nav.about')}
+            <Link to="/about" className={linkStyle}>
+              {translate("nav.about")}
             </Link>
-            <Link
-              to="/contact"
-              className={linkStyle}
-            >
-              {translate('nav.contact')}
+            <Link to="/contact" className={linkStyle}>
+              {translate("nav.contact")}
             </Link>
-            <Link
-              to="/give"
-              className={linkStyle}
-            >
-              {translate('nav.give')}
+            <Link to="/give" className={linkStyle}>
+              {translate("nav.give")}
             </Link>
-            <Link
-              to="/faq"
-              className={linkStyle}
-            >
-              {translate('nav.faq')}
+            <Link to="/faq" className={linkStyle}>
+              {translate("nav.faq")}
             </Link>
           </div>
         </div>
 
         <p>
-          {translate('footer.affiliation', {
+          {translate("footer.affiliation", {
             gyc: (
               <ExternalLink
                 href="https://gycweb.org"
