@@ -148,29 +148,34 @@ function PopupNav() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.2 }}
-                  className="bg-background text-foreground fixed inset-x-0 top-[60px] flex h-[calc(100%_-_60px)] flex-1 flex-col justify-center gap-10 p-4"
+                  className="bg-background text-foreground fixed inset-x-0 top-[60px] flex h-[calc(100%_-_60px)] flex-1 flex-col overflow-y-auto p-4"
                 >
-                  {[
-                    {
-                      to: `/${new Date().getFullYear()}`,
-                      label: translate("nav.home", {
-                        year: new Date().getFullYear(),
-                      }),
-                    },
-                    { to: "/about", label: translate("nav.about") },
-                    { to: "/team", label: translate("nav.team") },
-                    { to: "/contact", label: translate("nav.contact") },
-                    { to: "/give", label: translate("nav.give") },
-                    { to: "/volunteer", label: translate("nav.volunteer") },
-                  ].map((item, index) => (
-                    <NavItem
-                      key={item.to}
-                      to={item.to}
-                      revealDelay={index * STAGGER_STEP}
-                    >
-                      {item.label}
-                    </NavItem>
-                  ))}
+                  {/* `my-auto` centres the links when they fit and lets them
+                      scroll fully when they don't — flexbox `justify-center`
+                      clips the top of overflowing content past reach. */}
+                  <div className="my-auto flex flex-col gap-10">
+                    {[
+                      {
+                        to: `/${new Date().getFullYear()}`,
+                        label: translate("nav.home", {
+                          year: new Date().getFullYear(),
+                        }),
+                      },
+                      { to: "/about", label: translate("nav.about") },
+                      // { to: "/team", label: translate("nav.team") },
+                      { to: "/contact", label: translate("nav.contact") },
+                      { to: "/give", label: translate("nav.give") },
+                      { to: "/volunteer", label: translate("nav.volunteer") },
+                    ].map((item, index) => (
+                      <NavItem
+                        key={item.to}
+                        to={item.to}
+                        revealDelay={index * STAGGER_STEP}
+                      >
+                        {item.label}
+                      </NavItem>
+                    ))}
+                  </div>
                 </motion.nav>
               ) : null}
             </AnimatePresence>
