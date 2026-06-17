@@ -1,0 +1,304 @@
+commit 6b8d040d3cedc334bff0e6c4ecd692cc207ebbbf
+Author: cevr <seeve.c@gmail.com>
+Date:   Wed Jun 17 12:47:10 2026 -0400
+
+    test(conference)(section-skip): cover every skip + the present-but-empty hard-error
+    
+    Branch 4.2: pin the section-skip gating (4.1) from the outside and prove
+    items stay strict.
+    
+    conference-detail.test.tsx — a `section-skip` block renders to string with
+    each gate independently exercised: empty speakers/seminars omit only their
+    own section; an absent `mapEmbedUrl` drops the iframe but keeps the hotels
+    column (and vice-versa); both absent drops the whole `MapSection`; an absent
+    `registrationUrl`/`scheduleUrl` drops the register/schedule buttons. Then the
+    two launch shapes: `2026` (RegFox-only) = hero + register + FAQ with no empty
+    sections, and `2025` (cancelled) = hero + FAQ only, EN+FR.
+    
+    schema.test.ts — a `Hotel present-but-empty hard-error` block proves skip is
+    section-level, not item-level: a *present* hotel with a blank/absent required
+    bilingual `name`, or a half-filled present `note`, fails strict (publish)
+    decode; a fully-populated hotel publishes. Tolerance is for an absent list,
+    never a half-built item (the both-locales `Text` invariant lives in the
+    schema, never the component).
+
+diff --git a/app/lib/content/schema.test.ts b/app/lib/content/schema.test.ts
+index cba17af..2274d09 100644
+--- a/app/lib/content/schema.test.ts
++++ b/app/lib/content/schema.test.ts
+@@ -454,3 +454,89 @@ describe('DraftSiteContent (draft-lax / publish-strict)', () => {
+       expect(decodeDraft(malformed)._tag).toBe('Failure');
+     }));
+ });
++
++/**
++ * Append `extraHotel` to the /2024 conference's `hotels`. Typed `unknown`→record
++ * so a deliberately-empty / half-filled `Hotel` (the present-but-empty cases
++ * under test) can be constructed without satisfying the strict encoded `Hotel`
++ * shape.
++ */
++const withExtraHotel = (
++  encoded: typeof SiteContent.Encoded,
++  extraHotel: Record<string, unknown>,
++): unknown => {
++  const doc = encoded as unknown as {
++    conferences: ReadonlyArray<{
++      slug: string;
++      hotels: readonly unknown[];
++    }>;
++  };
++  return {
++    ...doc,
++    conferences: doc.conferences.map((c) =>
++      c.slug === '/2024'
++        ? { ...c, hotels: [...c.hotels, extraHotel] }
++        : c,
++    ),
++  };
++};
++
++/**
++ * Section-skip is section-LEVEL, never item-level (registration-launch Branch 4,
++ * settled #3, CONTEXT §"Section skip"): an *absent* `hotels` list omits the
++ * hotels column (proven render-side in `conference-detail.test.tsx`), but a
++ * *present* hotel with a blank required bilingual `name` is a hard `Text` decode
++ * error — the both-locales invariant lives in the schema, never the component, so
++ * the component can never receive half-filled content. These pin that the
++ * tolerance is for absence, not for half-filled presence.
++ */
++describe('Hotel present-but-empty hard-error (skip is section-level, items stay strict)', () => {
++  it.effect('a present hotel with a blank `name` locale fails strict decode (publish-invalid)', () =>
++    Effect.gen(function* () {
++      const encoded = yield* encodeStrict(defaultContent);
++      // An empty EN `name` locale: `Text` requires both locales non-empty, so a
++      // present-but-empty hotel name is rejected by publish.
++      const blankName = withExtraHotel(encoded, {
++        id: String(newListItemId()),
++        name: { en: '', fr: 'Hôtel' },
++      });
++      expect(decodeStrict(blankName)._tag).toBe('Failure');
++    }));
++
++  it.effect('a present hotel missing `name` entirely fails strict decode', () =>
++    Effect.gen(function* () {
++      const encoded = yield* encodeStrict(defaultContent);
++      // `name` is a required field on `Hotel` — a present hotel that omits it
++      // (only `id`) cannot publish. (Skip is for an absent *list*, never a
++      // half-built *item*.)
++      const noName = withExtraHotel(encoded, {
++        id: String(newListItemId()),
++      });
++      expect(decodeStrict(noName)._tag).toBe('Failure');
++    }));
++
++  it.effect('a present hotel with a half-filled bilingual `note` fails strict decode', () =>
++    Effect.gen(function* () {
++      const encoded = yield* encodeStrict(defaultContent);
++      // `note` is optional (`optionalKey`), but once PRESENT it is a strict
++      // `Text`: a present note with one empty locale is rejected — optionality is
++      // about absence, not about tolerating a half-filled present value.
++      const halfNote = withExtraHotel(encoded, {
++        id: String(newListItemId()),
++        name: { en: 'Lakeview Inn', fr: 'Auberge du Lac' },
++        note: { en: 'Group code: GYC', fr: '' },
++      });
++      expect(decodeStrict(halfNote)._tag).toBe('Failure');
++    }));
++
++  it.effect('a fully-populated present hotel decodes strictly (the inverse: complete items publish)', () =>
++    Effect.gen(function* () {
++      const encoded = yield* encodeStrict(defaultContent);
++      const complete = withExtraHotel(encoded, {
++        id: String(newListItemId()),
++        name: { en: 'Lakeview Inn', fr: 'Auberge du Lac' },
++        note: { en: 'Group code: GYC', fr: 'Code de groupe : GYC' },
++      });
++      expect(decodeStrict(complete)._tag).toBe('Success');
++    }));
++});
+diff --git a/app/routes/($lang)+/conference-detail.test.tsx b/app/routes/($lang)+/conference-detail.test.tsx
+index 16abcc6..e096bdf 100644
+--- a/app/routes/($lang)+/conference-detail.test.tsx
++++ b/app/routes/($lang)+/conference-detail.test.tsx
+@@ -253,3 +253,181 @@ describe('ConferenceDetail', () => {
+     expect(html).toContain(`src="${fullConference.mapEmbedUrl}"`);
+   });
+ });
++
++/**
++ * Section-skip (registration-launch Branch 4, Candidate 2, settled #3, CONTEXT
++ * §"Section skip"). Branch 4.1 gated every detail section on the boundary data
++ * `toConference` already emits — the document `Option` projected to
++ * `string | undefined`, and the list projected to `[]`. These tests pin the
++ * gating from the OUTSIDE (`prove-it-works`): with a field absent / a list empty,
++ * the section is genuinely gone from the rendered HTML — not merely visually
++ * hidden, not a dormant JSX comment. Each gate is exercised independently, then
++ * the two launch shapes (`2026` RegFox-only and `2025` cancelled) are pinned.
++ *
++ * Skip is section-LEVEL: a *present* item with a blank required bilingual field
++ * is a hard `Text` decode error upstream (proven in `schema.test.ts`), so the
++ * component never receives half-filled content — these tests omit whole sections,
++ * they never half-fill one.
++ */
++describe('ConferenceDetail section-skip', () => {
++  it('omits the speakers section when speakers is empty (seminars unaffected)', () => {
++    const html = renderConference({ ...fullConference, speakers: [] });
++
++    // The speakers heading and the speaker's name are both gone.
++    expect(html).not.toContain('Speakers');
++    expect(html).not.toContain('Matt Parra');
++    // Seminars is gated independently — still present.
++    expect(html).toContain('Seminars');
++    expect(html).toContain('Discipleship');
++  });
++
++  it('omits the seminars section when seminars is empty (speakers unaffected)', () => {
++    const html = renderConference({ ...fullConference, seminars: [] });
++
++    expect(html).not.toContain('Seminars');
++    expect(html).not.toContain('Discipleship');
++    // Speakers is gated independently — still present.
++    expect(html).toContain('Speakers');
++    expect(html).toContain('Matt Parra');
++  });
++
++  it('omits the map iframe when mapEmbedUrl is absent but keeps the hotels column', () => {
++    const html = renderConference({
++      ...fullConference,
++      mapEmbedUrl: undefined,
++    });
++
++    // The iframe (its `title="Map"` + the old fallback src) is gone…
++    expect(html).not.toContain('title="Map"');
++    expect(html).not.toContain('/maps/embed');
++    // …but the hotels half of the section survives (each half gated independently).
++    expect(html).toContain('Super 8 by Wyndham Kelowna BC');
++  });
++
++  it('omits the hotels column when hotels is empty but keeps the map iframe', () => {
++    const html = renderConference({ ...fullConference, hotels: [] });
++
++    expect(html).not.toContain('Super 8 by Wyndham Kelowna BC');
++    expect(html).not.toContain('Fairfield Inn');
++    // The map half survives.
++    expect(html).toContain(`src="${fullConference.mapEmbedUrl}"`);
++    expect(html).toContain('title="Map"');
++  });
++
++  it('omits the whole MapSection when neither a map embed nor hotels are present', () => {
++    const html = renderConference({
++      ...fullConference,
++      mapEmbedUrl: undefined,
++      hotels: [],
++    });
++
++    expect(html).not.toContain('title="Map"');
++    expect(html).not.toContain('Super 8 by Wyndham Kelowna BC');
++    // The hotels-description copy (the section's only other content) is gone too.
++    expect(html).not.toContain(translations.en['registration.hotels.description.facebook']);
++  });
++
++  it('omits the register button + RegistrationSection when registrationUrl is absent', () => {
++    const html = renderConference({
++      ...fullConference,
++      registrationUrl: undefined,
++    });
++
++    // The `RegistrationSection` (its title) and the RegFox href are both gone.
++    expect(html).not.toContain(translations.en['registration.register.title']);
++    expect(html).not.toContain('regfox.com');
++    expect(html).not.toContain(
++      'href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"',
++    );
++  });
++
++  it('omits the schedule button when scheduleUrl is absent', () => {
++    const html = renderConference({ ...fullConference, scheduleUrl: undefined });
++
++    expect(html).not.toContain(`href="${fullConference.scheduleUrl}"`);
++    expect(html).not.toContain('docs.google.com');
++  });
++
++  /**
++   * The `2026` launch shape: RegFox only (settled #9). The conference carries a
++   * `registrationUrl` and nothing else optional — so the page is hero + register
++   * button + FAQ, with NO empty Speakers / Seminars / Map / schedule sections.
++   * This is the Friday gate's render contract.
++   */
++  it('renders the 2026 RegFox-only shape: hero + register button + FAQ, no empty sections', () => {
++    const conference2026: Conference = {
++      ...fullConference,
++      slug: '2026',
++      speakers: [],
++      seminars: [],
++      scheduleUrl: undefined,
++      mapEmbedUrl: undefined,
++      hotels: [],
++      registrationUrl: 'https://gyccanada.regfox.com/gyc-canada-2026-speak',
++    };
++    const html = renderConference(conference2026);
++
++    // Present: hero, register button, FAQ.
++    expect(html).toContain(conference2026.hero.image.desktop);
++    expect(html).toContain(translations.en['registration.register.title']);
++    expect(html).toContain(
++      'href="https://gyccanada.regfox.com/gyc-canada-2026-speak"',
++    );
++    expect(html).toContain(translations.en['registration.faq.title']);
++    // Absent: every data-less section.
++    expect(html).not.toContain('Speakers');
++    expect(html).not.toContain('Seminars');
++    expect(html).not.toContain('title="Map"');
++    expect(html).not.toContain('Super 8 by Wyndham Kelowna BC');
++  });
++
++  /**
++   * The `2025` cancelled shape: every optional field absent (CONTEXT §Hiatus).
++   * The page collapses to hero + FAQ only — no register button, no schedule, no
++   * speakers / seminars / map / hotels. This proves a fully-empty conference
++   * renders cleanly through the shared module (it used to be a forked dead page).
++   */
++  it('renders the 2025 cancelled shape: hero + FAQ only', () => {
++    const conference2025: Conference = {
++      ...fullConference,
++      slug: '2025',
++      speakers: [],
++      seminars: [],
++      registrationUrl: undefined,
++      scheduleUrl: undefined,
++      mapEmbedUrl: undefined,
++      hotels: [],
++    };
++    const html = renderConference(conference2025);
++
++    // Present: hero (image + tagline) and FAQ.
++    expect(html).toContain(conference2025.hero.image.desktop);
++    expect(html).toContain(conference2025.tagline);
++    expect(html).toContain(translations.en['registration.faq.title']);
++    // Absent: everything data-driven.
++    expect(html).not.toContain('Speakers');
++    expect(html).not.toContain('Seminars');
++    expect(html).not.toContain(translations.en['registration.register.title']);
++    expect(html).not.toContain('regfox.com');
++    expect(html).not.toContain('title="Map"');
++    expect(html).not.toContain('Super 8 by Wyndham Kelowna BC');
++  });
++
++  it('renders the 2025 cancelled shape (hero + FAQ only) under /fr too', () => {
++    const conference2025: Conference = {
++      ...fullConference,
++      slug: '2025',
++      speakers: [],
++      seminars: [],
++      registrationUrl: undefined,
++      scheduleUrl: undefined,
++      mapEmbedUrl: undefined,
++      hotels: [],
++    };
++    const html = renderConference(conference2025, { lang: 'fr' });
++
++    expect(html).toContain(translations.fr['registration.faq.title']);
++    expect(html).not.toContain(translations.fr['registration.register.title']);
++    expect(html).not.toContain('title="Map"');
++  });
++});
