@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { Effect, Schema } from 'effect';
+import { DateTime, Effect, Layer, Option, Schema } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
 import { defaultRegistrationForm } from '../content/pages/defaults';
@@ -10,7 +10,7 @@ import {
   type RequestRuntime,
 } from '../effect/runtime';
 import type { RouteArgs } from '../effect/router-context';
-import { Storage } from '../storage.server';
+import { type ObjectHead, NotFound, Storage, StorageError } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
 
 import { registrationAction } from './registration-action';
@@ -185,6 +185,136 @@ describe('registrationAction', () => {
     expect(new Set(notified?.map((s) => s.id)).size).toBe(2);
     const storedIds = new Set(stored.map((entry) => entry.record.id));
     expect(notified?.every((s) => storedIds.has(s.id))).toBe(true);
+  });
+
+  it('a RETRY after a mid-loop persist failure does NOT duplicate the records that landed (idempotency)', async () => {
+    // A `Storage` over a SHARED `Map` (so a retry sees what the first attempt
+    // wrote) whose `put` fails on demand — to simulate the deep review's escalated
+    // partial write: registrant #1 lands, #2's put fails, the loop aborts.
+    const entries = new Map<string, { body: string | Uint8Array; contentType: string }>();
+    let failPutsAfter = Infinity;
+    let puts = 0;
+    const sharedStorage = Layer.sync(Storage.Service, () =>
+      Storage.Service.of({
+        get: Effect.fn('Storage.get')(function* (key: string) {
+          const object = entries.get(key);
+          if (object === undefined) return yield* new NotFound({ key });
+          return {
+            stream:
+              new Response(
+                typeof object.body === 'string'
+                  ? object.body
+                  : new Blob([object.body as Uint8Array<ArrayBuffer>]),
+              ).body ?? new ReadableStream<Uint8Array>(),
+            contentType: object.contentType,
+            size: new TextEncoder().encode(String(object.body)).byteLength,
+          };
+        }),
+        put: Effect.fn('Storage.put')(function* (
+          key: string,
+          body: string | Uint8Array,
+          contentType: string,
+        ) {
+          puts += 1;
+          if (puts > failPutsAfter) {
+            return yield* new StorageError({ key, op: 'put' });
+          }
+          entries.set(key, { body, contentType });
+        }),
+        head: Effect.fn('Storage.head')((key: string) =>
+          Effect.sync(() =>
+            entries.has(key)
+              ? Option.some<ObjectHead>({
+                  size: 0,
+                  contentType: 'application/json',
+                  lastModified: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+                  etag: `"${key}"`,
+                })
+              : Option.none<ObjectHead>(),
+          ),
+        ),
+        list: Effect.fn('Storage.list')((prefix?: string) =>
+          Effect.sync(() =>
+            [...entries.keys()]
+              .filter((key) => prefix === undefined || key.startsWith(prefix))
+              .map((key) => ({
+                key,
+                size: 0,
+                lastModified: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+              })),
+          ),
+        ),
+        delete: Effect.fn('Storage.delete')((key: string) =>
+          Effect.sync(() => {
+            entries.delete(key);
+          }),
+        ),
+      }),
+    );
+
+    const runtime = makeRequestRuntimeFromLayer(makeAppLayer(sharedStorage));
+    const action = registrationAction({ notify: () => Effect.void, success });
+
+    // Attempt 1: a group of 3 where the 2nd registrant's put fails mid-loop.
+    failPutsAfter = 1; // registrant #0 persists; #1's put fails → loop aborts.
+    const body = registrantsBody(3);
+    let thrown: unknown;
+    try {
+      await action(makeRegistrationArgs(runtime, body));
+    } catch (error) {
+      thrown = error;
+    }
+    // The StorageError aborts the submission — the runtime maps it to a 500, NOT a
+    // 302 success redirect (the submit did not succeed).
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(500);
+    // Exactly one record landed before the failure.
+    const argsForRead = makeRegistrationArgs(runtime, body);
+    const afterFailure = await listRegistrations(runtime, argsForRead);
+    expect(afterFailure.length).toBe(1);
+    const firstKey = afterFailure[0]?.key ?? '';
+
+    // Attempt 2: the user retries the SAME submission, storage now healthy.
+    failPutsAfter = Infinity;
+    const retryThrown = await action(makeRegistrationArgs(runtime, body)).catch(
+      (e) => e,
+    );
+    // Now it completes → redirect.
+    expect(retryThrown).toBeInstanceOf(Response);
+    expect((retryThrown as Response).status).toBe(302);
+
+    // The bucket holds EXACTLY 3 records, not 4 — registrant #0 was OVERWRITTEN in
+    // place (same content-addressed id), not duplicated, and #1/#2 completed.
+    const afterRetry = await listRegistrations(runtime, argsForRead);
+    expect(afterRetry.length).toBe(3);
+    // The record that survived attempt 1 kept its key (idempotent overwrite).
+    expect(afterRetry.map((e) => e.key)).toContain(firstKey);
+    // All three companies present exactly once.
+    const companies = afterRetry
+      .map((e) => e.record.payload['company'])
+      .sort();
+    expect(companies).toEqual([
+      'Booth Co. 0 Ltd.',
+      'Booth Co. 1 Ltd.',
+      'Booth Co. 2 Ltd.',
+    ]);
+  });
+
+  it('the same submission re-derives the SAME record ids (deterministic, content-addressed)', async () => {
+    const ids = async (): Promise<ReadonlyArray<string>> => {
+      const runtime = makeRequestRuntimeFromLayer(makeAppLayer(layerTest({})));
+      const action = registrationAction({ notify: () => Effect.void, success });
+      const body = registrantsBody(2);
+      await action(makeRegistrationArgs(runtime, body)).catch(() => {});
+      const stored = await listRegistrations(
+        runtime,
+        makeRegistrationArgs(runtime, body),
+      );
+      return stored.map((e) => e.record.id).sort();
+    };
+    // Two independent submissions of the identical payload yield the identical
+    // ids — the id is derived from the submission content + index, not random.
+    expect(await ids()).toEqual(await ids());
   });
 
   it('a notify failure still leaves BOTH registration records on the bucket (persist-first)', async () => {
