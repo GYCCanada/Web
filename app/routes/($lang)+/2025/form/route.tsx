@@ -1,12 +1,17 @@
-import { Effect } from 'effect';
 import { type MetaFunction, useActionData, useLoaderData } from 'react-router';
 
 import { Content } from '~/lib/content.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
-import { routeAction, routeHandler } from '~/lib/effect/route';
+import { routeHandler } from '~/lib/effect/route';
 import { getLocale } from '~/lib/localization/localization';
 
+import { action } from '../../registration-route';
 import { RegistrationForm } from '../../registration-form';
+
+// The registration server action (net-new in Branch 7.3) is shared across all
+// three year shells — RegFox carries the live channel (settled #9), so the
+// on-site persist-then-notify path is one configured action, not three forks.
+export { action };
 
 export const meta: MetaFunction<typeof loader> = ({ params }) => {
   const locale = getLocale(params);
@@ -41,11 +46,6 @@ export const loader = routeHandler(function* () {
   return { conference, definition };
 });
 
-// Registration submission is a deliberate no-op (product decision pending).
-export const action = routeAction(function* () {
-  yield* Effect.void;
-});
-
 export default function Registration2025() {
   const { definition } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -53,7 +53,7 @@ export default function Registration2025() {
     <RegistrationForm
       year={2025}
       definition={definition}
-      actionData={actionData}
+      actionData={actionData?.result}
     />
   );
 }

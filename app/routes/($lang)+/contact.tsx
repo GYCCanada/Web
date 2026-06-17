@@ -77,14 +77,17 @@ const contactLine = (decoded: DecodedForm): string => {
   return email;
 };
 
-// The contact action is the generic skeleton (Branch 6.2): `Content.getForm` →
-// `decodeForm` → `notify` → `toast.redirect`. The form-specific part is the
-// notification — the same mailer body the hand-tuned action built, now over the
-// engine's decoded payload.
+// The contact action is the generic skeleton (Branch 6.2; persist-then-notify
+// wired in Branch 7.3): `Content.getForm` → `decodeForm` → `Submissions.persist`
+// → `notify` → `toast.redirect`. The form-specific part is the notification — the
+// same mailer body the hand-tuned action built, now over the PERSISTED record's
+// payload (the durable `submissions/contact/<id>.json` object is already written
+// when `notify` runs, so a mailer failure cannot lose the record).
 export const action = formAction({
   form: "contact",
-  notify: (decoded) =>
+  notify: (submission) =>
     Effect.gen(function* () {
+      const decoded = submission.payload;
       const mailer = yield* Mailer.Service;
       const name = str(decoded, "name");
       const result = yield* Effect.exit(

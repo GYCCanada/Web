@@ -1,37 +1,41 @@
 import { describe, expect, it } from 'bun:test';
-import { Effect } from 'effect';
+import { Effect, ManagedRuntime } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
 import { formValidationError } from '../effect/errors';
-import { makeRequestRuntime } from '../effect/runtime';
-import type { RouteArgs } from '../effect/router-context';
+import { makeAppLayer, makeRequestRuntimeFromLayer } from '../effect/runtime';
+import { ReactRouterContext, type RouteArgs } from '../effect/router-context';
+import { Storage } from '../storage.server';
+import { layerTest } from '../storage.test-helper';
 
 import { formAction } from './action';
-import type { DecodedForm } from './decode';
+import type { Submission } from './submission';
 
 /**
- * Branch 6.2 — the generic action skeleton.
+ * Branch 6.2 — the generic action skeleton; Branch 7.3 — persist-then-notify.
  *
- * `formAction({ form, notify, success })` collapses the `parse → decode → notify
- * → toast.redirect` pipeline the three form routes triplicate into one wrapped
+ * `formAction({ form, notify, success })` collapses the `parse → decode → persist
+ * → notify → toast.redirect` pipeline the form routes triplicate into one wrapped
  * route action. These tests pin the pipeline WIRING (`prove-it-works`) — the
- * per-kind decode semantics are covered exhaustively in `decode.test.ts`, so here
- * the form is `contact` (its graph populated in 6.3) driven by a minimal VALID
- * contact payload. Every form now carries a populated graph (registration's
- * migrated in 6.5), so the skeleton is isolated with a payload that decodes rather
- * than the old empty-graph fixture. Each form is exercised end-to-end by its own
- * equivalence harness; here we pin only the skeleton's own wiring:
- *   - a valid submission runs `notify` with the decoded payload, then redirects
- *     with the success toast (so a migrated route's success path is unchanged);
+ * per-kind decode semantics are covered exhaustively in `decode.test.ts` and the
+ * durable-write contract in `submissions.server.test.ts`, so here the form is
+ * `contact` driven by a minimal VALID contact payload. We pin only the skeleton's
+ * own wiring:
+ *   - a valid submission PERSISTS the durable record, then runs `notify` with the
+ *     STORED `Submission` (Branch 7.3 — the email references the persisted record),
+ *     then redirects with the success toast;
  *   - a `notify` failure (e.g. a mailer error mapped to a form-level key) aborts
- *     the redirect and surfaces as a form error report — the record-vs-notify
- *     separation Branch 7 builds the persist step in front of;
+ *     the redirect and surfaces as a form error report — and the record is ALREADY
+ *     persisted (persist ran first), the record-vs-notify separation settled #8
+ *     demands;
  *   - the honeypot short-circuit (inherited from `routeFormAction`) skips the
- *     body entirely.
+ *     body entirely (no persist, no notify).
  *
- * The action runs through the real request runtime (`makeRequestRuntime`), which
- * wires `Content` (reading the bundled default form definition), `Toast`, and the
- * `Mailer` — the same layers the live server provides.
+ * The action runs through the real request runtime, but over `makeAppLayer` with
+ * an IN-MEMORY `Storage` (`layerTest`) so the `Submissions.persist` write
+ * succeeds end-to-end — a bucket-less production `Storage.layerOptional` would
+ * fail the write. `Content` (the bundled default form definition), `Toast`, and
+ * the `Mailer` are the same layers the live server provides.
  */
 
 const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
@@ -43,7 +47,7 @@ const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
   });
   const context = new RouterContextProvider();
-  context.runtime = makeRequestRuntime();
+  context.runtime = makeRequestRuntimeFromLayer(makeAppLayer(layerTest({})));
   return {
     request,
     url: new URL(url),
@@ -54,13 +58,13 @@ const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
 };
 
 describe('formAction', () => {
-  it('runs notify with the decoded payload, then redirects with the success toast', async () => {
-    let notified: DecodedForm | undefined;
+  it('persists, runs notify with the stored record, then redirects with the success toast', async () => {
+    let notified: Submission | undefined;
     const action = formAction({
       form: 'contact',
-      notify: (decoded) =>
+      notify: (submission) =>
         Effect.sync(() => {
-          notified = decoded;
+          notified = submission;
         }),
       success: {
         title: 'contact.form.success.title',
@@ -90,8 +94,11 @@ describe('formAction', () => {
     expect(response.headers.get('location')).toBe('/contact');
     // The success toast was flashed (the set-cookie carries the toast session).
     expect(response.headers.get('set-cookie')).toContain('toast');
-    // notify ran with the decoded payload.
-    expect(notified).toEqual({
+    // notify ran with the STORED record: a real branded id + form, and the
+    // decoded payload as the source of truth the email references (Branch 7.3).
+    expect(notified?.form).toBe('contact');
+    expect(typeof notified?.id).toBe('string');
+    expect(notified?.payload).toEqual({
       method: 'email',
       name: 'Ada',
       email: 'ada@example.com',
@@ -109,12 +116,12 @@ describe('formAction', () => {
   // `parseSubmission` (no `stripEmptyValues`), so a present `''` is kept, exactly
   // as the browser sends it.
   it('the rendered method=phone payload (email field absent) decodes to success', async () => {
-    let notified: DecodedForm | undefined;
+    let notified: Submission | undefined;
     const action = formAction({
       form: 'contact',
-      notify: (decoded) =>
+      notify: (submission) =>
         Effect.sync(() => {
-          notified = decoded;
+          notified = submission;
         }),
       success: {
         title: 'contact.form.success.title',
@@ -138,7 +145,7 @@ describe('formAction', () => {
 
     expect(thrown).toBeInstanceOf(Response);
     expect((thrown as Response).status).toBe(302);
-    expect(notified).toEqual({
+    expect(notified?.payload).toEqual({
       method: 'phone',
       name: 'Ada',
       phone: '123-456-7890',
@@ -197,6 +204,56 @@ describe('formAction', () => {
 
     expect(result.status).toBe('error');
     expect(result.result.error?.formErrors).toEqual(['contact.form.error']);
+  });
+
+  // settled #8 — persist-FIRST, notify-second: a notify failure provably cannot
+  // lose the record, because `Submissions.persist` ran and returned its durable
+  // object BEFORE `notify`. We build ONE app layer over a single in-memory bucket,
+  // run the action (whose notify fails) through it, then read that SAME bucket back
+  // through the same runtime and find the persisted `submissions/contact/<id>.json`.
+  it('a notify failure still leaves the persisted record on the bucket (persist-first)', async () => {
+    const storage = layerTest({});
+    const appLayer = makeAppLayer(storage);
+    const runtime = ManagedRuntime.make(appLayer);
+
+    const args = makeFormArgs({
+      method: 'email',
+      name: 'Persisted Ada',
+      email: 'ada@example.com',
+      message: 'hi',
+    });
+    // Run against the SAME runtime (so the readback sees the same in-memory
+    // bucket), providing `ReactRouterContext` exactly as the production runtime
+    // does.
+    args.context.runtime = {
+      run: (routeArgs, effect) =>
+        runtime.runPromise(
+          effect.pipe(Effect.provideService(ReactRouterContext, routeArgs)),
+        ),
+    };
+
+    const action = formAction({
+      form: 'contact',
+      notify: () =>
+        Effect.fail(formValidationError({ formErrors: ['contact.form.error'] })),
+      success: {
+        title: 'contact.form.success.title',
+        description: 'contact.form.success.description',
+      },
+    });
+
+    const result = await action(args);
+    expect(result.status).toBe('error');
+
+    // The record is on the bucket despite the notify failure.
+    const listed = await runtime.runPromise(
+      Effect.gen(function* () {
+        const s = yield* Storage.Service;
+        return yield* s.list('submissions/contact/');
+      }),
+    );
+    expect(listed.length).toBe(1);
+    expect(listed[0]?.key).toMatch(/^submissions\/contact\/.+\.json$/);
   });
 
   it('skips the body (no notify) when the honeypot is filled', async () => {

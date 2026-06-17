@@ -4,6 +4,7 @@ import { data, redirect } from 'react-router';
 import { AdminDisabled, Auth, BadPassword, Unauthorized } from '~/lib/auth.server';
 import { Content } from '~/lib/content.server';
 import { DraftEditor } from '~/lib/content/draft-editor.server';
+import { Submissions } from '~/lib/forms/submissions.server';
 import { Env } from '~/lib/env.server';
 import { Sendgrid, SendgridDisabled, SendgridError } from '~/lib/sendgrid.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
@@ -25,6 +26,7 @@ export type AppServices =
   | Sendgrid.Service
   | Content.Service
   | DraftEditor.Service
+  | Submissions.Service
   | Auth.Service
   | Storage.Service
   | Toast;
@@ -59,24 +61,45 @@ export type AppError =
 // `Auth` is likewise optional everywhere: with `ADMIN_PASSWORD` unset its layer
 // builds a disabled instance (admin 404s), so it never fails to build either.
 //
-// `DraftEditor.layer` (the `/admin` editor's write pipeline) is layered ON TOP
-// of this base via `provideMerge`, so it consumes the SAME exposed
-// `Content.Service` (its `publish` busts the very cache the public read serves
-// from) and the SAME exposed `Storage.Service` the editor route reads/writes —
-// no second Content/Storage instance to coordinate.
-const BaseLayer = Layer.mergeAll(
-  Mailer.layer,
-  Sendgrid.layer,
-  Toast.layer,
-  Content.defaultLayer,
-  Storage.layerOptional,
-  Auth.layer,
-);
-const AppLayer = DraftEditor.layer.pipe(
-  Layer.provideMerge(BaseLayer),
-  Layer.provideMerge(Env.layer),
-);
-const AppRuntime = ManagedRuntime.make(AppLayer);
+// `DraftEditor.layer` (the `/admin` editor's write pipeline) and
+// `Submissions.layer` (the form-action persist step) are layered ON TOP of this
+// base via `provideMerge`, so each consumes the SAME exposed `Content.Service`
+// (DraftEditor's `publish` busts the very cache the public read serves from;
+// Submissions reads each form's CMS-editable definition through it) and the SAME
+// exposed `Storage.Service` the editor route reads/writes and the persisted
+// `submissions/<form>/<id>.json` objects land in — no second Content/Storage
+// instance to coordinate.
+/**
+ * Build the full app layer over a chosen `Storage` layer. Production uses
+ * `Storage.layerOptional` (bucket-less it reports `NotFound`/`StorageError`,
+ * never failing to build). A test can pass an in-memory `Storage` layer (the
+ * `Map`-backed `layerTest`) so a code path that WRITES — the form-action
+ * `Submissions.persist` step — can be exercised end-to-end through the real
+ * request runtime, since a bucket-less write would otherwise fail. The single
+ * exposed `Storage.Service` is shared by `Content`, `DraftEditor`, and
+ * `Submissions` (no second instance to coordinate).
+ */
+export const makeAppLayer = (
+  storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
+) => {
+  const baseLayer = Layer.mergeAll(
+    Mailer.layer,
+    Sendgrid.layer,
+    Toast.layer,
+    Content.defaultLayer,
+    storageLayer,
+    Auth.layer,
+  );
+  return Layer.mergeAll(DraftEditor.layer, Submissions.layer).pipe(
+    Layer.provideMerge(baseLayer),
+    Layer.provideMerge(Env.layer),
+  );
+};
+
+/** The fully-composed app layer (its error channel is `Env.layer`'s `ConfigError`). */
+export type AppLayer = ReturnType<typeof makeAppLayer>;
+
+const AppRuntime = ManagedRuntime.make(makeAppLayer(Storage.layerOptional));
 
 const isResponse = (v: unknown): v is Response =>
   typeof v === 'object' && v !== null && v instanceof Response;
@@ -126,19 +149,42 @@ export interface RequestRuntime {
   ) => Promise<A>;
 }
 
-const runWithContext = <A, E, R extends AppServices | ReactRouterContext>(
-  args: RouteArgs,
-  effect: Effect.Effect<A, E, R>,
-): Promise<A> => {
-  const provided = effect.pipe(
-    Effect.provideService(ReactRouterContext, args),
-  ) as Effect.Effect<A, E, AppServices>;
-  return AppRuntime.runPromiseExit(provided).then((exit) => {
-    if (Exit.isSuccess(exit)) return exit.value;
-    return throwCauseError(exit.cause);
-  });
-};
+/**
+ * The runtime any `RequestRuntime` runs against — `AppRuntime` in production. Its
+ * error channel is `Env.layer`'s `ConfigError` (the `Config` reads at layer
+ * construction), surfaced when a required env var is missing.
+ */
+type AppManagedRuntime = ManagedRuntime.ManagedRuntime<
+  Layer.Success<AppLayer>,
+  Layer.Error<AppLayer>
+>;
+
+const runWithContext =
+  (runtime: AppManagedRuntime) =>
+  <A, E, R extends AppServices | ReactRouterContext>(
+    args: RouteArgs,
+    effect: Effect.Effect<A, E, R>,
+  ): Promise<A> => {
+    const provided = effect.pipe(
+      Effect.provideService(ReactRouterContext, args),
+    ) as Effect.Effect<A, E, AppServices>;
+    return runtime.runPromiseExit(provided).then((exit) => {
+      if (Exit.isSuccess(exit)) return exit.value;
+      return throwCauseError(exit.cause);
+    });
+  };
+
+/**
+ * Build a {@link RequestRuntime} over a chosen app layer, sharing the runtime's
+ * error → `Response` mapping. Production calls {@link makeRequestRuntime} (the
+ * global `AppRuntime`); a test builds one over `makeAppLayer(layerTest(...))` so
+ * a route/form action that writes (`Submissions.persist`) runs end-to-end against
+ * an in-memory bucket through the real pipeline.
+ */
+export const makeRequestRuntimeFromLayer = (layer: AppLayer): RequestRuntime => ({
+  run: runWithContext(ManagedRuntime.make(layer)),
+});
 
 export const makeRequestRuntime = (): RequestRuntime => ({
-  run: runWithContext,
+  run: runWithContext(AppRuntime),
 });
