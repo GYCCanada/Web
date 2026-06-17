@@ -6,6 +6,7 @@ import {
   AssetKey,
   ConferenceSlug,
   DateRange,
+  DraftSiteContent,
   HexColour,
   IsoDate,
   ListItemId,
@@ -280,4 +281,97 @@ describe('branded primitives carry their nominal brand', () => {
       'YOQ7GeACwaTCKjY6y3HAV',
     ]);
   });
+});
+
+/**
+ * `DraftSiteContent` (ADR 0006, registration-launch Branch 2) is the laxer
+ * variant the `/admin` editor saves and reopens: a freshly-added list item is
+ * draft-valid carrying only its `id`, while publish enforces the strict
+ * `SiteContent`. These pin the two halves of that contract — a stub item decodes
+ * as a draft but NOT as a publish, and a *present* malformed value (half a
+ * bilingual locale) is rejected even by the draft (only *absence* is tolerated).
+ */
+const encodeStrict = Schema.encodeUnknownEffect(SiteContent);
+const decodeDraft = Schema.decodeUnknownResult(DraftSiteContent);
+const decodeStrict = Schema.decodeUnknownResult(SiteContent);
+
+/**
+ * The encoded defaults as a plain JSON object, with `extraSpeaker` appended to
+ * the /2024 speakers. Typed `unknown`→record so a deliberately-partial /
+ * malformed speaker (the cases under test) can be constructed without satisfying
+ * the strict encoded `Speaker` shape.
+ */
+const withExtraSpeaker = (
+  encoded: typeof SiteContent.Encoded,
+  extraSpeaker: Record<string, unknown>,
+): unknown => {
+  const doc = encoded as unknown as {
+    conferences: ReadonlyArray<{
+      slug: string;
+      speakers: readonly unknown[];
+    }>;
+  };
+  return {
+    ...doc,
+    conferences: doc.conferences.map((c) =>
+      c.slug === '/2024'
+        ? { ...c, speakers: [...c.speakers, extraSpeaker] }
+        : c,
+    ),
+  };
+};
+
+describe('DraftSiteContent (draft-lax / publish-strict)', () => {
+  it.effect('a freshly-added stub item (id only) decodes as a DRAFT', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeStrict(defaultContent);
+      const draft = withExtraSpeaker(encoded, { id: String(newListItemId()) });
+      expect(decodeDraft(draft)._tag).toBe('Success');
+    }));
+
+  it.effect('the same stub item is REJECTED by the strict publish schema', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeStrict(defaultContent);
+      const draft = withExtraSpeaker(encoded, { id: String(newListItemId()) });
+      // The added speaker has no required `name`/`activity`/`bio`/`photo` —
+      // publish (strict `SiteContent`) rejects it (ADR 0006: an empty required
+      // field blocks publish, not draft save).
+      expect(decodeStrict(draft)._tag).toBe('Failure');
+    }));
+
+  it.effect('a complete document satisfies BOTH the draft and the strict schema', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeStrict(defaultContent);
+      expect(decodeDraft(encoded)._tag).toBe('Success');
+      expect(decodeStrict(encoded)._tag).toBe('Success');
+    }));
+
+  it.effect('a half-filled bilingual field IS draft-valid (in-progress edit), but publish-invalid', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeStrict(defaultContent);
+      // A present `name` with an empty FR locale is an *in-progress* edit — the
+      // admin typed EN, not yet FR. The draft tolerates it (ADR 0006: an
+      // incomplete field blocks publish, not save) but publish (strict `Text`,
+      // both locales non-empty) rejects it.
+      const inProgress = withExtraSpeaker(encoded, {
+        id: String(newListItemId()),
+        name: { en: 'Jane', fr: '' },
+      });
+      expect(decodeDraft(inProgress)._tag).toBe('Success');
+      expect(decodeStrict(inProgress)._tag).toBe('Failure');
+    }));
+
+  it.effect('a present but MALFORMED leaf (a non-AssetKey image key) is rejected even as a draft', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeStrict(defaultContent);
+      // The draft tolerates *absence*, never a malformed *typed* value: a present
+      // image `key` must still be a valid `AssetKey` (an upload always produces
+      // one). A path-traversal key is rejected even in a draft
+      // (`make-impossible-states-unrepresentable` holds for what IS set).
+      const malformed = withExtraSpeaker(encoded, {
+        id: String(newListItemId()),
+        photo: { key: '../../etc/passwd' },
+      });
+      expect(decodeDraft(malformed)._tag).toBe('Failure');
+    }));
 });

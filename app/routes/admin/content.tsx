@@ -27,7 +27,8 @@ import {
   uploadedImageKey,
   type Json,
 } from '~/lib/content/admin-form';
-import { SiteContent } from '~/lib/content/schema';
+import { collectListOps, listOpFieldName } from '~/lib/content/list-edit';
+import { DraftSiteContent, newListItemId } from '~/lib/content/schema';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction, routeHandler } from '~/lib/effect/route';
 import { Storage } from '~/lib/storage.server';
@@ -57,11 +58,13 @@ export const headers = adminSecurityHeaders;
  */
 
 // `encodeDocument` yields the encoded object the React view renders from the
-// loader's `AdminContent`. The merge/decode/re-encode/store choreography now
-// lives in `DraftEditor`; the route only encodes for display.
-const encodeDocument = Schema.encodeUnknownEffect(SiteContent);
+// loader's `AdminContent`. It encodes the DRAFT shape (`DraftSiteContent`): a
+// reopened draft may carry a freshly-added list item holding only its `id`
+// (ADR 0006), so the view must render partial items. The merge/decode/re-encode/
+// store choreography lives in `DraftEditor`; the route only encodes for display.
+const encodeDocument = Schema.encodeUnknownEffect(DraftSiteContent);
 
-type EncodedDocument = typeof SiteContent.Encoded;
+type EncodedDocument = typeof DraftSiteContent.Encoded;
 
 type ActionResult =
   | { readonly ok: true }
@@ -165,6 +168,26 @@ export const action = routeAction(function* () {
     return redirect(
       `/admin/content?status=${encodeURIComponent(`Image uploaded: ${key}`)}`,
     );
+  }
+
+  // ---- list op (add / remove / reorder) ------------------------------------
+  // A per-list Add / Remove / reorder control submits `list:<path>:<kind>` fields
+  // (ADR 0006). The route parses them into `ListOp`s; `DraftEditor.applyListOps`
+  // performs the id-keyed structural edit on the draft and auto-saves it (settled
+  // #10) so a freshly-added item's id exists server-side before a photo upload /
+  // field edit targets it. An "Add" appends an item carrying only its id — draft-
+  // valid, publish-invalid until its bilingual fields are filled (ADR 0006).
+  if (intent === 'list-op') {
+    const ops = collectListOps(form.entries());
+    if (ops.length === 0) {
+      return Response.json(
+        { ok: false, error: 'No list change to apply.', issues: [] },
+        { status: 400 },
+      );
+    }
+    const applied = yield* editor.applyListOps(siteScope, ops).pipe(Effect.result);
+    if (applied._tag === 'Failure') return issueResponse(applied.failure);
+    return redirect('/admin/content?status=List%20updated.');
   }
 
   if (intent !== 'save-draft' && intent !== 'publish') {
@@ -339,6 +362,139 @@ function Section({
   );
 }
 
+/**
+ * Submit a single id-keyed list op (ADR 0006) out-of-band via `useFetcher`,
+ * exactly like `ImageUpload` — *not* a nested `<form>` (the editor's main
+ * `<Form>` wraps every section, and HTML forbids nested forms). The button
+ * builds a one-off `FormData` carrying `intent=list-op` and the
+ * `list:<path>:<kind>` control field, hands it to `fetcher.submit`, and the
+ * action applies the op and redirects, revalidating the loader so the changed
+ * list re-renders.
+ *
+ * The `value` carries the op payload: an item `id` for add/remove, or the
+ * comma-joined surviving ids for a reorder. An "Add" mints a fresh `ListItemId`
+ * client-side so the appended item's id is known before submit; the server
+ * appends an item carrying only that id (draft-valid, publish-invalid until
+ * edited).
+ */
+function ListOpButton({
+  listPath,
+  kind,
+  value,
+  label,
+  variant = 'default',
+  disabled = false,
+}: {
+  readonly listPath: string;
+  readonly kind: 'add' | 'remove' | 'reorder';
+  readonly value: string;
+  readonly label: string;
+  readonly variant?: 'default' | 'add' | 'danger';
+  readonly disabled?: boolean;
+}) {
+  const fetcher = useFetcher<ActionResult>();
+  const pending = fetcher.state !== 'idle';
+  const className =
+    variant === 'add'
+      ? 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-emerald-300 bg-emerald-50 px-3 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50'
+      : variant === 'danger'
+        ? 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-rose-300 px-3 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50'
+        : 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-neutral-300 px-2 text-xs font-medium hover:bg-neutral-100 disabled:opacity-50';
+
+  const submit = () => {
+    const data = new FormData();
+    data.set('intent', 'list-op');
+    data.set(listOpFieldName(listPath, kind), value);
+    void fetcher.submit(data, { method: 'post' });
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={submit}
+      disabled={disabled || pending}
+      className={className}
+    >
+      {pending ? '…' : label}
+    </button>
+  );
+}
+
+/**
+ * The per-item structural controls (ADR 0006): move up / down (a reorder
+ * submitting the full new id order so a partial/stale order never drops an item)
+ * and remove. Rendered next to each list item; the `ids` is the list's current
+ * id order so a move computes the swapped permutation client-side.
+ */
+function ItemControls({
+  listPath,
+  ids,
+  index,
+}: {
+  readonly listPath: string;
+  readonly ids: readonly string[];
+  readonly index: number;
+}) {
+  const id = ids[index];
+  if (id === undefined) return null;
+  // Swap two positions to compute the reorder permutation, guarding the bounds
+  // so the disabled edge buttons (first item's "↑", last item's "↓") never
+  // index past the array; out of range, the order is returned unchanged.
+  const swapped = (a: number, b: number): string => {
+    const aId = ids[a];
+    const bId = ids[b];
+    if (aId === undefined || bId === undefined) return ids.join(',');
+    const next = [...ids];
+    next[a] = bId;
+    next[b] = aId;
+    return next.join(',');
+  };
+  return (
+    <div className="flex items-center gap-1">
+      <ListOpButton
+        listPath={listPath}
+        kind="reorder"
+        value={index > 0 ? swapped(index, index - 1) : ids.join(',')}
+        label="↑"
+        disabled={index === 0}
+      />
+      <ListOpButton
+        listPath={listPath}
+        kind="reorder"
+        value={index < ids.length - 1 ? swapped(index, index + 1) : ids.join(',')}
+        label="↓"
+        disabled={index === ids.length - 1}
+      />
+      <ListOpButton
+        listPath={listPath}
+        kind="remove"
+        value={id}
+        label="Remove"
+        variant="danger"
+      />
+    </div>
+  );
+}
+
+/** The "Add item" control: mints a fresh id client-side and appends an empty item. */
+function AddItemButton({
+  listPath,
+  label,
+}: {
+  readonly listPath: string;
+  readonly label: string;
+}) {
+  return (
+    <ListOpButton
+      listPath={listPath}
+      kind="add"
+      value={newListItemId()}
+      label={label}
+      variant="add"
+    />
+  );
+}
+
 export default function AdminContentEditor() {
   const { document, source, bucketConfigured } = useLoaderData<typeof loader>();
   const actionData = useActionData<ActionResult>();
@@ -350,6 +506,11 @@ export default function AdminContentEditor() {
       ? null
       : new URLSearchParams(window.location.search).get('status');
 
+  // Items carry an `id` (ADR 0006), and a freshly-added item is draft-valid with
+  // only its `id` — its bilingual content fields are absent until edited. The
+  // view therefore treats every per-item content field as optional and supplies
+  // empty defaults so a partial item still renders (and stays editable so the
+  // admin can fill it in and publish).
   const conferences = (document.conferences ?? []) as ReadonlyArray<{
     slug: string;
     themeName: { en: string; fr: string };
@@ -363,17 +524,21 @@ export default function AdminContentEditor() {
       mobile: { key: { en: string; fr: string }; alt: { en: string; fr: string } };
     };
     speakers: ReadonlyArray<{
-      name: { en: string; fr: string };
-      activity: { en: string; fr: string };
-      bio: { en: string; fr: string };
-      photo: { key: string; alt: { en: string; fr: string } };
+      id: string;
+      name?: { en: string; fr: string };
+      activity?: { en: string; fr: string };
+      bio?: { en: string; fr: string };
+      photo?: { key: string; alt: { en: string; fr: string } };
     }>;
   }>;
   const team = (document.team ?? []) as ReadonlyArray<{
-    name: string;
-    position: string;
-    photo: { key: string; alt: { en: string; fr: string } };
+    id: string;
+    name?: string;
+    position?: string;
+    photo?: { key: string; alt: { en: string; fr: string } };
   }>;
+
+  const emptyText = { en: '', fr: '' } as const;
   const translations = (document.translations ?? { en: {}, fr: {} }) as {
     en: Readonly<Record<string, string>>;
     fr: Readonly<Record<string, string>>;
@@ -496,51 +661,73 @@ export default function AdminContentEditor() {
                 </div>
               ))}
             </fieldset>
-            {conference.speakers.length > 0 && (
-              <fieldset className="space-y-3">
-                <legend className="text-sm font-medium text-neutral-800">
-                  Speakers
-                </legend>
-                {conference.speakers.map((speaker, si) => (
-                  <div key={si} className="space-y-2 rounded-md bg-neutral-50 p-3">
-                    <Bilingual
-                      label="Name"
-                      name={`conferences.${ci}.speakers.${si}.name`}
-                      value={speaker.name}
-                    />
-                    <Bilingual
-                      label="Activity"
-                      name={`conferences.${ci}.speakers.${si}.activity`}
-                      value={speaker.activity}
-                    />
-                    <Bilingual
-                      label="Bio"
-                      name={`conferences.${ci}.speakers.${si}.bio`}
-                      value={speaker.bio}
-                      multiline
-                    />
-                    <ImageUpload
-                      keyPath={`conferences.${ci}.speakers.${si}.photo.key`}
-                      currentKey={speaker.photo.key}
+            <fieldset className="space-y-3">
+              <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
+                <span>Speakers</span>
+                <AddItemButton
+                  listPath={`conferences.${ci}.speakers`}
+                  label="+ Add speaker"
+                />
+              </legend>
+              {conference.speakers.map((speaker, si) => (
+                <div
+                  key={speaker.id}
+                  className="space-y-2 rounded-md bg-neutral-50 p-3"
+                >
+                  <div className="flex items-center justify-end">
+                    <ItemControls
+                      listPath={`conferences.${ci}.speakers`}
+                      ids={conference.speakers.map((s) => s.id)}
+                      index={si}
                     />
                   </div>
-                ))}
-              </fieldset>
-            )}
+                  <Bilingual
+                    label="Name"
+                    name={`conferences.${ci}.speakers.${si}.name`}
+                    value={speaker.name ?? emptyText}
+                  />
+                  <Bilingual
+                    label="Activity"
+                    name={`conferences.${ci}.speakers.${si}.activity`}
+                    value={speaker.activity ?? emptyText}
+                  />
+                  <Bilingual
+                    label="Bio"
+                    name={`conferences.${ci}.speakers.${si}.bio`}
+                    value={speaker.bio ?? emptyText}
+                    multiline
+                  />
+                  <ImageUpload
+                    keyPath={`conferences.${ci}.speakers.${si}.photo.key`}
+                    currentKey={speaker.photo?.key ?? ''}
+                  />
+                </div>
+              ))}
+            </fieldset>
           </Section>
         ))}
 
         <Section title="Team">
+          <div className="flex items-center justify-end">
+            <AddItemButton listPath="team" label="+ Add team member" />
+          </div>
           {team.map((member, ti) => (
-            <div key={ti} className="space-y-2 rounded-md bg-neutral-50 p-3">
+            <div key={member.id} className="space-y-2 rounded-md bg-neutral-50 p-3">
+              <div className="flex items-center justify-end">
+                <ItemControls
+                  listPath="team"
+                  ids={team.map((m) => m.id)}
+                  index={ti}
+                />
+              </div>
               <Text
                 label="Name"
                 name={`team.${ti}.name`}
-                defaultValue={member.name}
+                defaultValue={member.name ?? ''}
               />
               <ImageUpload
                 keyPath={`team.${ti}.photo.key`}
-                currentKey={member.photo.key}
+                currentKey={member.photo?.key ?? ''}
               />
             </div>
           ))}

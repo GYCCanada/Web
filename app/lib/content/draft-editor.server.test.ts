@@ -20,7 +20,10 @@ import {
 import { DraftEditor, scopeKeys, siteScope } from './draft-editor.server';
 import { defaultContent } from './defaults';
 import { SiteContent } from './schema';
-import type { SiteContent as SiteContentType } from './schema';
+import type {
+  DraftSiteContent as DraftSiteContentType,
+  SiteContent as SiteContentType,
+} from './schema';
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(SiteContent));
 // Decode the encoded OBJECT a DraftEditor write returns (not a JSON string).
@@ -193,8 +196,14 @@ const readStoredText = (key: string) =>
     return yield* Effect.promise(() => new Response(object.stream).text());
   });
 
-/** The 2026 conference's theme name (EN) on a decoded document. */
-const themeName2026 = (doc: SiteContentType): string | undefined =>
+/**
+ * The 2026 conference's theme name (EN) on a decoded document — accepts the
+ * laxer draft document too (a `DraftEditor.load` now returns `DraftSiteContent`);
+ * `themeName` is a strict `Text` in both, so the read is total.
+ */
+const themeName2026 = (
+  doc: SiteContentType | DraftSiteContentType,
+): string | undefined =>
   doc.conferences.find((c) => c.slug === '/2026')?.themeName.en;
 
 const seededPublished = (doc: SiteContentType) =>

@@ -16,6 +16,7 @@ import { SiteContent } from './content/schema';
 import type {
   AssetKey,
   Conference as DocConference,
+  DraftSiteContent as DraftSiteContentType,
   IsoDate,
   Seminar as DocSeminar,
   Speaker as DocSpeaker,
@@ -300,7 +301,15 @@ export const SITE_CONTENT_DRAFT_KEY = 'content/site.draft.json';
 export type AdminContentSource = 'draft' | 'published' | 'defaults';
 
 export interface AdminContent {
-  readonly content: SiteContentType;
+  /**
+   * The document the `/admin` editor opens. It is the **draft** shape
+   * (`DraftSiteContent`): a published / defaults source is also a valid draft (a
+   * complete document trivially satisfies the laxer draft schema), while a
+   * reopened draft may carry freshly-added list items that hold only their `id`
+   * (ADR 0006, settled #10). Publish re-decodes the strict `SiteContent`, the
+   * single boundary that enforces the both-locales `Text` invariant.
+   */
+  readonly content: DraftSiteContentType;
   readonly source: AdminContentSource;
 }
 
