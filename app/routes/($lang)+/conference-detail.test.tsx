@@ -300,8 +300,11 @@ describe('ConferenceDetail section-skip', () => {
     // The iframe (its `title="Map"` + the old fallback src) is gone…
     expect(html).not.toContain('title="Map"');
     expect(html).not.toContain('/maps/embed');
-    // …but the hotels half of the section survives (each half gated independently).
+    // …but the hotels half of the section survives (each half gated independently),
+    // and the section wrapper is still present (the early-return only fires when
+    // BOTH halves are empty).
     expect(html).toContain('Super 8 by Wyndham Kelowna BC');
+    expect(html).toContain('aria-label="Venue and accommodations"');
   });
 
   it('omits the hotels column when hotels is empty but keeps the map iframe', () => {
@@ -309,9 +312,17 @@ describe('ConferenceDetail section-skip', () => {
 
     expect(html).not.toContain('Super 8 by Wyndham Kelowna BC');
     expect(html).not.toContain('Fairfield Inn');
-    // The map half survives.
+    // The hotels-description copy lives inside the hotels half (alongside the
+    // `<ul>`); deleting only the hotels-half gate would re-render this `<p>` (the
+    // empty `<ul>` keeps the names absent regardless), so assert the description
+    // is gone too — it pins the WHOLE hotels half is skipped, not just its list.
+    expect(html).not.toContain(
+      translations.en['registration.hotels.description.facebook'],
+    );
+    // The map half survives, and the section wrapper is still present.
     expect(html).toContain(`src="${fullConference.mapEmbedUrl}"`);
     expect(html).toContain('title="Map"');
+    expect(html).toContain('aria-label="Venue and accommodations"');
   });
 
   it('omits the whole MapSection when neither a map embed nor hotels are present', () => {
@@ -324,7 +335,16 @@ describe('ConferenceDetail section-skip', () => {
     expect(html).not.toContain('title="Map"');
     expect(html).not.toContain('Super 8 by Wyndham Kelowna BC');
     // The hotels-description copy (the section's only other content) is gone too.
-    expect(html).not.toContain(translations.en['registration.hotels.description.facebook']);
+    expect(html).not.toContain(
+      translations.en['registration.hotels.description.facebook'],
+    );
+    // The `MapSection` `<section>` wrapper itself is gone (the early
+    // `if (!hasHotels && !hasMap) return null`). Both halves are independently
+    // gated to null, so an inner-content-only assertion would still pass if the
+    // early-return were deleted — leaving an empty `<section aria-label=…>` that
+    // no other check catches. Pin the section's structural marker absent so the
+    // whole-section skip is what's proven, not merely its emptied contents.
+    expect(html).not.toContain('aria-label="Venue and accommodations"');
   });
 
   it('omits the register button + RegistrationSection when registrationUrl is absent', () => {
@@ -339,6 +359,14 @@ describe('ConferenceDetail section-skip', () => {
     expect(html).not.toContain(
       'href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"',
     );
+    // The HERO register label (`registration.register` = 'Register', a DIFFERENT
+    // key from `registration.register.title` = 'Register Now!') is gone too. A
+    // regressed desktop-hero gate rendering `<a href={undefined}>Register</a>`
+    // drops the href (React omits undefined attrs) and the title check above is a
+    // different string — so without this assertion that regression passes green.
+    // 'Register' is a substring of the title/button copy, so this must run only
+    // when the whole RegistrationSection is already gone (registrationUrl absent).
+    expect(html).not.toContain(translations.en['registration.register']);
   });
 
   it('omits the schedule button when scheduleUrl is absent', () => {
@@ -353,6 +381,40 @@ describe('ConferenceDetail section-skip', () => {
     // is used ONLY inside the gated schedule button (conference-detail.tsx:125,211),
     // so its absence pins the whole button is gone (prove-it-works).
     expect(html).not.toContain(translations.en['registration.schedule']);
+  });
+
+  /**
+   * The MOBILE hero carries its OWN register + schedule gates
+   * (`MobileHero`, conference-detail.tsx:111-127) — a separate layout from the
+   * desktop hero, never reached by the default `Breakpoint.Xl` renders above.
+   * Without a mobile-breakpoint render, deleting either mobile gate leaves every
+   * test green (the desktop gates are a different code path). Exercise both:
+   * with `registrationUrl`/`scheduleUrl` absent, neither the mobile register
+   * label (`registration.register` = 'Register') nor the schedule label
+   * (`registration.schedule` = 'Schedule') nor any RegFox href survives. The
+   * existing 'renders the mobile hero variant' test pins the PRESENT case, so the
+   * gates are load-bearing in both directions.
+   */
+  it('omits the mobile hero register + schedule buttons when their URLs are absent', () => {
+    const html = renderConference(
+      {
+        ...fullConference,
+        registrationUrl: undefined,
+        scheduleUrl: undefined,
+      },
+      { breakpoint: Breakpoint.Sm },
+    );
+
+    // Render the mobile layout (mobile hero crop confirms the breakpoint took).
+    expect(html).toContain(fullConference.hero.image.mobile);
+    // Both mobile-hero CTA labels are gone (different keys; both substrings of
+    // larger copy, so this only holds because the whole `RegistrationSection` is
+    // also skipped — registrationUrl is absent).
+    expect(html).not.toContain(translations.en['registration.register']);
+    expect(html).not.toContain(translations.en['registration.schedule']);
+    // And no RegFox / schedule hrefs leak through the mobile hero.
+    expect(html).not.toContain('regfox.com');
+    expect(html).not.toContain(`href="${fullConference.scheduleUrl}"`);
   });
 
   /**

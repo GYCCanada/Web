@@ -231,7 +231,10 @@ function MapSection({ conference }: { conference: Conference }) {
   if (!hasHotels && !hasMap) return null;
 
   return (
-    <section className="grid grid-cols-1 gap-10 p-4 pb-16 md:grid-cols-2">
+    <section
+      aria-label="Venue and accommodations"
+      className="grid grid-cols-1 gap-10 p-4 pb-16 md:grid-cols-2"
+    >
       {hasHotels ? (
         <div className="flex flex-col gap-6">
           <p>
