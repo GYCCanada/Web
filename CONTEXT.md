@@ -7,6 +7,47 @@ youth ministry. This repository is its public-facing **conference website** — 
 
 ## Glossary
 
+### Page
+
+An **evergreen**, individually-schema'd unit of editable site content — about, FAQ,
+give, contact, volunteer, archive, and the home page's non-conference sections. Each
+Page has its own typed CMS schema (a FAQ Page is a list of Q&A items; a Give Page is a
+directions list plus a donate URL), authored through a dedicated `/admin` section. A Page
+is **not** a Conference: a Conference is an entity *rendered into* the `/YYYY` and home
+routes, whereas a Page owns its own content. _Avoid_: "route" (a route may render a Page,
+a Conference, or both), "screen".
+
+### Section skip
+
+A Page or Conference view renders a **section** (Speakers, FAQ, Registration, …) only
+when that section *has data*: its list is non-empty, or its optional block is present
+(`Option.some`). An empty list or an absent optional block is **skipped silently**. Skip
+is "nothing here yet" — it is **not** a tolerance for half-filled content: a *present*
+item with a blank required bilingual field is still a hard validation error (the `Text`
+"both locales non-empty" invariant is never relaxed). _Avoid_: "hide" (that implies a
+visibility toggle on present data; skip is purely about absence).
+
+### Form definition
+
+A **data** description of one of the site's forms (contact, volunteer, registration) —
+its fields, their kinds (drawn from a closed set: required/optional text, email, URL,
+literal/radio, checkbox-boolean, array-of-literal, nested group), their bilingual
+labels/placeholders, and their validation rules including discriminated-union variants
+and cross-field requirements. A generic renderer turns a Form definition into the rendered
+form; a generic decoder reconstructs server-side validation from it. The field *kinds* are
+a fixed, specified set — a Form definition cannot invent an arbitrary field type. _Avoid_:
+"form schema" when you mean the hand-tuned Effect Schema code (that is being replaced by
+the Form definition + generic decoder).
+
+### Submission
+
+A persisted record of one completed form (a registration, a contact message, a volunteer
+signup), stored as its own bucket object (`submissions/<form>/<id>.json`) at submit time,
+with an email notification sent *of* the stored record. A Submission is the durable
+source of truth — the planned future registrar reads the registration Submission log; the
+email is a notification, not the record. _Avoid_: treating a submission as a transient
+email payload.
+
 ### Conference
 
 A single annual gathering, identified by its **year** and addressed by a year **slug**
@@ -66,6 +107,17 @@ A person presenting at a Conference. Two roles:
 
 A Conference may have an empty `speakers`/`seminars` list when speakers are **TBD**
 (as 2025 was, and as 2026 currently is).
+
+### Registration channel
+
+How attendees actually register for a Conference. Two exist: the **external registrar**
+(RegFox, reached via the Conference's optional `registrationUrl` Register button) and the
+**on-site form** (the form-builder–driven registration form whose Submissions persist to
+the bucket + notify, seeding a possible future first-party registrar). For 2026 the live
+channel is **RegFox**; the on-site form is built and proven but not load-bearing until/
+unless the first-party registrar is finished before signups open. A Conference names its
+live channel by whether `registrationUrl` is set. _Avoid_: assuming the on-site form is
+the registration channel — it is the registrar's seed, not (yet) the live path.
 
 ### Registration window
 
