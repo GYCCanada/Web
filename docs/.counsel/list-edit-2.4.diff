@@ -1,0 +1,1265 @@
+commit 6a9bb5b13018fddb415d818252fde2b8a65c1c6c
+Author: cevr <seeve.c@gmail.com>
+Date:   Wed Jun 17 11:16:49 2026 -0400
+
+    feat(cms)(list-edit): retire the index assumption — identity-keyed merge/navigation
+    
+    Sub-commit 2.4 (ADR 0006). The id-keyed structural edit (2.2/2.3) is now the
+    ONLY way lists move; this deletes the index assumption's remaining homes and
+    migrates every caller to address list items + conferences by stable identity
+    (`<id>` / `<slug>`), never by array position.
+    
+    Deletions (migrate-callers-then-delete):
+    - `deepMerge`'s array-by-index branch → identity-keyed merge: an object override
+      (`{ <id>: partial }` / `{ "/2024": partial }`) onto an array base matches each
+      key against the item whose `id`/`slug` equals it; an edit can never land on the
+      wrong item after a list grew/shrank.
+    - `setPath`'s numeric array-construction + `setAtPath`'s list-index navigation →
+      `setByIdentity`: the override is a pure object tree, and the image-upload
+      rewrite resolves array segments by identity (creating only missing OBJECT keys,
+      never fabricating array items).
+    - the view's positional `speakers.${si}` / `team.${ti}` field-name templates →
+      `fieldName(listPath, item.id, leaf)`; conferences keyed by `slug`.
+    
+    `applyListEdit`'s path navigation (`updateListAtPath`) is unified to the same
+    identity resolution, since the view now hands `applyListOps` slug-keyed
+    conference paths. Callers migrated: the admin route, the editDocument
+    equivalence corpus, applyImageUpload, the list-op e2e, and the unit tests.
+    Adds position-independence tests (an edit lands on its id after a reorder).
+    
+    Gate green: typecheck, lint, build, 231 tests.
+
+diff --git a/app/lib/content/admin-form.test.ts b/app/lib/content/admin-form.test.ts
+index 9042747..99be16b 100644
+--- a/app/lib/content/admin-form.test.ts
++++ b/app/lib/content/admin-form.test.ts
+@@ -29,30 +29,35 @@ const entries = (
+ ): Iterable<readonly [string, string]> => Object.entries(record);
+ 
+ describe('assembleOverrides', () => {
+-  test('parses dotted form names into a nested object', () => {
++  test('parses identity-keyed form names into a nested object tree', () => {
++    // List items and conferences are named by their stable identity segment
++    // (ADR 0006): `conferences.<slug>.…`, `team.<id>.…`. The assembled override
++    // is therefore a pure object tree keyed by identity — never a sparse,
++    // position-indexed array — which `deepMerge` reconciles against the base's
++    // arrays by matching `slug` / `id`.
+     const result = assembleOverrides(
+       entries({
+-        'conferences.0.themeName.en': 'New Title',
+-        'team.1.name': 'Jane Doe',
++        'conferences./2024.themeName.en': 'New Title',
++        'team.team-member-id-000001.name': 'Jane Doe',
+         intent: 'save-draft',
+         _array: 'ignored',
+       }),
+     );
+     expect(result).toEqual({
+-      conferences: [{ themeName: { en: 'New Title' } }],
+-      team: [undefined as unknown as Json, { name: 'Jane Doe' }] as Json,
++      conferences: { '/2024': { themeName: { en: 'New Title' } } },
++      team: { 'team-member-id-000001': { name: 'Jane Doe' } },
+     });
+   });
+ 
+   test('coerces bible chapter/verse leaves to numbers', () => {
+     const result = assembleOverrides(
+       entries({
+-        'conferences.0.bible.chapter': '12',
+-        'conferences.0.bible.verse': '3',
++        'conferences./2024.bible.chapter': '12',
++        'conferences./2024.bible.verse': '3',
+       }),
+-    ) as { conferences: { bible: { chapter: number; verse: number } }[] };
+-    expect(result.conferences[0]?.bible.chapter).toBe(12);
+-    expect(result.conferences[0]?.bible.verse).toBe(3);
++    ) as { conferences: { '/2024': { bible: { chapter: number; verse: number } } } };
++    expect(result.conferences['/2024']?.bible.chapter).toBe(12);
++    expect(result.conferences['/2024']?.bible.verse).toBe(3);
+   });
+ });
+ 
+@@ -65,13 +70,48 @@ describe('deepMerge', () => {
+     expect(merged).toEqual({ a: { x: 9, y: 2 }, b: 3 });
+   });
+ 
+-  test('merges arrays element-by-element by index', () => {
++  test('merges an array base by item identity, not by position', () => {
++    // The override is an identity-MAP (keyed by `id`), so a base array merges by
++    // matching `id` — never by index. An item the override does not name keeps
++    // every field verbatim; the order of `base` is preserved (a shifted position
++    // can never land an edit on the wrong item — ADR 0006).
+     const merged = deepMerge(
+-      { list: [{ k: 'a', keep: true }, { k: 'b', keep: true }] },
+-      { list: [{ k: 'A' }] },
++      { list: [{ id: 'a', k: 'a', keep: true }, { id: 'b', k: 'b', keep: true }] },
++      { list: { a: { k: 'A' } } },
+     );
+     expect(merged).toEqual({
+-      list: [{ k: 'A', keep: true }, { k: 'b', keep: true }],
++      list: [{ id: 'a', k: 'A', keep: true }, { id: 'b', k: 'b', keep: true }],
++    });
++  });
++
++  test('an override id matching no base item is ignored (adds are applyListEdit, not a field merge)', () => {
++    const merged = deepMerge(
++      { list: [{ id: 'a', k: 'a' }] },
++      { list: { z: { k: 'Z' } } },
++    );
++    expect(merged).toEqual({ list: [{ id: 'a', k: 'a' }] });
++  });
++
++  test('matches a conference base item by its slug identity', () => {
++    const merged = deepMerge(
++      { conferences: [{ slug: '/2024', t: 'old' }, { slug: '/2026', t: 'keep' }] },
++      { conferences: { '/2024': { t: 'new' } } },
++    );
++    expect(merged).toEqual({
++      conferences: [{ slug: '/2024', t: 'new' }, { slug: '/2026', t: 'keep' }],
++    });
++  });
++
++  test('an edit lands on its id even when the item moved position (no index drift)', () => {
++    // The override names item `b`; `b` sits at index 0 here. An index-aligned
++    // merge would have edited index 0 expecting the FIRST-declared item — the
++    // exact corruption ADR 0006 retires. Identity merge edits `b` wherever it is.
++    const merged = deepMerge(
++      { list: [{ id: 'b', v: 'old-b' }, { id: 'a', v: 'keep-a' }] },
++      { list: { b: { v: 'new-b' } } },
++    );
++    expect(merged).toEqual({
++      list: [{ id: 'b', v: 'new-b' }, { id: 'a', v: 'keep-a' }],
+     });
+   });
+ 
+@@ -87,11 +127,12 @@ describe('merge-onto-current-document round-trip', () => {
+     Effect.gen(function* () {
+       const base = (yield* encode(defaultContent)) as Json;
+ 
+-      // Edit only the 2026 theme name (en) and accent colour.
++      // Edit only the 2026 theme name (en) and accent colour — addressed by the
++      // conference's `slug` identity, not its array position (ADR 0006).
+       const overrides = assembleOverrides(
+         entries({
+-          'conferences.2.themeName.en': 'Speak Up',
+-          'conferences.2.accentColor': '#123456',
++          'conferences./2026.themeName.en': 'Speak Up',
++          'conferences./2026.accentColor': '#123456',
+         }),
+       );
+       const merged = deepMerge(base, overrides);
+@@ -116,7 +157,7 @@ describe('merge-onto-current-document round-trip', () => {
+       const base = (yield* encode(defaultContent)) as Json;
+       const merged = deepMerge(
+         base,
+-        assembleOverrides(entries({ 'conferences.0.accentColor': 'not-a-colour' })),
++        assembleOverrides(entries({ 'conferences./2024.accentColor': 'not-a-colour' })),
+       );
+       const exit = yield* Effect.exit(decode(merged));
+       expect(exit._tag).toBe('Failure');
+@@ -124,21 +165,61 @@ describe('merge-onto-current-document round-trip', () => {
+ });
+ 
+ describe('setAtPath', () => {
+-  test('sets a deep leaf on a clone without mutating the original', () => {
+-    const doc: Json = { conferences: [{ hero: { desktop: { key: { en: 'old' } } } }] };
+-    const next = setAtPath(doc, 'conferences.0.hero.desktop.key.en', 'images/new.png');
++  test('sets a deep leaf by item identity on a clone without mutating the original', () => {
++    // `setAtPath` navigates into the `conferences` array by matching the `/2024`
++    // segment against each item's `slug` (ADR 0006), never by array index — so a
++    // reordered document still rewrites the right item's key.
++    const doc: Json = {
++      conferences: [
++        { slug: '/2024', hero: { desktop: { key: { en: 'old' } } } },
++        { slug: '/2026', hero: { desktop: { key: { en: 'untouched' } } } },
++      ],
++    };
++    const next = setAtPath(
++      doc,
++      'conferences./2024.hero.desktop.key.en',
++      'images/new.png',
++    );
+     expect(next).toEqual({
+-      conferences: [{ hero: { desktop: { key: { en: 'images/new.png' } } } }],
++      conferences: [
++        { slug: '/2024', hero: { desktop: { key: { en: 'images/new.png' } } } },
++        { slug: '/2026', hero: { desktop: { key: { en: 'untouched' } } } },
++      ],
+     });
+     expect(doc).toEqual({
+-      conferences: [{ hero: { desktop: { key: { en: 'old' } } } }],
++      conferences: [
++        { slug: '/2024', hero: { desktop: { key: { en: 'old' } } } },
++        { slug: '/2026', hero: { desktop: { key: { en: 'untouched' } } } },
++      ],
++    });
++  });
++
++  test('a list item is addressed by its id (team.<id>.photo.key)', () => {
++    const doc: Json = {
++      team: [
++        { id: 'aaaaaaaaaaaaaaaaaaaaa', photo: { key: 'old.png' } },
++        { id: 'bbbbbbbbbbbbbbbbbbbbb', photo: { key: 'keep.png' } },
++      ],
++    };
++    const next = setAtPath(
++      doc,
++      'team.aaaaaaaaaaaaaaaaaaaaa.photo.key',
++      'images/uploaded.png',
++    );
++    expect(next).toEqual({
++      team: [
++        { id: 'aaaaaaaaaaaaaaaaaaaaa', photo: { key: 'images/uploaded.png' } },
++        { id: 'bbbbbbbbbbbbbbbbbbbbb', photo: { key: 'keep.png' } },
++      ],
+     });
+   });
+ });
+ 
+ describe('image upload helpers', () => {
+   test('recognises an upload intent and recovers its target path', () => {
+-    expect(imageUploadTarget('upload:team.0.photo.key')).toBe('team.0.photo.key');
++    expect(imageUploadTarget('upload:team.team-member-id-1.photo.key')).toBe(
++      'team.team-member-id-1.photo.key',
++    );
+     expect(imageUploadTarget('save-draft')).toBeNull();
+     expect(imageUploadTarget('upload:')).toBeNull();
+   });
+diff --git a/app/lib/content/admin-form.ts b/app/lib/content/admin-form.ts
+index fc77d21..aacd498 100644
+--- a/app/lib/content/admin-form.ts
++++ b/app/lib/content/admin-form.ts
+@@ -8,11 +8,15 @@
+  * (`make-impossible-states-unrepresentable`, no-bail-outs):
+  *
+  *   1. the form carries only the fields it renders, named by their dotted JSON
+- *      path (`conferences.2.themeName.en`, `team.0.name`, `translations.fr.…`);
+- *   2. `assembleOverrides` parses those into a nested partial object;
+- *   3. `deepMerge` overlays that partial onto the *encoded current document*, so
+- *      every unedited field (long bios, image keys, `Option` registration
+- *      windows omitted from the encoded JSON) survives verbatim;
++ *      path — list items and conferences keyed by their stable **identity**
++ *      (`conferences./2026.themeName.en`, `team.<id>.name`, `translations.fr.…`),
++ *      never by array position (ADR 0006);
++ *   2. `assembleOverrides` parses those into a nested partial object tree;
++ *   3. `deepMerge` overlays that partial onto the *encoded current document*,
++ *      reconciling each array by item identity, so every unedited field (long
++ *      bios, image keys, `Option` registration windows omitted from the encoded
++ *      JSON) survives verbatim and an edit can never land on the wrong item after
++ *      a list grew or shrank;
+  *   4. the route then Schema-decodes the merged result — the single boundary
+  *      where an edit can be rejected (`boundary-discipline`).
+  *
+@@ -79,8 +83,9 @@ export const extensionForType = (type: string): string =>
+ 
+ /**
+  * Recover the dotted key path an image-upload intent targets, or `null` if the
+- * intent is not an upload. E.g. `upload:conferences.0.speakers.1.photo.key` →
+- * `conferences.0.speakers.1.photo.key`.
++ * intent is not an upload. The path is identity-keyed (ADR 0006), e.g.
++ * `upload:conferences./2024.speakers.<id>.photo.key` →
++ * `conferences./2024.speakers.<id>.photo.key`.
+  */
+ export const imageUploadTarget = (intent: string): string | null => {
+   if (!intent.startsWith(IMAGE_UPLOAD_INTENT_PREFIX)) return null;
+@@ -153,37 +158,49 @@ export const collectTranslations = (
+   return { en, fr };
+ };
+ 
+-const isIndex = (segment: string): boolean => /^\d+$/.test(segment);
++/**
++ * The stable identity of a list / conference item the merge keys on (ADR 0006):
++ * a list item's `id` (a nanoid), or a conference's `slug` (`/2024`). Both are
++ * **content** that round-trips through the schema, so an edit addresses an item
++ * by identity rather than by array position. Returns `undefined` for an item
++ * that carries neither (the index-keyed merge is gone — an identity-less item is
++ * never an override target).
++ */
++const itemIdentity = (item: Json): string | undefined => {
++  if (!isPlainObject(item)) return undefined;
++  if (typeof item['id'] === 'string') return item['id'];
++  if (typeof item['slug'] === 'string') return item['slug'];
++  return undefined;
++};
+ 
+ /**
+- * Set `value` at the dotted `path` inside `root`, creating intermediate objects
+- * (or arrays, when the next segment is numeric) as needed. Mirrors the
+- * paulo-suzanne admin's `setPath` but typed to `Json`.
++ * Set `value` at the dotted `path` inside the fresh override `root`, creating
++ * intermediate **objects** as needed. The override is a pure nested object tree:
++ * every array in the document is addressed by item **identity** (ADR 0006), so a
++ * list-item / conference segment (`/2024`, a nanoid) is an object KEY here, never
++ * an array index — `setPath` therefore never builds arrays, and the identity
++ * reconciliation against the base's real arrays happens in `deepMerge`. (The
++ * index-keyed array construction this used to do is gone — registration-launch
++ * Branch 2 sub-commit 2.4.)
+  */
+ const setPath = (root: MutableJsonObject, path: string[], value: Json): void => {
+   if (path.length === 0) return;
+-  let cursor: MutableJsonObject | Json[] = root;
++  let cursor: MutableJsonObject = root;
+   for (let i = 0; i < path.length - 1; i += 1) {
+     const segment = path[i];
+-    const next = path[i + 1];
+-    if (segment === undefined || next === undefined) return;
+-    const key = Array.isArray(cursor) ? Number(segment) : segment;
+-    const existing = (cursor as MutableJsonObject)[key as keyof typeof cursor];
+-    if (isPlainObject(existing as Json) || Array.isArray(existing)) {
+-      cursor = existing as MutableJsonObject | Json[];
++    if (segment === undefined) return;
++    const existing: Json | undefined = cursor[segment];
++    if (existing !== undefined && isPlainObject(existing)) {
++      cursor = existing as MutableJsonObject;
+     } else {
+-      const container: MutableJsonObject | Json[] = isIndex(next) ? [] : {};
+-      (cursor as MutableJsonObject)[String(key)] = container;
++      const container: MutableJsonObject = {};
++      cursor[segment] = container;
+       cursor = container;
+     }
+   }
+   const leaf = path[path.length - 1];
+   if (leaf === undefined) return;
+-  if (Array.isArray(cursor) && isIndex(leaf)) {
+-    cursor[Number(leaf)] = value;
+-  } else {
+-    (cursor as MutableJsonObject)[leaf] = value;
+-  }
++  cursor[leaf] = value;
+ };
+ 
+ /**
+@@ -191,6 +208,11 @@ const setPath = (root: MutableJsonObject, path: string[], value: Json): void =>
+  * name is a dotted path are taken; control fields (`intent`, anything starting
+  * with `_`) and non-string values (files) are skipped. A leaf named `chapter` /
+  * `verse` is coerced to a number so the `BibleRef` integer fields decode.
++ *
++ * List items and conferences are named by their **identity** segment
++ * (`team.<id>.name`, `conferences./2024.themeName.en` — ADR 0006), so the
++ * assembled override is a pure object tree keyed by identity; `deepMerge`
++ * reconciles it against the base's arrays by matching that identity.
+  */
+ export const assembleOverrides = (
+   entries: Iterable<readonly [string, FormDataEntryValue]>,
+@@ -212,13 +234,36 @@ export const assembleOverrides = (
+ };
+ 
+ /**
+- * Deep-merge `overrides` onto `base`, returning a new value. Objects merge
+- * key-by-key; arrays merge element-by-element by index (so editing
+- * `conferences.0.themeName.en` overlays only that leaf and leaves
+- * `conferences.0.speakers` untouched); every other value (string / number /
+- * boolean / null) is replaced. `base` and `overrides` are never mutated.
++ * Deep-merge `overrides` onto `base`, returning a new value. `base` and
++ * `overrides` are never mutated.
++ *
++ * Objects merge key-by-key. An **array** in `base` is merged by item
++ * **identity** (ADR 0006), NOT by position: `overrides` for a list arrives as an
++ * identity-map (`{ <id>: partial }` for `team`/`speakers`, `{ "/2024": partial }`
++ * for `conferences`), and each override key is matched against the base item
++ * whose `id` / `slug` equals it — so editing `conferences./2024.themeName.en`
++ * overlays only that conference's leaf and leaves every other item (and every
++ * unedited deep field) untouched, even if list positions shifted from an
++ * add/remove. A base item no override names survives verbatim; an override key
++ * that matches no base item is ignored (structural add/remove is `applyListEdit`'s
++ * job, never a field merge's). Every scalar (string / number / boolean / null) is
++ * replaced.
++ *
++ * The old index-aligned array branch is gone (registration-launch Branch 2
++ * sub-commit 2.4): position is no longer an identity, so an edit can never land
++ * on the wrong item after a list grew or shrank.
+  */
+ export const deepMerge = (base: Json, overrides: Json): Json => {
++  // Identity-keyed merge: an object override onto an array base addresses items
++  // by `id` / `slug`, never by index.
++  if (Array.isArray(base) && isPlainObject(overrides)) {
++    return base.map((item) => {
++      const identity = itemIdentity(item);
++      if (identity === undefined) return item;
++      const next = overrides[identity];
++      return next === undefined ? item : deepMerge(item, next);
++    });
++  }
+   if (isPlainObject(base) && isPlainObject(overrides)) {
+     const result: MutableJsonObject = { ...base };
+     for (const key of Object.keys(overrides)) {
+@@ -230,21 +275,62 @@ export const deepMerge = (base: Json, overrides: Json): Json => {
+     }
+     return result;
+   }
+-  if (Array.isArray(base) && Array.isArray(overrides)) {
+-    const result: Json[] = [...base];
+-    for (let i = 0; i < overrides.length; i += 1) {
+-      const next = overrides[i];
+-      if (next === undefined) continue;
+-      result[i] = i < base.length ? deepMerge(base[i] as Json, next) : next;
+-    }
+-    return result;
+-  }
+   return overrides;
+ };
+ 
+-/** Set the leaf at a dotted `path` on a structurally-cloned copy of `doc`. */
++/**
++ * Set the leaf at a dotted `path` on a structurally-cloned copy of `doc`,
++ * resolving each segment by **identity** when it descends into an array (ADR
++ * 0006): a `<slug>` / `<id>` segment selects the array item whose `slug` / `id`
++ * equals it, never an array index. The image-upload rewrite (`applyImageUpload`)
++ * targets a key this way (`team.<id>.photo.key`,
++ * `conferences./2024.speakers.<id>.photo.key`), so a freshly-reordered list never
++ * rewrites the wrong item's image. A segment that resolves to no array item (or a
++ * non-container) leaves `doc` untouched — the strict decode downstream is the gate.
++ */
+ export const setAtPath = (doc: Json, path: string, value: Json): Json => {
+-  const clone = structuredClone(doc) as MutableJsonObject;
+-  setPath(clone, path.split('.'), value);
+-  return clone;
++  const clone = structuredClone(doc) as Json;
++  return setByIdentity(clone, path.split('.'), value);
++};
++
++/**
++ * Return a fresh `node` with `value` set at `path`, navigating objects by key
++ * and arrays by item **identity** (`id` / `slug`). Missing **object** keys along
++ * the path are created (so an image upload to a freshly-added stub item — which
++ * carries only its `id`, with no `photo` object yet — still lands its key, just
++ * as the old positional `setPath` created intermediates). An **array** segment is
++ * never fabricated: an identity that matches no item leaves `node` unchanged (a
++ * structural add is `applyListEdit`'s job, never an upload's). Containers along
++ * the path are cloned, so the input is never mutated.
++ */
++const setByIdentity = (
++  node: Json,
++  path: readonly string[],
++  value: Json,
++): Json => {
++  const [head, ...rest] = path;
++  if (head === undefined) return value;
++  if (Array.isArray(node)) {
++    let hit = false;
++    const next = node.map((item) => {
++      if (hit || itemIdentity(item) !== head) return item;
++      hit = true;
++      return setByIdentity(item, rest, value);
++    });
++    return hit ? next : node;
++  }
++  if (isPlainObject(node)) {
++    if (rest.length === 0) return { ...node, [head]: value };
++    const existing: Json | undefined = node[head];
++    // Descend into an existing container; otherwise create a fresh object so the
++    // remaining path can be built (an absent or scalar slot is replaced, never
++    // left to silently drop the write — mirrors the old `setPath`).
++    const child: Json =
++      existing !== undefined &&
++      (isPlainObject(existing) || Array.isArray(existing))
++        ? existing
++        : {};
++    return { ...node, [head]: setByIdentity(child, rest, value) };
++  }
++  return node;
+ };
+diff --git a/app/lib/content/cms-e2e.test.ts b/app/lib/content/cms-e2e.test.ts
+index 19d9a99..0d6f210 100644
+--- a/app/lib/content/cms-e2e.test.ts
++++ b/app/lib/content/cms-e2e.test.ts
+@@ -13,7 +13,7 @@ import {
+ } from './admin-form';
+ import { DraftEditor, siteScope } from './draft-editor.server';
+ import { defaultContent } from './defaults';
+-import { addOp, removeOp, reorderOp } from './list-edit';
++import { addOp, fieldName, removeOp, reorderOp } from './list-edit';
+ import { newListItemId, SiteContent } from './schema';
+ 
+ /**
+@@ -76,8 +76,8 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
+         // 2. The admin edits the 2026 theme name + accent (simulating the form's
+         //    parsed override), then publishes — the route's two-step.
+         const override = assembleOverrides([
+-          ['conferences.2.themeName.en', 'Speak Boldly'],
+-          ['conferences.2.accentColor', '#112233'],
++          ['conferences./2026.themeName.en', 'Speak Boldly'],
++          ['conferences./2026.accentColor', '#112233'],
+         ]) as Json;
+         // Advance so the saved draft is strictly newer than the epoch seed.
+         yield* TestClock.adjust('1 second');
+@@ -114,7 +114,7 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
+         yield* TestClock.adjust('1 second');
+         yield* editor.editDocument(
+           siteScope,
+-          assembleOverrides([['conferences.2.themeName.en', 'Draft Only']]) as Json,
++          assembleOverrides([['conferences./2026.themeName.en', 'Draft Only']]) as Json,
+         );
+ 
+         const publicRead = yield* content.getConference('en', 2026);
+@@ -144,7 +144,10 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
+         // rewrite the draft's targeted key via the one service.
+         const contentType = 'image/png';
+         expect(isAcceptedImageType(contentType)).toBe(true);
+-        const target = 'team.0.photo.key';
++        // The upload target addresses team member 0 by its `id` (ADR 0006), not
++        // by array position.
++        const member0Id = String(defaultContent.team[0]?.id);
++        const target = `team.${member0Id}.photo.key`;
+         const key = uploadedImageKey(target, contentType, 1_700_000_000_000);
+         yield* storage.put(key, png, contentType);
+         // Advance so the draft the rewrite writes is strictly newer than the
+@@ -172,8 +175,10 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
+       { [SITE_CONTENT_KEY]: { body: seed } },
+     );
+ 
+-    expect(String(result.key)).toBe(
+-      'images/uploads/team-0-photo-key-1700000000000.png',
++    // The key is namespaced under images/uploads/ with the id-keyed target
++    // slugified and the millisecond seed appended (collision-free).
++    expect(String(result.key)).toMatch(
++      /^images\/uploads\/team-[A-Za-z0-9-]+-photo-key-1700000000000\.png$/,
+     );
+     expect(result.servedContentType).toBe('image/png');
+     expect([...result.bytes]).toEqual([
+@@ -206,7 +211,9 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
+  * drops the id; the public read is untouched until publish.
+  */
+ const conf2024 = defaultContent.conferences.findIndex((c) => c.slug === '/2024');
+-const speakers2024 = `conferences.${conf2024}.speakers`;
++// The list path addresses the 2024 conference by its `slug` identity (ADR 0006,
++// sub-commit 2.4), not by array position.
++const speakers2024 = `conferences./2024.speakers`;
+ 
+ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', () => {
+   it('add appends an id-only item the DRAFT reopens, but publish rejects it', async () => {
+@@ -270,23 +277,24 @@ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', ()
+         yield* TestClock.adjust('1 second');
+         // Add a speaker (stub), then the admin hits "Save draft" WITHOUT touching
+         // the new item — the form re-submits every rendered field, including the
+-        // new item's empty `name`/`activity`/`bio`. This must NOT fail
+-        // (regression: empty strings used to be rejected by the strict boundary).
++        // new item's empty `name`/`activity`/`bio`, named by the new speaker's
++        // **id** (ADR 0006, sub-commit 2.4). This must NOT fail (regression: empty
++        // strings used to be rejected by the strict boundary). `assembleOverrides`
++        // + `fieldName` reproduces exactly the override the migrated id-keyed view
++        // submits.
+         yield* editor.applyListOps(siteScope, [addOp(speakers2024, newId)]);
+-        const ci = conf2024;
+         const saveExit = yield* Effect.exit(
+-          editor.editDocument(siteScope, {
+-            conferences: defaultContent.conferences.map((c, i) =>
+-              i === ci
+-                ? {
+-                    speakers: [
+-                      ...defaultContent.conferences[ci]!.speakers.map(() => ({})),
+-                      { name: { en: '', fr: '' }, activity: { en: '', fr: '' }, bio: { en: '', fr: '' } },
+-                    ],
+-                  }
+-                : {},
+-            ),
+-          } as unknown as Json),
++          editor.editDocument(
++            siteScope,
++            assembleOverrides([
++              [fieldName(speakers2024, newId, 'name.en'), ''],
++              [fieldName(speakers2024, newId, 'name.fr'), ''],
++              [fieldName(speakers2024, newId, 'activity.en'), ''],
++              [fieldName(speakers2024, newId, 'activity.fr'), ''],
++              [fieldName(speakers2024, newId, 'bio.en'), ''],
++              [fieldName(speakers2024, newId, 'bio.fr'), ''],
++            ]) as Json,
++          ),
+         );
+ 
+         const draft = yield* editor.load(siteScope);
+@@ -316,11 +324,10 @@ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', ()
+         yield* TestClock.adjust('1 second');
+         yield* editor.applyListOps(siteScope, [addOp(speakers2024, newId)]);
+ 
+-        // The new speaker is the last one; upload a photo to its id-less
+-        // positional key path (the upload path is positional in 2.3).
+-        const ci = conf2024;
+-        const newIndex = defaultContent.conferences[ci]!.speakers.length;
+-        const target = `conferences.${ci}.speakers.${newIndex}.photo.key`;
++        // Upload a photo to the new speaker by its **id** (ADR 0006, sub-commit
++        // 2.4): the upload target is id-keyed, so `setAtPath` rewrites the key on
++        // the matching item regardless of its current list position.
++        const target = fieldName(speakers2024, newId, 'photo.key');
+         const key = uploadedImageKey(target, 'image/png', 1_700_000_000_000);
+         yield* storage.put(key, png, 'image/png');
+         yield* TestClock.adjust('1 second');
+diff --git a/app/lib/content/draft-editor.server.test.ts b/app/lib/content/draft-editor.server.test.ts
+index 99ef6a5..bbb501f 100644
+--- a/app/lib/content/draft-editor.server.test.ts
++++ b/app/lib/content/draft-editor.server.test.ts
+@@ -219,10 +219,11 @@ describe('DraftEditor.editDocument (encode → merge → decode → store draft)
+     () =>
+       Effect.gen(function* () {
+         const editor = yield* DraftEditor.Service;
+-        // The route's parsed override: rename the 2026 theme. `assembleOverrides`
+-        // is the exact parse the old inline action used.
++        // The route's parsed override: rename the 2026 theme, addressed by the
++        // conference's `slug` identity (ADR 0006). `assembleOverrides` is the
++        // exact parse the migrated route action uses.
+         const override = assembleOverrides([
+-          ['conferences.2.themeName.en', 'Speak Boldly'],
++          ['conferences./2026.themeName.en', 'Speak Boldly'],
+         ]) as Json;
+         // The published doc is seeded at epoch; advance the clock so the draft
+         // the edit writes is strictly newer and `load` reopens it.
+@@ -259,7 +260,7 @@ describe('DraftEditor.editDocument (encode → merge → decode → store draft)
+         // Blank the 2026 EN theme name — `Text`'s both-locales-non-empty
+         // invariant must reject this at the decode boundary.
+         const override = assembleOverrides([
+-          ['conferences.2.themeName.en', ''],
++          ['conferences./2026.themeName.en', ''],
+         ]) as Json;
+         const result = yield* Effect.exit(
+           editor.editDocument(siteScope, override),
+@@ -289,7 +290,10 @@ describe('DraftEditor.applyImageUpload (rewrite a key on the draft)', () => {
+   it.effect('points the targeted key at the uploaded object on the draft', () =>
+     Effect.gen(function* () {
+       const editor = yield* DraftEditor.Service;
+-      const target = 'team.0.photo.key';
++      // The upload target addresses the team member by its `id` (ADR 0006), not
++      // by array position — `setAtPath` rewrites the key on the matching item.
++      const member0Id = String(defaultContent.team[0]?.id);
++      const target = `team.${member0Id}.photo.key`;
+       const key = uploadedImageKey(target, 'image/png', 1_700_000_000_000);
+       const encoded = yield* editor.applyImageUpload(siteScope, target, key);
+ 
+@@ -363,10 +367,15 @@ interface CorpusCase {
+   readonly expected: unknown;
+ }
+ 
++// The first team member's id — list items and conferences are addressed by
++// stable identity (`team.<id>.…`, `conferences.<slug>.…`), not by array
++// position (ADR 0006, sub-commit 2.4).
++const member0Id = String(defaultContent.team[0]?.id);
++
+ const corpus: readonly CorpusCase[] = [
+   {
+-    name: 'dotted-path leaf — rename the 2026 theme (EN)',
+-    entries: [['conferences.2.themeName.en', 'Speak Boldly']],
++    name: 'identity-keyed leaf — rename the 2026 theme (EN) by slug',
++    entries: [['conferences./2026.themeName.en', 'Speak Boldly']],
+     proof: themeName2026,
+     expected: 'Speak Boldly',
+   },
+@@ -388,8 +397,8 @@ const corpus: readonly CorpusCase[] = [
+   {
+     name: 'numeric coercion — bible.chapter/verse parse to Int',
+     entries: [
+-      ['conferences.2.bible.chapter', '3'],
+-      ['conferences.2.bible.verse', '16'],
++      ['conferences./2026.bible.chapter', '3'],
++      ['conferences./2026.bible.verse', '16'],
+     ],
+     proof: (doc) => {
+       const c = doc.conferences.find((x) => x.slug === '/2026');
+@@ -398,23 +407,23 @@ const corpus: readonly CorpusCase[] = [
+     expected: '3/16',
+   },
+   {
+-    name: 'nested hero key — alt text on a deep hero crop',
+-    entries: [['conferences.0.hero.desktop.alt.en', 'A brand new alt']],
++    name: 'nested hero key — alt text on a deep hero crop (by slug)',
++    entries: [['conferences./2024.hero.desktop.alt.en', 'A brand new alt']],
+     proof: (doc) =>
+       doc.conferences.find((x) => x.slug === '/2024')?.hero.desktop.alt.en,
+     expected: 'A brand new alt',
+   },
+   {
+-    name: 'team field — rename a board member',
+-    entries: [['team.0.name', 'Renamed Member']],
++    name: 'team field — rename a board member by id',
++    entries: [[`team.${member0Id}.name`, 'Renamed Member']],
+     proof: (doc) => doc.team[0]?.name,
+     expected: 'Renamed Member',
+   },
+   {
+-    name: 'mixed override — dotted + translation + numeric in one submit',
++    name: 'mixed override — identity-keyed + translation + numeric in one submit',
+     entries: [
+-      ['conferences.2.themeName.en', 'Combined Edit'],
+-      ['conferences.2.bible.verse', '7'],
++      ['conferences./2026.themeName.en', 'Combined Edit'],
++      ['conferences./2026.bible.verse', '7'],
+       [translationFieldName('fr', 'main.reserve'), 'Réservez'],
+     ],
+     proof: (doc) => {
+@@ -484,7 +493,7 @@ describe('DraftEditor.publish (promote draft → published, drop draft, bust)',
+         // strictly newer than the epoch-seeded published doc and `publish`
+         // promotes IT (not the stale published doc).
+         const override = assembleOverrides([
+-          ['conferences.2.themeName.en', 'Speak Now'],
++          ['conferences./2026.themeName.en', 'Speak Now'],
+         ]) as Json;
+         yield* TestClock.adjust('1 second');
+         yield* editor.editDocument(siteScope, override);
+@@ -530,7 +539,7 @@ describe('DraftEditor.publish (promote draft → published, drop draft, bust)',
+         // NO TestClock.adjust — edit and publish land in the same second as the
+         // epoch-seeded published document.
+         const override = assembleOverrides([
+-          ['conferences.2.themeName.en', 'Same Second Edit'],
++          ['conferences./2026.themeName.en', 'Same Second Edit'],
+         ]) as Json;
+         yield* editor.editDocument(siteScope, override);
+         yield* editor.publish(siteScope);
+diff --git a/app/lib/content/list-edit.test.ts b/app/lib/content/list-edit.test.ts
+index 6bf8e06..279daf3 100644
+--- a/app/lib/content/list-edit.test.ts
++++ b/app/lib/content/list-edit.test.ts
+@@ -140,7 +140,7 @@ describe('applyListEdit — id-keyed, not positional', () => {
+     });
+   });
+ 
+-  test('navigates a nested list path (conferences.0.speakers)', () => {
++  test('navigates a nested list path by conference slug, not position (conferences./2024.speakers)', () => {
+     const base: Json = {
+       conferences: [
+         { slug: '/2024', speakers: list({ id: 's1' }, { id: 's2' }) },
+@@ -148,7 +148,7 @@ describe('applyListEdit — id-keyed, not positional', () => {
+       ],
+     };
+     const next = applyListEdit(base, [
+-      addOp('conferences.0.speakers', id('s9')),
++      addOp('conferences./2024.speakers', id('s9')),
+     ]) as {
+       conferences: ReadonlyArray<{ speakers: ReadonlyArray<{ id: string }> }>;
+     };
+@@ -161,6 +161,27 @@ describe('applyListEdit — id-keyed, not positional', () => {
+     expect(next.conferences[1]?.speakers.map((s) => s.id)).toEqual(['s3']);
+   });
+ 
++  test('a reordered conferences array still resolves the right year by slug', () => {
++    // Position 0 is now /2026, position 1 is /2024 — an index-based navigation
++    // would edit the wrong conference; identity navigation finds /2024.
++    const base: Json = {
++      conferences: [
++        { slug: '/2026', speakers: list({ id: 's3' }) },
++        { slug: '/2024', speakers: list({ id: 's1' }) },
++      ],
++    };
++    const next = applyListEdit(base, [
++      addOp('conferences./2024.speakers', id('s9')),
++    ]) as {
++      conferences: ReadonlyArray<{ slug: string; speakers: ReadonlyArray<{ id: string }> }>;
++    };
++    expect(next.conferences.find((c) => c.slug === '/2024')?.speakers.map((s) => s.id)).toEqual([
++      's1',
++      's9',
++    ]);
++    expect(next.conferences.find((c) => c.slug === '/2026')?.speakers.map((s) => s.id)).toEqual(['s3']);
++  });
++
+   test('does not mutate its input', () => {
+     const base: Json = { team: list({ id: 'a' }) };
+     const snapshot = structuredClone(base);
+@@ -191,13 +212,14 @@ describe('applyListEdit — round-trips through the real document', () => {
+       const base = (yield* encode(defaultContent)) as Json & {
+         conferences: ReadonlyArray<{ slug: string; speakers: readonly { id: string }[] }>;
+       };
+-      const ci = base.conferences.findIndex((c) => c.slug === '/2024');
+-      const firstSpeakerId = base.conferences[ci]?.speakers[0]?.id;
++      const conf = base.conferences.find((c) => c.slug === '/2024');
++      const firstSpeakerId = conf?.speakers[0]?.id;
+       expect(firstSpeakerId).toBeDefined();
+ 
+-      // Remove the first 2024 speaker — the rest of the document still decodes.
++      // Remove the first 2024 speaker (addressed by slug, ADR 0006) — the rest of
++      // the document still decodes.
+       const removed = applyListEdit(base, [
+-        removeOp(`conferences.${ci}.speakers`, id(firstSpeakerId!)),
++        removeOp('conferences./2024.speakers', id(firstSpeakerId!)),
+       ]);
+       const decoded = yield* decode(removed);
+       const conf2024 = decoded.conferences.find((c) => c.slug === '/2024');
+@@ -218,13 +240,12 @@ describe('applyListEdit — round-trips through the real document', () => {
+       const base = (yield* encode(defaultContent)) as Json & {
+         conferences: ReadonlyArray<{ slug: string }>;
+       };
+-      const ci = base.conferences.findIndex((c) => c.slug === '/2024');
+ 
+-      // Add an empty speaker (id only). The list grew, but the item has no
+-      // required `name`/`bio`/… — so the publish-time decode FAILS (ADR 0006:
++      // Add an empty speaker (id only) to /2024. The list grew, but the item has
++      // no required `name`/`bio`/… — so the publish-time decode FAILS (ADR 0006:
+       // an empty required field blocks publish, not the structural edit).
+       const added = applyListEdit(base, [
+-        addOp(`conferences.${ci}.speakers`, newListItemId()),
++        addOp('conferences./2024.speakers', newListItemId()),
+       ]);
+       const exit = yield* Effect.exit(decode(added));
+       expect(exit._tag).toBe('Failure');
+@@ -237,15 +258,15 @@ describe('collectListOps', () => {
+       entries({
+         [listOpFieldName('team', 'add')]: 'newid000000000000000A',
+         [listOpFieldName('team', 'remove')]: 'oldid000000000000000B',
+-        [listOpFieldName('conferences.0.speakers', 'reorder')]: 'idA, idB ,idC',
+-        'team.0.name': 'ignored — a field, not a control op',
++        [listOpFieldName('conferences./2024.speakers', 'reorder')]: 'idA, idB ,idC',
++        'team.some-member-id-00000.name': 'ignored — a field, not a control op',
+         intent: 'save-draft',
+       }),
+     );
+     expect(ops).toEqual([
+       addOp('team', id('newid000000000000000A')),
+       removeOp('team', id('oldid000000000000000B')),
+-      reorderOp('conferences.0.speakers', [
++      reorderOp('conferences./2024.speakers', [
+         'idA',
+         'idB',
+         'idC',
+@@ -265,10 +286,10 @@ describe('collectListOps', () => {
+ 
+   test('keeps a listPath that itself contains dots intact (lastIndexOf split)', () => {
+     const ops = collectListOps(
+-      entries({ [listOpFieldName('conferences.2.seminars', 'add')]: 'someid0000000000000AB' }),
++      entries({ [listOpFieldName('conferences./2026.seminars', 'add')]: 'someid0000000000000AB' }),
+     );
+     expect(ops).toEqual([
+-      addOp('conferences.2.seminars', id('someid0000000000000AB')),
++      addOp('conferences./2026.seminars', id('someid0000000000000AB')),
+     ]);
+   });
+ });
+@@ -276,15 +297,15 @@ describe('collectListOps', () => {
+ describe('field-name templates', () => {
+   test('listOpFieldName round-trips through collectListOps', () => {
+     expect(listOpFieldName('team', 'add')).toBe('list:team:add');
+-    expect(listOpFieldName('conferences.0.speakers', 'remove')).toBe(
+-      'list:conferences.0.speakers:remove',
++    expect(listOpFieldName('conferences./2024.speakers', 'remove')).toBe(
++      'list:conferences./2024.speakers:remove',
+     );
+   });
+ 
+   test('fieldName addresses a list-item leaf by id, not position', () => {
+     const speaker = id('abcdefghij0123456789X');
+-    expect(fieldName('conferences.0.speakers', speaker, 'name.en')).toBe(
+-      'conferences.0.speakers.abcdefghij0123456789X.name.en',
++    expect(fieldName('conferences./2024.speakers', speaker, 'name.en')).toBe(
++      'conferences./2024.speakers.abcdefghij0123456789X.name.en',
+     );
+   });
+ });
+diff --git a/app/lib/content/list-edit.ts b/app/lib/content/list-edit.ts
+index ddb8deb..6e5779b 100644
+--- a/app/lib/content/list-edit.ts
++++ b/app/lib/content/list-edit.ts
+@@ -30,9 +30,11 @@ const isPlainObject = (value: Json): value is { readonly [k: string]: Json } =>
+ 
+ /**
+  * A dotted path to a list (array) inside the encoded document — e.g. `team`, or
+- * `conferences.0.speakers`. Numeric segments index into an array (the document's
+- * `conferences`), string segments key into an object. The path addresses the
+- * **array**, not an item; the item is addressed by its `id` inside the `ListOp`.
++ * `conferences./2024.speakers`. A segment that descends THROUGH an array selects
++ * the item by its **identity** (a conference's `slug`, a list item's `id` — ADR
++ * 0006), never by position; string segments key into an object. The path
++ * addresses the **array**, not an item; the item to add / remove / reorder is
++ * addressed by its `id` inside the `ListOp`.
+  */
+ export type ListPath = string;
+ 
+@@ -76,6 +78,19 @@ export const reorderOp = (
+ const itemId = (item: Json): string | undefined =>
+   isPlainObject(item) && typeof item['id'] === 'string' ? item['id'] : undefined;
+ 
++/**
++ * The stable identity a *path segment* matches an array item by (ADR 0006): a
++ * list item's `id`, or a conference's `slug`. Used to navigate THROUGH an array
++ * (e.g. `conferences./2024.speakers`) to a nested list — positional indexing is
++ * gone, so a reordered `conferences` array still resolves the right year.
++ */
++const navIdentity = (item: Json): string | undefined => {
++  if (!isPlainObject(item)) return undefined;
++  if (typeof item['id'] === 'string') return item['id'];
++  if (typeof item['slug'] === 'string') return item['slug'];
++  return undefined;
++};
++
+ /**
+  * Apply one op to the array `list`, returning a fresh array (never mutating). The
+  * op kinds are exhaustive over the `ListOp` union, so adding a kind without
+@@ -119,10 +134,13 @@ const applyOp = (list: readonly Json[], op: ListOp): readonly Json[] => {
+ 
+ /**
+  * Navigate to the array at `path` inside `root`, replace it via `update`, and
+- * return a fresh document. Intermediate containers are cloned along the path so
+- * the input is never mutated; a path that does not resolve to an array is left
+- * untouched (the caller's listPath always names a real list, but a malformed
+- * control field must not throw — the strict decode downstream is the gate).
++ * return a fresh document. When the path descends THROUGH an array (e.g.
++ * `conferences./2024.speakers`), the next segment selects the array item by its
++ * **identity** (`slug` / `id`), never by position (ADR 0006, sub-commit 2.4) — so
++ * a reordered `conferences` still resolves the right year. Intermediate
++ * containers are cloned along the path so the input is never mutated; a path that
++ * does not resolve to an array (an unknown identity, a malformed control field)
++ * is left untouched — the strict decode downstream is the gate.
+  */
+ const updateListAtPath = (
+   root: Json,
+@@ -134,10 +152,8 @@ const updateListAtPath = (
+     return Array.isArray(root) ? update(root) : root;
+   }
+   if (Array.isArray(root)) {
+-    const index = Number(head);
+-    if (!Number.isInteger(index) || index < 0 || index >= root.length) {
+-      return root;
+-    }
++    const index = root.findIndex((item) => navIdentity(item) === head);
++    if (index < 0) return root;
+     const next = [...root];
+     next[index] = updateListAtPath(root[index] as Json, rest, update);
+     return next;
+@@ -226,11 +242,12 @@ export const collectListOps = (
+ 
+ /**
+  * The id-keyed form field-name for a leaf of a list item — e.g.
+- * `fieldName('conferences.0.speakers', id, 'name.en')` →
+- * `conferences.0.speakers.<id>.name.en`. This replaces the positional templates
+- * (`conferences.0.speakers.1.name.en`) the index merge relied on (ADR 0006); the
+- * id segment is a validated `ListItemId`, so it can never smuggle a `.`-bearing
+- * path that would re-split into the wrong shape (`boundary-discipline`).
++ * `fieldName('conferences./2024.speakers', id, 'name.en')` →
++ * `conferences./2024.speakers.<id>.name.en`. This replaces the positional
++ * templates (`conferences.0.speakers.1.name.en`) the index merge relied on (ADR
++ * 0006); the id segment is a validated `ListItemId`, so it can never smuggle a
++ * `.`-bearing path that would re-split into the wrong shape
++ * (`boundary-discipline`).
+  */
+ export const fieldName = (
+   listPath: ListPath,
+diff --git a/app/routes/admin/content.tsx b/app/routes/admin/content.tsx
+index 5adbad2..1c64aad 100644
+--- a/app/routes/admin/content.tsx
++++ b/app/routes/admin/content.tsx
+@@ -27,8 +27,16 @@ import {
+   uploadedImageKey,
+   type Json,
+ } from '~/lib/content/admin-form';
+-import { collectListOps, listOpFieldName } from '~/lib/content/list-edit';
+-import { DraftSiteContent, newListItemId } from '~/lib/content/schema';
++import {
++  collectListOps,
++  fieldName,
++  listOpFieldName,
++} from '~/lib/content/list-edit';
++import {
++  DraftSiteContent,
++  ListItemId,
++  newListItemId,
++} from '~/lib/content/schema';
+ import { ReactRouterContext } from '~/lib/effect/router-context';
+ import { routeAction, routeHandler } from '~/lib/effect/route';
+ import { Storage } from '~/lib/storage.server';
+@@ -538,6 +546,7 @@ export default function AdminContentEditor() {
+     photo?: { key: string; alt: { en: string; fr: string } };
+   }>;
+ 
++  const teamIds = team.map((m) => m.id);
+   const emptyText = { en: '', fr: '' } as const;
+   const translations = (document.translations ?? { en: {}, fr: {} }) as {
+     en: Readonly<Record<string, string>>;
+@@ -583,154 +592,169 @@ export default function AdminContentEditor() {
+       )}
+ 
+       <Form method="post" className="space-y-4">
+-        {conferences.map((conference, ci) => (
+-          <Section key={conference.slug} title={`Conference ${conference.slug}`}>
+-            <Bilingual
+-              label="Theme name"
+-              name={`conferences.${ci}.themeName`}
+-              value={conference.themeName}
+-            />
+-            <Text
+-              label="Accent colour (#rrggbb)"
+-              name={`conferences.${ci}.accentColor`}
+-              defaultValue={conference.accentColor}
+-            />
+-            <div className="grid gap-2 sm:grid-cols-2">
+-              <Text
+-                label="Start date (YYYY-MM-DD)"
+-                name={`conferences.${ci}.dates.start`}
+-                defaultValue={conference.dates.start}
++        {conferences.map((conference) => {
++          // Conferences are addressed by their stable `slug` identity (ADR 0006),
++          // not by array position — `deepMerge` / `setAtPath` reconcile the
++          // override against the base's `conferences` array by matching `slug`,
++          // so an edit never lands on the wrong year.
++          const conf = `conferences.${conference.slug}`;
++          const speakersPath = `${conf}.speakers`;
++          const speakerIds = conference.speakers.map((s) => s.id);
++          return (
++            <Section key={conference.slug} title={`Conference ${conference.slug}`}>
++              <Bilingual
++                label="Theme name"
++                name={`${conf}.themeName`}
++                value={conference.themeName}
+               />
+               <Text
+-                label="End date (YYYY-MM-DD)"
+-                name={`conferences.${ci}.dates.end`}
+-                defaultValue={conference.dates.end}
++                label="Accent colour (#rrggbb)"
++                name={`${conf}.accentColor`}
++                defaultValue={conference.accentColor}
+               />
+-            </div>
+-            <Bilingual
+-              label="Location"
+-              name={`conferences.${ci}.location`}
+-              value={conference.location}
+-            />
+-            <Bilingual
+-              label="Tagline"
+-              name={`conferences.${ci}.tagline`}
+-              value={conference.tagline}
+-              multiline
+-            />
+-            <Bilingual
+-              label="Bible book"
+-              name={`conferences.${ci}.bible.book`}
+-              value={conference.bible.book}
+-            />
+-            <div className="grid gap-2 sm:grid-cols-2">
+-              <Text
+-                label="Chapter"
+-                name={`conferences.${ci}.bible.chapter`}
+-                defaultValue={String(conference.bible.chapter)}
++              <div className="grid gap-2 sm:grid-cols-2">
++                <Text
++                  label="Start date (YYYY-MM-DD)"
++                  name={`${conf}.dates.start`}
++                  defaultValue={conference.dates.start}
++                />
++                <Text
++                  label="End date (YYYY-MM-DD)"
++                  name={`${conf}.dates.end`}
++                  defaultValue={conference.dates.end}
++                />
++              </div>
++              <Bilingual
++                label="Location"
++                name={`${conf}.location`}
++                value={conference.location}
+               />
+-              <Text
+-                label="Verse"
+-                name={`conferences.${ci}.bible.verse`}
+-                defaultValue={String(conference.bible.verse)}
++              <Bilingual
++                label="Tagline"
++                name={`${conf}.tagline`}
++                value={conference.tagline}
++                multiline
+               />
+-            </div>
+-            <fieldset className="space-y-3">
+-              <legend className="text-sm font-medium text-neutral-800">
+-                Hero artwork
+-              </legend>
+-              {(['desktop', 'mobile'] as const).map((crop) => (
+-                <div key={crop} className="space-y-2 rounded-md bg-neutral-50 p-3">
+-                  <p className="text-xs font-semibold uppercase text-neutral-500">
+-                    {crop}
+-                  </p>
+-                  <Bilingual
+-                    label="Alt text"
+-                    name={`conferences.${ci}.hero.${crop}.alt`}
+-                    value={conference.hero[crop].alt}
+-                  />
+-                  <div className="grid gap-3 sm:grid-cols-2">
+-                    {(['en', 'fr'] as const).map((locale) => (
+-                      <ImageUpload
+-                        key={locale}
+-                        keyPath={`conferences.${ci}.hero.${crop}.key.${locale}`}
+-                        currentKey={conference.hero[crop].key[locale]}
+-                      />
+-                    ))}
+-                  </div>
+-                </div>
+-              ))}
+-            </fieldset>
+-            <fieldset className="space-y-3">
+-              <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
+-                <span>Speakers</span>
+-                <AddItemButton
+-                  listPath={`conferences.${ci}.speakers`}
+-                  label="+ Add speaker"
++              <Bilingual
++                label="Bible book"
++                name={`${conf}.bible.book`}
++                value={conference.bible.book}
++              />
++              <div className="grid gap-2 sm:grid-cols-2">
++                <Text
++                  label="Chapter"
++                  name={`${conf}.bible.chapter`}
++                  defaultValue={String(conference.bible.chapter)}
+                 />
+-              </legend>
+-              {conference.speakers.map((speaker, si) => (
+-                <div
+-                  key={speaker.id}
+-                  className="space-y-2 rounded-md bg-neutral-50 p-3"
+-                >
+-                  <div className="flex items-center justify-end">
+-                    <ItemControls
+-                      listPath={`conferences.${ci}.speakers`}
+-                      ids={conference.speakers.map((s) => s.id)}
+-                      index={si}
++                <Text
++                  label="Verse"
++                  name={`${conf}.bible.verse`}
++                  defaultValue={String(conference.bible.verse)}
++                />
++              </div>
++              <fieldset className="space-y-3">
++                <legend className="text-sm font-medium text-neutral-800">
++                  Hero artwork
++                </legend>
++                {(['desktop', 'mobile'] as const).map((crop) => (
++                  <div key={crop} className="space-y-2 rounded-md bg-neutral-50 p-3">
++                    <p className="text-xs font-semibold uppercase text-neutral-500">
++                      {crop}
++                    </p>
++                    <Bilingual
++                      label="Alt text"
++                      name={`${conf}.hero.${crop}.alt`}
++                      value={conference.hero[crop].alt}
+                     />
++                    <div className="grid gap-3 sm:grid-cols-2">
++                      {(['en', 'fr'] as const).map((locale) => (
++                        <ImageUpload
++                          key={locale}
++                          keyPath={`${conf}.hero.${crop}.key.${locale}`}
++                          currentKey={conference.hero[crop].key[locale]}
++                        />
++                      ))}
++                    </div>
+                   </div>
+-                  <Bilingual
+-                    label="Name"
+-                    name={`conferences.${ci}.speakers.${si}.name`}
+-                    value={speaker.name ?? emptyText}
+-                  />
+-                  <Bilingual
+-                    label="Activity"
+-                    name={`conferences.${ci}.speakers.${si}.activity`}
+-                    value={speaker.activity ?? emptyText}
+-                  />
+-                  <Bilingual
+-                    label="Bio"
+-                    name={`conferences.${ci}.speakers.${si}.bio`}
+-                    value={speaker.bio ?? emptyText}
+-                    multiline
+-                  />
+-                  <ImageUpload
+-                    keyPath={`conferences.${ci}.speakers.${si}.photo.key`}
+-                    currentKey={speaker.photo?.key ?? ''}
+-                  />
+-                </div>
+-              ))}
+-            </fieldset>
+-          </Section>
+-        ))}
++                ))}
++              </fieldset>
++              <fieldset className="space-y-3">
++                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
++                  <span>Speakers</span>
++                  <AddItemButton listPath={speakersPath} label="+ Add speaker" />
++                </legend>
++                {conference.speakers.map((speaker, si) => {
++                  // Re-assert the `ListItemId` brand at this view boundary: the
++                  // encoded document carries the id as a bare `string` (encode
++                  // drops the brand), but it decoded through `ListItemId`, so it
++                  // matches the nanoid pattern — `make` validates rather than
++                  // casts, keeping `fieldName`'s "no `.`-bearing id" guarantee
++                  // load-bearing (`boundary-discipline`).
++                  const speakerId = ListItemId.make(speaker.id);
++                  return (
++                    <div
++                      key={speaker.id}
++                      className="space-y-2 rounded-md bg-neutral-50 p-3"
++                    >
++                      <div className="flex items-center justify-end">
++                        <ItemControls
++                          listPath={speakersPath}
++                          ids={speakerIds}
++                          index={si}
++                        />
++                      </div>
++                      <Bilingual
++                        label="Name"
++                        name={fieldName(speakersPath, speakerId, 'name')}
++                        value={speaker.name ?? emptyText}
++                      />
++                      <Bilingual
++                        label="Activity"
++                        name={fieldName(speakersPath, speakerId, 'activity')}
++                        value={speaker.activity ?? emptyText}
++                      />
++                      <Bilingual
++                        label="Bio"
++                        name={fieldName(speakersPath, speakerId, 'bio')}
++                        value={speaker.bio ?? emptyText}
++                        multiline
++                      />
++                      <ImageUpload
++                        keyPath={fieldName(speakersPath, speakerId, 'photo.key')}
++                        currentKey={speaker.photo?.key ?? ''}
++                      />
++                    </div>
++                  );
++                })}
++              </fieldset>
++            </Section>
++          );
++        })}
+ 
+         <Section title="Team">
+           <div className="flex items-center justify-end">
+             <AddItemButton listPath="team" label="+ Add team member" />
+           </div>
+-          {team.map((member, ti) => (
+-            <div key={member.id} className="space-y-2 rounded-md bg-neutral-50 p-3">
+-              <div className="flex items-center justify-end">
+-                <ItemControls
+-                  listPath="team"
+-                  ids={team.map((m) => m.id)}
+-                  index={ti}
++          {team.map((member, ti) => {
++            // Re-assert the brand at this boundary (see the speakers note).
++            const memberId = ListItemId.make(member.id);
++            return (
++              <div key={member.id} className="space-y-2 rounded-md bg-neutral-50 p-3">
++                <div className="flex items-center justify-end">
++                  <ItemControls listPath="team" ids={teamIds} index={ti} />
++                </div>
++                <Text
++                  label="Name"
++                  name={fieldName('team', memberId, 'name')}
++                  defaultValue={member.name ?? ''}
++                />
++                <ImageUpload
++                  keyPath={fieldName('team', memberId, 'photo.key')}
++                  currentKey={member.photo?.key ?? ''}
+                 />
+               </div>
+-              <Text
+-                label="Name"
+-                name={`team.${ti}.name`}
+-                defaultValue={member.name ?? ''}
+-              />
+-              <ImageUpload
+-                keyPath={`team.${ti}.photo.key`}
+-                currentKey={member.photo?.key ?? ''}
+-              />
+-            </div>
+-          ))}
++            );
++          })}
+         </Section>
+ 
+         <Section title={`Translations (${translationKeys.length} keys)`}>

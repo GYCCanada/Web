@@ -1,0 +1,498 @@
+commit b7ad48d5b7294fb08a958ed71bfe18e77b8f162e
+Author: cevr <seeve.c@gmail.com>
+Date:   Wed Jun 17 09:06:00 2026 -0400
+
+    refactor(cms)(draft-editor): editDocument + applyImageUpload + publish
+    
+    Add the three write operations to DraftEditor, each addressed by ContentScope
+    and routed through scopeKeys:
+    - editDocument: encode current → deepMerge(override) → decode (400 IssueError
+      on reject) → re-encode → store at the scope's draft key; returns EncodedDoc.
+    - applyImageUpload: rewrite a targeted …key field on the draft (raw-bytes
+      upload + content-type gate stay in the route).
+    - publish: promote the scope's current edit source to the published key, drop
+      the draft best-effort, bust the public read cache; 502 IssueError on a
+      storage failure.
+    
+    A decoded document always re-encodes, so encode-after-decode dies rather than
+    masquerading as an IssueError. defaultLayer pre-provides ONE shared Storage so
+    publish's bust hits the cache the public read serves from.
+    
+    Route still calls the old inline pipeline; behavior identical (migrated in
+    1.3). Tests prove merge preserves unedited deep fields, the present-but-empty
+    required field rejects, image-key rewrite persists, and publish goes live on
+    the next read.
+
+diff --git a/app/lib/content/draft-editor.server.test.ts b/app/lib/content/draft-editor.server.test.ts
+index 94ad49b..6d30910 100644
+--- a/app/lib/content/draft-editor.server.test.ts
++++ b/app/lib/content/draft-editor.server.test.ts
+@@ -3,16 +3,26 @@ import { Effect, Layer, Schema } from 'effect';
+ import { TestClock } from 'effect/testing';
+ 
+ import {
++  Content,
+   SITE_CONTENT_DRAFT_KEY,
+   SITE_CONTENT_KEY,
+ } from '../content.server';
+ import { Storage } from '../storage.server';
+ import { layerTest } from '../storage.test-helper';
++import {
++  assembleOverrides,
++  uploadedImageKey,
++  type Json,
++} from './admin-form';
+ import { DraftEditor, scopeKeys, siteScope } from './draft-editor.server';
+ import { defaultContent } from './defaults';
+ import { SiteContent } from './schema';
+ import type { SiteContent as SiteContentType } from './schema';
+ 
++const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(SiteContent));
++// Decode the encoded OBJECT a DraftEditor write returns (not a JSON string).
++const decodeObject = Schema.decodeUnknownEffect(SiteContent);
++
+ /**
+  * `DraftEditor` (registration-launch Branch 1) absorbs the inline admin write
+  * pipeline. Sub-commit 1.1 introduces the `ContentScope` → `scopeKeys` key-pair
+@@ -31,11 +41,30 @@ const seededStorage = (
+ ): Layer.Layer<Storage.Service> =>
+   Layer.unwrap(encode(doc).pipe(Effect.orDie, Effect.map(factory)));
+ 
++/**
++ * Provide `DraftEditor` (and the `Content` it depends on for `publish`'s
++ * cache-bust) over ONE shared in-memory `Storage`, also exposed to the test —
++ * so a `put` from the test body hits the same bucket the editor reads.
++ */
+ const provideEditor =
+   (storageLayer: Layer.Layer<Storage.Service>) =>
+-  <A, E>(effect: Effect.Effect<A, E, DraftEditor.Service | Storage.Service>) =>
++  <A, E>(
++    effect: Effect.Effect<
++      A,
++      E,
++      DraftEditor.Service | Content.Service | Storage.Service
++    >,
++  ) =>
+     effect.pipe(
+-      Effect.provide(Layer.provideMerge(DraftEditor.layer, storageLayer)),
++      Effect.provide(
++        Layer.provideMerge(
++          // `Content.layer` feeds `DraftEditor.layer`'s `Content.Service`
++          // requirement (for `publish`'s cache-bust) and stays exposed; both
++          // then share the one `storageLayer`.
++          Layer.provideMerge(DraftEditor.layer, Content.layer),
++          storageLayer,
++        ),
++      ),
+     );
+ 
+ const adminStorage = (objects: Record<string, string>) =>
+@@ -152,3 +181,158 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
+       }).pipe(provideEditor(adminStorage({}))),
+   );
+ });
++
++/** Read a stored object's body as text through `Storage.get`. */
++const readStoredText = (key: string) =>
++  Effect.gen(function* () {
++    const storage = yield* Storage.Service;
++    const object = yield* storage.get(key);
++    return yield* Effect.promise(() => new Response(object.stream).text());
++  });
++
++/** The 2026 conference's theme name (EN) on a decoded document. */
++const themeName2026 = (doc: SiteContentType): string | undefined =>
++  doc.conferences.find((c) => c.slug === '/2026')?.themeName.en;
++
++const seededPublished = (doc: SiteContentType) =>
++  provideEditor(
++    seededStorage(doc, (published) =>
++      adminStorage({ [SITE_CONTENT_KEY]: published }),
++    ),
++  );
++
++describe('DraftEditor.editDocument (encode → merge → decode → store draft)', () => {
++  it.effect(
++    'merges the override onto the current document and stores a draft that decodes with the edit',
++    () =>
++      Effect.gen(function* () {
++        const editor = yield* DraftEditor.Service;
++        // The route's parsed override: rename the 2026 theme. `assembleOverrides`
++        // is the exact parse the old inline action used.
++        const override = assembleOverrides([
++          ['conferences.2.themeName.en', 'Speak Boldly'],
++        ]) as Json;
++        // The published doc is seeded at epoch; advance the clock so the draft
++        // the edit writes is strictly newer and `load` reopens it.
++        yield* TestClock.adjust('1 second');
++        const encoded = yield* editor.editDocument(siteScope, override);
++
++        // The returned EncodedDoc carries the edit…
++        const returnedDecoded = yield* decodeObject(encoded);
++        expect(themeName2026(returnedDecoded)).toBe('Speak Boldly');
++
++        // …and the stored draft is the canonical JSON of the merged document,
++        // so a reload (load) reopens it.
++        const draftBody = yield* readStoredText(SITE_CONTENT_DRAFT_KEY);
++        const storedDraft = yield* decodeJson(draftBody);
++        expect(themeName2026(storedDraft)).toBe('Speak Boldly');
++
++        // Every unedited deep field survives the merge (the property the old
++        // index-merge had): the 2024 conference is untouched.
++        expect(storedDraft.conferences.find((c) => c.slug === '/2024')).toEqual(
++          defaultContent.conferences.find((c) => c.slug === '/2024'),
++        );
++
++        const reopened = yield* editor.load(siteScope);
++        expect(reopened.source).toBe('draft');
++        expect(themeName2026(reopened.content)).toBe('Speak Boldly');
++      }).pipe(seededPublished(defaultContent)),
++  );
++
++  it.effect(
++    'rejects an edit that empties a required bilingual field with a 400 IssueError',
++    () =>
++      Effect.gen(function* () {
++        const editor = yield* DraftEditor.Service;
++        // Blank the 2026 EN theme name — `Text`'s both-locales-non-empty
++        // invariant must reject this at the decode boundary.
++        const override = assembleOverrides([
++          ['conferences.2.themeName.en', ''],
++        ]) as Json;
++        const result = yield* Effect.exit(
++          editor.editDocument(siteScope, override),
++        );
++        expect(result._tag).toBe('Failure');
++        if (result._tag === 'Failure') {
++          const error = result.cause.reasons.find(
++            (reason) => reason._tag === 'Fail',
++          );
++          expect(error).toBeDefined();
++          const issueError = (error as { readonly error: DraftEditor.IssueError })
++            .error;
++          expect(issueError._tag).toBe('DraftEditor.IssueError');
++          expect(issueError.status).toBe(400);
++          expect(issueError.issues.length).toBeGreaterThan(0);
++        }
++        // The reject left the bucket untouched: no draft was written.
++        const draftHead = yield* (yield* Storage.Service).head(
++          SITE_CONTENT_DRAFT_KEY,
++        );
++        expect(draftHead._tag).toBe('None');
++      }).pipe(seededPublished(defaultContent)),
++  );
++});
++
++describe('DraftEditor.applyImageUpload (rewrite a key on the draft)', () => {
++  it.effect('points the targeted key at the uploaded object on the draft', () =>
++    Effect.gen(function* () {
++      const editor = yield* DraftEditor.Service;
++      const target = 'team.0.photo.key';
++      const key = uploadedImageKey(target, 'image/png', 1_700_000_000_000);
++      const encoded = yield* editor.applyImageUpload(siteScope, target, key);
++
++      // The returned EncodedDoc references the new key for team member 0.
++      const decoded = yield* decodeObject(encoded);
++      expect(String(decoded.team[0]?.photo.key)).toBe(key);
++
++      // The stored draft persists that rewrite.
++      const draftBody = yield* readStoredText(SITE_CONTENT_DRAFT_KEY);
++      const storedDraft = yield* decodeJson(draftBody);
++      expect(String(storedDraft.team[0]?.photo.key)).toBe(key);
++    }).pipe(seededPublished(defaultContent)),
++  );
++});
++
++describe('DraftEditor.publish (promote draft → published, drop draft, bust)', () => {
++  it.effect(
++    'promotes the current draft to the published key and makes it live on the next public read',
++    () =>
++      Effect.gen(function* () {
++        const editor = yield* DraftEditor.Service;
++        const content = yield* Content.Service;
++
++        // Public read starts on the seeded published defaults.
++        const before = yield* content.getConference('en', 2026);
++        expect(before.title).toBe('Speak');
++
++        // Edit (save a draft) then publish — the two-step the migrated route
++        // runs for the Publish intent. Advance the clock so the saved draft is
++        // strictly newer than the epoch-seeded published doc and `publish`
++        // promotes IT (not the stale published doc).
++        const override = assembleOverrides([
++          ['conferences.2.themeName.en', 'Speak Now'],
++        ]) as Json;
++        yield* TestClock.adjust('1 second');
++        yield* editor.editDocument(siteScope, override);
++        yield* editor.publish(siteScope);
++
++        // The public read reflects the publish immediately (publish busts the
++        // cache) — no TTL advance.
++        const after = yield* content.getConference('en', 2026);
++        expect(after.title).toBe('Speak Now');
++
++        // The published object carries the edit and the draft was dropped.
++        const publishedBody = yield* readStoredText(SITE_CONTENT_KEY);
++        const publishedDoc = yield* decodeJson(publishedBody);
++        expect(themeName2026(publishedDoc)).toBe('Speak Now');
++        const draftHead = yield* (yield* Storage.Service).head(
++          SITE_CONTENT_DRAFT_KEY,
++        );
++        expect(draftHead._tag).toBe('None');
++
++        // The editor now reopens from the published document (no pending draft).
++        const reopened = yield* editor.load(siteScope);
++        expect(reopened.source).toBe('published');
++      }).pipe(seededPublished(defaultContent)),
++  );
++});
+diff --git a/app/lib/content/draft-editor.server.ts b/app/lib/content/draft-editor.server.ts
+index a4867b9..bce9cbc 100644
+--- a/app/lib/content/draft-editor.server.ts
++++ b/app/lib/content/draft-editor.server.ts
+@@ -1,18 +1,23 @@
+ export * as DraftEditor from './draft-editor.server';
+ 
+-import { Context, Effect, Layer, Option, Schema } from 'effect';
++import { Context, Effect, Layer, Option, Schema, SchemaIssue } from 'effect';
+ 
+ import {
++  Content,
+   SITE_CONTENT_DRAFT_KEY,
+   SITE_CONTENT_KEY,
+   type AdminContent,
+ } from '../content.server';
++import { deepMerge, setAtPath, type Json } from './admin-form';
+ import { defaultContent } from './defaults';
+ import { SiteContent } from './schema';
+ import type { SiteContent as SiteContentType } from './schema';
+ import { Storage } from '../storage.server';
+ import type { ObjectHead } from '../storage.server';
+ 
++/** The document encoded to its on-bucket object shape, returned to the view. */
++export type EncodedDoc = typeof SiteContent.Encoded;
++
+ /**
+  * `DraftEditor` is the deep module the `/admin` editor write path talks to
+  * (registration-launch plan, Branch 1). It absorbs the encode→merge→decode→
+@@ -74,6 +79,36 @@ export const scopeKeys = (scope: ContentScope): ScopeKeys => {
+   }
+ };
+ 
++// ---------------------------------------------------------------------------
++// Error
++// ---------------------------------------------------------------------------
++
++/**
++ * The single failure a `DraftEditor` write surfaces to the route. It carries a
++ * human `message`, the dotted-path `issues` of a rejected decode (empty for a
++ * storage failure), and the HTTP `status` the route maps to a `Response` (400
++ * for a validation reject, 502 for a storage failure). Keeping the status here
++ * means the route maps every outcome the same way regardless of which operation
++ * produced it (`small-interface-deep-implementation`).
++ */
++export class IssueError extends Schema.TaggedErrorClass<IssueError>()(
++  'DraftEditor.IssueError',
++  {
++    message: Schema.String,
++    issues: Schema.Array(Schema.String),
++    status: Schema.Number,
++  },
++) {}
++
++const formatIssue = SchemaIssue.makeFormatterStandardSchemaV1();
++
++/** Flatten a schema `Issue` tree to dotted-path messages for the editor. */
++const issueMessages = (issue: SchemaIssue.Issue): readonly string[] =>
++  formatIssue(issue).issues.map((entry) => {
++    const path = entry.path?.map((segment) => String(segment)).join('.');
++    return path ? `${path}: ${entry.message}` : entry.message;
++  });
++
+ // ---------------------------------------------------------------------------
+ // Codecs (the document's on-bucket JSON ↔ decoded value)
+ // ---------------------------------------------------------------------------
+@@ -81,6 +116,15 @@ export const scopeKeys = (scope: ContentScope): ScopeKeys => {
+ const decodeDocumentJson = Schema.decodeUnknownEffect(
+   Schema.fromJsonString(SiteContent),
+ );
++// `encodeDocument` yields the encoded OBJECT (handed back to the view);
++// `encodeDocumentJson` yields the JSON STRING stored in the bucket (Effect
++// Schema's JSON codec, not `JSON.stringify`, per the project lint rule);
++// `decodeDocument` decodes a merged object at the single boundary.
++const encodeDocument = Schema.encodeUnknownEffect(SiteContent);
++const encodeDocumentJson = Schema.encodeUnknownEffect(
++  Schema.fromJsonString(SiteContent),
++);
++const decodeDocument = Schema.decodeUnknownEffect(SiteContent);
+ 
+ // ---------------------------------------------------------------------------
+ // Service
+@@ -98,6 +142,37 @@ export class Service extends Context.Service<
+      * bad draft is logged and ignored), so the editor always opens.
+      */
+     readonly load: (scope: ContentScope) => Effect.Effect<AdminContent>;
++    /**
++     * The whole encode→merge→decode→re-encode→store-draft pipeline as ONE call:
++     * `override` (the route's parsed form override) is deep-merged onto the
++     * encoded current document, decoded at the single boundary (rejecting with a
++     * 400 `IssueError` carrying the dotted field issues), re-encoded to its
++     * canonical JSON, and stored at the scope's draft key. Returns the encoded
++     * document so the route can revalidate the view without a re-read.
++     */
++    readonly editDocument: (
++      scope: ContentScope,
++      override: Json,
++    ) => Effect.Effect<EncodedDoc, IssueError>;
++    /**
++     * Point the `targetPath` `…key` field at a freshly-uploaded bucket object
++     * `key` on the current draft and persist it, so the new image survives a
++     * reload and a later publish. The raw-bytes upload + content-type gate stays
++     * in the route; this rewrites the draft only.
++     */
++    readonly applyImageUpload: (
++      scope: ContentScope,
++      targetPath: string,
++      key: string,
++    ) => Effect.Effect<EncodedDoc, IssueError>;
++    /**
++     * Promote the scope's current edit source (the draft if newer, else the
++     * published document) to the published key, delete the draft best-effort,
++     * and bust the public read cache so the change is live on the next read with
++     * no redeploy. A storage failure on the published write rejects with a 502
++     * `IssueError`; the best-effort draft delete never fails the publish.
++     */
++    readonly publish: (scope: ContentScope) => Effect.Effect<void, IssueError>;
+   }
+ >()('gycc/lib/content/draft-editor.server/Service') {}
+ 
+@@ -105,6 +180,7 @@ export const layer = Layer.effect(
+   Service,
+   Effect.gen(function* () {
+     const storage = yield* Storage.Service;
++    const content = yield* Content.Service;
+ 
+     /**
+      * Read + decode the document at `key`, or `Option.none()` when it is absent
+@@ -164,14 +240,116 @@ export const layer = Layer.effect(
+       return { content: defaultContent, source: 'defaults' as const };
+     });
+ 
+-    return Service.of({ load });
++    /**
++     * Decode a merged candidate document, rejecting with a 400 `IssueError`
++     * carrying its dotted field issues. Shared by `editDocument` (form merge)
++     * and `applyImageUpload` (key rewrite) — the single decode boundary.
++     */
++    const decodeOrReject = (
++      candidate: Json,
++    ): Effect.Effect<SiteContentType, IssueError> =>
++      decodeDocument(candidate).pipe(
++        Effect.mapError(
++          (error) =>
++            new IssueError({
++              message: 'Validation failed — fix the fields below and resubmit.',
++              issues: issueMessages(error.issue),
++              status: 400,
++            }),
++        ),
++      );
++
++    /**
++     * Re-encode a decoded document to its canonical JSON and store it at
++     * `draftKey`, rejecting with a 502 `IssueError` on a storage failure.
++     * Returns the encoded object so callers can hand it back to the view.
++     */
++    const storeDraft = (
++      draftKey: string,
++      decoded: SiteContentType,
++    ): Effect.Effect<EncodedDoc, IssueError> =>
++      Effect.gen(function* () {
++        // A decoded `SiteContent` always re-encodes — a failure here is a bug,
++        // not a user error, so it dies rather than masquerading as an
++        // `IssueError`.
++        const json = yield* encodeDocumentJson(decoded).pipe(Effect.orDie);
++        yield* storage.put(draftKey, json, 'application/json').pipe(
++          Effect.mapError(
++            (cause) =>
++              new IssueError({
++                message: `Saving the draft failed — is the bucket configured? ${String(cause)}`,
++                issues: [],
++                status: 502,
++              }),
++          ),
++        );
++        return (yield* encodeDocument(decoded).pipe(Effect.orDie)) as EncodedDoc;
++      });
++
++    const editDocument = Effect.fn('DraftEditor.editDocument')(function* (
++      scope: ContentScope,
++      override: Json,
++    ) {
++      const { draftKey } = scopeKeys(scope);
++      const { content: current } = yield* load(scope);
++      const base = (yield* encodeDocument(current).pipe(Effect.orDie)) as Json;
++      const merged = deepMerge(base, override);
++      const decoded = yield* decodeOrReject(merged);
++      return yield* storeDraft(draftKey, decoded);
++    });
++
++    const applyImageUpload = Effect.fn('DraftEditor.applyImageUpload')(
++      function* (scope: ContentScope, targetPath: string, key: string) {
++        const { draftKey } = scopeKeys(scope);
++        const { content: current } = yield* load(scope);
++        const encoded = (yield* encodeDocument(current).pipe(
++          Effect.orDie,
++        )) as Json;
++        const next = setAtPath(encoded, targetPath, key);
++        const decoded = yield* decodeOrReject(next);
++        return yield* storeDraft(draftKey, decoded);
++      },
++    );
++
++    const publish = Effect.fn('DraftEditor.publish')(function* (
++      scope: ContentScope,
++    ) {
++      const { draftKey, publishedKey } = scopeKeys(scope);
++      const { content: current } = yield* load(scope);
++      const json = yield* encodeDocumentJson(current).pipe(Effect.orDie);
++      yield* storage.put(publishedKey, json, 'application/json').pipe(
++        Effect.mapError(
++          (cause) =>
++            new IssueError({
++              message: `Publishing failed — is the bucket configured? ${String(cause)}`,
++              issues: [],
++              status: 502,
++            }),
++        ),
++      );
++      // Best-effort cleanup; correctness does NOT depend on it (`load`
++      // reconciles draft-vs-published by `lastModified` and only reopens a
++      // strictly-newer draft, so a leftover draft can never reopen stale
++      // content). Hence it must not fail the publish — the live document is
++      // already written.
++      yield* storage.delete(draftKey).pipe(Effect.ignore);
++      yield* content.bust();
++    });
++
++    return Service.of({ load, editDocument, applyImageUpload, publish });
+   }),
+ );
+ 
+ /**
+- * The admin write path's `DraftEditor`, with its `Storage` dependency
+- * pre-provided as the never-fails-to-build `Storage.layerOptional` (mirroring
+- * `Content.defaultLayer`). Only `Env` stays open, discharged by the surrounding
++ * The admin write path's `DraftEditor`, self-contained except for `Env`. Its
++ * `Storage` and `Content` dependencies are pre-provided from ONE shared
++ * `Storage.layerOptional` so `publish`'s `Content.bust()` busts the very cache
++ * the public read path serves from, and the editor's writes and the read
++ * path's reads hit the same bucket instance (`make-impossible-states-
++ * unrepresentable` — no chance of a write-path Storage drifting from the
++ * read-path Storage). Only `Env` stays open, discharged by the surrounding
+  * app-runtime merge.
+  */
+-export const defaultLayer = layer.pipe(Layer.provide(Storage.layerOptional));
++export const defaultLayer = layer.pipe(
++  Layer.provide(Layer.provideMerge(Content.layer, Storage.layerOptional)),
++);

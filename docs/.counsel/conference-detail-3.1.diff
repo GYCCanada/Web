@@ -1,0 +1,372 @@
+commit f6b147881242abef6b0f050e10086ad0b637934e
+Author: cevr <seeve.c@gmail.com>
+Date:   Wed Jun 17 11:53:31 2026 -0400
+
+    feat(conference)(conference-detail): URL brands + Hotel + Conference schema growth + defaults
+    
+    Branch 3 sub-commit 3.1. Grow the Conference document schema with the
+    detail-page data the forked /YYYY pages hard-coded, modelling the optional
+    fields as Option at the document layer so Branch 4's section-skip has a real
+    Option.some/none discriminator (make-impossible-states-unrepresentable):
+    
+    - ExternalHttpsUrl: per-component XSS boundary (parses the URL; requires
+      https:, rejects embedded credentials). Modelled on assetKeyFilter, NOT a
+      substring/origin test.
+    - GoogleMapsEmbedUrl: ExternalHttpsUrl + host === www.google.com AND
+      pathname starts with /maps/embed. Host+path, NOT origin (origin excludes
+      the path, would admit www.google.com/anything).
+    - Hotel struct (id: ListItemId, name: Text, note?: Text) + DraftHotel.
+    - Conference grows registrationUrl/scheduleUrl (ExternalHttpsUrl),
+      mapEmbedUrl (GoogleMapsEmbedUrl) as OptionFromOptionalKey, and hotels as an
+      id-keyed empty-able list.
+    - Defaults: 2024 gets all (its real RegFox/schedule/map URLs + 5 hotels);
+      2026 gets only registrationUrl (RegFox, the live channel); 2025 gets
+      nothing optional (cancelled year).
+    - schema.test.ts: URL-brand accept/reject matrices, incl. the origin-vs-path
+      case GoogleMapsEmbedUrl must reject.
+
+diff --git a/app/lib/content/defaults.ts b/app/lib/content/defaults.ts
+index 55de1c6..b42eaf4 100644
+--- a/app/lib/content/defaults.ts
++++ b/app/lib/content/defaults.ts
+@@ -86,6 +86,53 @@ export const defaultContent: SiteContent = Schema.decodeUnknownSync(
+         regular: { start: "2024-06-23", end: "2024-07-20" },
+         late: { start: "2024-07-21", end: "2024-08-25" },
+       },
++      // Detail-page data (registration-launch Branch 3) — the URLs/hotels the
++      // forked `2024/_index.tsx` hard-coded, now editable content. All present
++      // for 2024, so every detail section renders.
++      registrationUrl:
++        "https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day",
++      scheduleUrl:
++        "https://docs.google.com/document/d/1gNAOfdW2Yhgg7FABjUqQt2k2mXV_AdhARWUOyiVL9dA/pub",
++      mapEmbedUrl:
++        "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2570.54720532797!2d-119.4124495876084!3d49.888529227544645!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x537d8d28862f4bfd%3A0xd41402dfff0455f4!2s130%20Gerstmar%20Rd%2C%20Kelowna%2C%20BC%20V1X%204A7!5e0!3m2!1sen!2sca!4v1720988332743!5m2!1sen!2sca",
++      hotels: [
++        {
++          id: "hQ1c8mZrT0vK4nXpL9aWd",
++          name: {
++            en: "Super 8 by Wyndham Kelowna BC",
++            fr: "Super 8 by Wyndham Kelowna BC",
++          },
++        },
++        {
++          id: "rB7yN2eJ5sU0wG3kP8xQv",
++          name: {
++            en: "Fairfield Inn & Suites Kelowna",
++            fr: "Fairfield Inn & Suites Kelowna",
++          },
++          note: {
++            en: 'Holiday Inn Express & Suites Kelowna — "GYC Canada" or Group Code: "GYC" (call 778-484-2999 for discount)',
++            fr: 'Holiday Inn Express & Suites Kelowna — « GYC Canada » ou code de groupe : « GYC » (appelez le 778-484-2999 pour le rabais)',
++          },
++        },
++        {
++          id: "tF9pX4kW6mD1cR8vN3sLb",
++          name: {
++            en: "Microtel Inn & Suites by Wyndham Kelowna",
++            fr: "Microtel Inn & Suites by Wyndham Kelowna",
++          },
++        },
++        {
++          id: "yK2nV7bH5jQ0dT8wM4xPc",
++          name: { en: "Comfort Suites", fr: "Comfort Suites" },
++        },
++        {
++          id: "zL6mC3gR9pW1kN7vX5sQt",
++          name: {
++            en: "Kelowna Days Inn by Wyndham Kelowna",
++            fr: "Kelowna Days Inn by Wyndham Kelowna",
++          },
++        },
++      ],
+       location: {
+         en: "130 Gerstmar Rd, Kelowna, BC V1X 4A7",
+         fr: "130 Gerstmar Rd, Kelowna, BC V1X 4A7",
+@@ -255,6 +302,10 @@ lives in Michigan with his wife and daughter where he works as a pastor.
+       },
+       dates: { start: "2025-08-20", end: "2025-08-24" },
+       // No pricing for 2025 — omit `registration` (decodes to `Option.none()`).
++      // Cancelled year: omit every optional detail field (registrationUrl /
++      // scheduleUrl / mapEmbedUrl decode to `Option.none()`) and carry no hotels,
++      // so Branch 4's section-skip renders 2025 as hero + FAQ only.
++      hotels: [],
+       location: { en: "Montreal, QC", fr: "Montréal, QC" },
+       tagline: {
+         en: '"And after the earthquake a fire, but the Lord was not in the fire; and after the fire a still small voice."',
+@@ -305,6 +356,12 @@ lives in Michigan with his wife and daughter where he works as a pastor.
+       },
+       dates: { start: "2026-08-05", end: "2026-08-09" },
+       // Pricing not set yet — omit `registration` (decodes to `Option.none()`).
++      // The return conference carries ONLY its RegFox `registrationUrl` (the live
++      // 2026 channel, settled #9) — schedule / map / hotels / speakers are still
++      // TBD, so those optional fields are omitted and `hotels` is empty. This sets
++      // up Branch 4's skip proof: /2026 renders hero + Register button + FAQ only.
++      registrationUrl: "https://gyccanada.regfox.com/gyc-canada-2026-speak",
++      hotels: [],
+       location: {
+         en: "Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB",
+         fr: "Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB",
+diff --git a/app/lib/content/schema.test.ts b/app/lib/content/schema.test.ts
+index 2f65dcd..cba17af 100644
+--- a/app/lib/content/schema.test.ts
++++ b/app/lib/content/schema.test.ts
+@@ -7,6 +7,8 @@ import {
+   ConferenceSlug,
+   DateRange,
+   DraftSiteContent,
++  ExternalHttpsUrl,
++  GoogleMapsEmbedUrl,
+   HexColour,
+   IsoDate,
+   ListItemId,
+@@ -188,6 +190,83 @@ describe('ConferenceSlug validation', () => {
+   });
+ });
+ 
++const isValidExternalHttpsUrl = (value: string): boolean =>
++  Schema.decodeUnknownResult(ExternalHttpsUrl)(value)._tag === 'Success';
++
++describe('ExternalHttpsUrl validation (per-component XSS boundary)', () => {
++  test('accepts https URLs without embedded credentials', () => {
++    for (const value of [
++      'https://gyccanada.regfox.com/gyc-canada-2026-speak',
++      'https://docs.google.com/document/d/abc/pub',
++      'https://example.com',
++      'https://example.com/path?q=1#frag',
++    ]) {
++      expect(isValidExternalHttpsUrl(value)).toBe(true);
++    }
++  });
++
++  test('rejects non-https protocols, credentialed URLs, and non-URLs', () => {
++    for (const value of [
++      '', // empty
++      'http://example.com/x', // http: not https:
++      'javascript:alert(1)', // XSS scheme
++      'data:text/html,<script>alert(1)</script>', // data: scheme
++      'file:///etc/passwd', // file: scheme
++      'ftp://example.com/x', // ftp: scheme
++      'https://user:pass@example.com/', // embedded credentials
++      'https://user@example.com/', // embedded username
++      '/relative/path', // not an absolute URL
++      'example.com', // no scheme
++      'not a url at all',
++    ]) {
++      expect(isValidExternalHttpsUrl(value)).toBe(false);
++    }
++  });
++});
++
++const isValidGoogleMapsEmbedUrl = (value: string): boolean =>
++  Schema.decodeUnknownResult(GoogleMapsEmbedUrl)(value)._tag === 'Success';
++
++describe('GoogleMapsEmbedUrl validation (host + path, NOT origin)', () => {
++  test('accepts a real Google Maps embed URL', () => {
++    expect(
++      isValidGoogleMapsEmbedUrl(
++        'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2570.5',
++      ),
++    ).toBe(true);
++    expect(
++      isValidGoogleMapsEmbedUrl('https://www.google.com/maps/embed/v1/place'),
++    ).toBe(true);
++  });
++
++  test('rejects a non-embed Google path (origin check would WRONGLY admit this)', () => {
++    // The defining case: an `origin` test excludes the path, so it would admit
++    // `https://www.google.com/anything`. The host+path filter rejects it.
++    for (const value of [
++      'https://www.google.com/anything',
++      'https://www.google.com/', // bare host, no embed path
++      'https://www.google.com/search?q=evil',
++      'https://www.google.com/maps', // /maps but not /maps/embed
++    ]) {
++      expect(isValidGoogleMapsEmbedUrl(value)).toBe(false);
++    }
++  });
++
++  test('rejects non-google hosts, non-https, and credentialed URLs', () => {
++    for (const value of [
++      'https://evil.com/maps/embed?pb=x', // wrong host
++      'https://maps.google.com/maps/embed', // wrong host (not www.google.com)
++      'https://www.google.com.evil.com/maps/embed', // host spoof
++      'http://www.google.com/maps/embed', // http: not https:
++      'https://user:pass@www.google.com/maps/embed', // embedded credentials
++      'javascript:alert(1)//www.google.com/maps/embed',
++      '',
++    ]) {
++      expect(isValidGoogleMapsEmbedUrl(value)).toBe(false);
++    }
++  });
++});
++
+ const isValidListItemId = (value: string): boolean =>
+   Schema.decodeUnknownResult(ListItemId)(value)._tag === 'Success';
+ 
+diff --git a/app/lib/content/schema.ts b/app/lib/content/schema.ts
+index 00e1a53..76ca2b1 100644
+--- a/app/lib/content/schema.ts
++++ b/app/lib/content/schema.ts
+@@ -116,6 +116,88 @@ export const HexColour = Schema.NonEmptyString.check(
+ ).pipe(Schema.brand('HexColour'));
+ export type HexColour = typeof HexColour.Type;
+ 
++/**
++ * An external `https://` URL safe to interpolate into an `href` or an iframe
++ * `src` from hand-edited document content (registration-launch Branch 3, settled
++ * #4). The `registrationUrl` / `scheduleUrl` / map-embed fields are author-set
++ * strings that the rendered detail page feeds straight into a link/iframe, so the
++ * brand must be a watertight XSS boundary — modelled per-component on
++ * `assetKeyFilter` above, **parsing the URL and inspecting its components**, NOT
++ * a substring or `origin` test (an `origin` check excludes the path, so it would
++ * admit `https://www.google.com/anything`).
++ *
++ * The filter rejects, by parsing:
++ *   - a value that is not a parseable absolute URL (relative refs, garbage);
++ *   - any protocol other than `https:` (so `javascript:`, `data:`, `http:`,
++ *     `file:` etc. can never reach an `href`/`src`);
++ *   - embedded credentials (`username` / `password` non-empty), so a smuggled
++ *     `https://user:pass@evil/` cannot ride along.
++ * The brand keeps the guarantee load-bearing past the decoder: a raw `string` is
++ * not an `ExternalHttpsUrl` until it has crossed the schema
++ * (`boundary-discipline`, `make-impossible-states-unrepresentable`).
++ */
++const parseUrl = (value: string): URL | undefined => {
++  try {
++    return new URL(value);
++  } catch {
++    return undefined;
++  }
++};
++
++const externalHttpsUrlFilter = Schema.makeFilter<string>(
++  (value) => {
++    const url = parseUrl(value);
++    if (url === undefined) return 'ExternalHttpsUrl must be a valid absolute URL';
++    if (url.protocol !== 'https:') {
++      return 'ExternalHttpsUrl must use the https: protocol';
++    }
++    if (url.username !== '' || url.password !== '') {
++      return 'ExternalHttpsUrl must not contain embedded credentials';
++    }
++    return undefined;
++  },
++  { title: 'ExternalHttpsUrl' },
++);
++
++export const ExternalHttpsUrl = Schema.NonEmptyString.check(
++  externalHttpsUrlFilter,
++).pipe(Schema.brand('ExternalHttpsUrl'));
++export type ExternalHttpsUrl = typeof ExternalHttpsUrl.Type;
++
++/**
++ * A Google Maps **embed** URL safe to use as an iframe `src` (registration-launch
++ * Branch 3). It is an `ExternalHttpsUrl` (https-only, no credentials) PLUS a
++ * per-component check that the URL **parses** to the Google Maps embed endpoint:
++ * `host === 'www.google.com'` AND `pathname.startsWith('/maps/embed')`. This is
++ * deliberately a host+path check, **not** an `origin` check: `origin` excludes
++ * the path, so an origin test would admit `https://www.google.com/anything`,
++ * which is not an embed and could be an arbitrary Google page. Constraining the
++ * iframe source to the embed endpoint prevents an arbitrary-iframe XSS through a
++ * hand-edited `mapEmbedUrl` (settled #4, modelled on `assetKeyFilter`).
++ */
++const googleMapsEmbedUrlFilter = Schema.makeFilter<string>(
++  (value) => {
++    const url = parseUrl(value);
++    if (url === undefined) {
++      return 'GoogleMapsEmbedUrl must be a valid absolute URL';
++    }
++    if (url.host !== 'www.google.com') {
++      return 'GoogleMapsEmbedUrl host must be www.google.com';
++    }
++    if (!url.pathname.startsWith('/maps/embed')) {
++      return 'GoogleMapsEmbedUrl path must start with /maps/embed';
++    }
++    return undefined;
++  },
++  { title: 'GoogleMapsEmbedUrl' },
++);
++
++export const GoogleMapsEmbedUrl = Schema.NonEmptyString.check(
++  externalHttpsUrlFilter,
++  googleMapsEmbedUrlFilter,
++).pipe(Schema.brand('GoogleMapsEmbedUrl'));
++export type GoogleMapsEmbedUrl = typeof GoogleMapsEmbedUrl.Type;
++
+ /**
+  * The stable identity of a CMS list item (a speaker, seminar, team member, and
+  * the hotel / FAQ / give items that follow) — a `nanoid` (ADR 0006). Identity is
+@@ -300,6 +382,23 @@ export const Hero = Schema.Struct({
+ });
+ export type Hero = typeof Hero.Type;
+ 
++/**
++ * A recommended hotel for a conference (registration-launch Branch 3, settled
++ * #4) — replaces the hard-coded `<li>` list in the forked detail pages with
++ * editable data. A list item, so it carries a stable `ListItemId` (ADR 0006) and
++ * lives in an `IdListArray`. `name` is a bilingual `Text` (both locales required
++ * and non-empty, like every other content string); `note` is an optional
++ * bilingual line for booking detail (a discount code, a phone number). The
++ * `hotels` array is empty-able and the whole `MapSection` is section-skippable
++ * (Branch 4): a year with no hotels simply omits them.
++ */
++export const Hotel = Schema.Struct({
++  id: ListItemId,
++  name: Text,
++  note: Schema.optionalKey(Text),
++});
++export type Hotel = typeof Hotel.Type;
++
+ /**
+  * A single annual conference.
+  *
+@@ -335,6 +434,24 @@ export const Conference = Schema.Struct({
+   speakers: IdListArray(Speaker),
+   seminars: IdListArray(Seminar),
+   promos: Schema.Array(Schema.NonEmptyString),
++  /**
++   * The conference's optional detail-page data (registration-launch Branch 3,
++   * settled #4). Each is modelled as `OptionFromOptionalKey` at the document
++   * layer so an *absent* field is `Option.none()` (never an empty string), which
++   * gives Branch 4's section-skip a real `Option.some`/`Option.none`
++   * discriminator (`make-impossible-states-unrepresentable`): an empty-string URL
++   * is not representable as "present". `hotels` is an empty-able id-keyed list
++   * (absence = `[]`, skipped). The `Content` boundary (Branch 3.2) projects each
++   * to `string | undefined` / `[]` so React never sees an `Option`.
++   *   - `registrationUrl` — the external registrar (RegFox) Register button.
++   *   - `scheduleUrl` — the published schedule link (was a hard-coded Google Docs URL).
++   *   - `mapEmbedUrl` — the venue map iframe (constrained to the Google Maps embed endpoint).
++   *   - `hotels` — recommended-hotel list (was a hard-coded `<li>` list).
++   */
++  registrationUrl: Schema.OptionFromOptionalKey(ExternalHttpsUrl),
++  scheduleUrl: Schema.OptionFromOptionalKey(ExternalHttpsUrl),
++  mapEmbedUrl: Schema.OptionFromOptionalKey(GoogleMapsEmbedUrl),
++  hotels: IdListArray(Hotel),
+ });
+ export type Conference = typeof Conference.Type;
+ 
+@@ -515,11 +632,23 @@ const DraftTeamMember = Schema.Struct({
+   photo: Schema.optionalKey(DraftImageRef),
+ });
+ 
++/**
++ * A draft hotel: a freshly-added item carries only its `id` (settled #10), with
++ * `name`/`note` filled in incrementally. Both relax to optional `DraftText`
++ * (publish re-enforces the strict bilingual `Text`).
++ */
++const DraftHotel = Schema.Struct({
++  id: ListItemId,
++  name: Schema.optionalKey(DraftText),
++  note: Schema.optionalKey(DraftText),
++});
++
+ /** The draft variant of `Conference`: only its list items are draft-lax. */
+ const DraftConference = Schema.Struct({
+   ...Conference.fields,
+   speakers: IdListArray(DraftSpeaker),
+   seminars: IdListArray(DraftSeminar),
++  hotels: IdListArray(DraftHotel),
+ });
+ 
+ /**

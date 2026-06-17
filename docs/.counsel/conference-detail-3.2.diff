@@ -1,0 +1,177 @@
+commit 83e8566ab06af35c8a9d51893a9f01def3ad423a
+Author: cevr <seeve.c@gmail.com>
+Date:   Wed Jun 17 12:03:03 2026 -0400
+
+    feat(conference)(conference-detail): boundary Conference growth + toConference Option projection
+    
+    Branch 3 sub-commit 3.2. Project the optional detail-page fields Branch 3.1
+    added to the Conference document (registrationUrl / scheduleUrl / mapEmbedUrl as
+    OptionFromOptionalKey, hotels as an empty-able id-keyed list) into the read
+    boundary the routes/components consume (boundary-discipline):
+    
+    - The boundary Conference interface grows registrationUrl / scheduleUrl /
+      mapEmbedUrl as string | undefined and hotels as a plain {name, note?}[] — so
+      React never sees an Option<string>, and Branch 4's section-skip gates on
+      undefined / [] (the section-presence discriminator).
+    - toConference projects each document Option via Option.getOrUndefined (the
+      convention for ALL new optional Conference fields, matching the existing
+      registration Option.isSome gate), and maps each Hotel to this locale's strings
+      via a new toHotel helper (dropping the list-identity id from the read shape;
+      the optional note stays string | undefined).
+    - content.server.test.ts: pins the projection against the defaults — 2024 (every
+      field present, hotel notes per-locale en/fr), 2026 (only registrationUrl, the
+      RegFox live channel; rest skippable), 2025 (cancelled year, all absent).
+
+diff --git a/app/lib/content.server.test.ts b/app/lib/content.server.test.ts
+index b722667..f63d898 100644
+--- a/app/lib/content.server.test.ts
++++ b/app/lib/content.server.test.ts
+@@ -180,6 +180,79 @@ describe('Content boundary conversion (decode → legacy shape)', () => {
+   });
+ });
+ 
++describe('Content optional detail-page projection (Option → string|undefined)', () => {
++  /**
++   * The Conference document models its detail-page fields as `Option`
++   * (`OptionFromOptionalKey` for the URLs, an empty-able list for `hotels`,
++   * registration-launch Branch 3.1). `toConference` projects each to the boundary
++   * shape React renders: `string | undefined` for the URLs, a plain `{name,
++   * note?}[]` for hotels — so a component never sees an `Option<string>` and
++   * Branch 4's section-skip gates on `undefined` / `[]` (`boundary-discipline`).
++   * These tests pin that projection against the defaults: 2024 carries every
++   * field, 2026 only `registrationUrl` (the RegFox live channel, settled #9),
++   * 2025 (cancelled) none.
++   */
++  it.effect('projects 2024 — every optional field present', () =>
++    Effect.gen(function* () {
++      const content = yield* Content.Service;
++      const conference = yield* content.getConference('en', 2024);
++
++      // The brand-validated https strings cross the boundary verbatim (no Option).
++      expect(conference.registrationUrl).toBe(
++        'https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day',
++      );
++      expect(conference.scheduleUrl).toBe(
++        'https://docs.google.com/document/d/1gNAOfdW2Yhgg7FABjUqQt2k2mXV_AdhARWUOyiVL9dA/pub',
++      );
++      expect(conference.mapEmbedUrl).toBeDefined();
++      expect(conference.mapEmbedUrl?.startsWith('https://www.google.com/maps/embed')).toBe(
++        true,
++      );
++
++      // Hotels project to this locale's strings; the optional `note` is present
++      // only on the items that carry one.
++      expect(conference.hotels).toHaveLength(5);
++      expect(conference.hotels[0]?.name).toBe('Super 8 by Wyndham Kelowna BC');
++      expect(conference.hotels[0]?.note).toBeUndefined();
++      expect(conference.hotels[1]?.name).toBe('Fairfield Inn & Suites Kelowna');
++      expect(conference.hotels[1]?.note).toContain('Holiday Inn Express');
++    }).pipe(provideSeeded(defaultContent)));
++
++  it.effect('projects 2024 hotel notes per-locale (fr)', () =>
++    Effect.gen(function* () {
++      const content = yield* Content.Service;
++      const conference = yield* content.getConference('fr', 2024);
++      // The bilingual `note` `Text` collapses to the requested locale.
++      expect(conference.hotels[1]?.note).toContain('code de groupe');
++    }).pipe(provideSeeded(defaultContent)));
++
++  it.effect('projects 2026 — only registrationUrl present, the rest skippable', () =>
++    Effect.gen(function* () {
++      const content = yield* Content.Service;
++      const conference = yield* content.getConference('en', 2026);
++      // 2026 carries ONLY its RegFox registration URL (settled #9).
++      expect(conference.registrationUrl).toBe(
++        'https://gyccanada.regfox.com/gyc-canada-2026-speak',
++      );
++      // Schedule / map / hotels are TBD → the section-skip discriminators.
++      expect(conference.scheduleUrl).toBeUndefined();
++      expect(conference.mapEmbedUrl).toBeUndefined();
++      expect(conference.hotels).toEqual([]);
++    }).pipe(provideSeeded(defaultContent)));
++
++  it.effect('projects 2025 — cancelled year, every optional field absent', () =>
++    Effect.gen(function* () {
++      const content = yield* Content.Service;
++      const conference = yield* content.getConference('en', 2025);
++      // Cancelled year: no registration channel, no schedule/map, no hotels —
++      // Branch 4 renders it as hero + FAQ only.
++      expect(conference.registrationUrl).toBeUndefined();
++      expect(conference.scheduleUrl).toBeUndefined();
++      expect(conference.mapEmbedUrl).toBeUndefined();
++      expect(conference.hotels).toEqual([]);
++    }).pipe(provideSeeded(defaultContent)));
++});
++
+ describe('Content fallback (semantically-invalid document)', () => {
+   /**
+    * A document whose `conferences` array decodes cleanly but is empty, or omits
+diff --git a/app/lib/content.server.ts b/app/lib/content.server.ts
+index 74d68b0..0c55e82 100644
+--- a/app/lib/content.server.ts
++++ b/app/lib/content.server.ts
+@@ -128,6 +128,25 @@ export interface Conference {
+    * document field is the correctly-named `accentColor` (CMS decision D5).
+    */
+   readonly theme: string;
++  /**
++   * The optional detail-page data the forked `/YYYY` pages hard-coded
++   * (registration-launch Branch 3, settled #4). The document models each as
++   * `Option` (`OptionFromOptionalKey` / empty list); this boundary projects them
++   * to `string | undefined` and a plain object array so React never sees an
++   * `Option<string>` (`boundary-discipline`). An absent field is `undefined`, an
++   * absent list is `[]` — that is the section-presence discriminator Branch 4's
++   * section-skip gates on (`registrationUrl !== undefined`,
++   * `mapEmbedUrl !== undefined`, `hotels.length > 0`). Each URL crossed the
++   * `ExternalHttpsUrl` / `GoogleMapsEmbedUrl` brand on decode, so the rendered
++   * `href` / iframe `src` is already an XSS-safe https string.
++   */
++  readonly registrationUrl: string | undefined;
++  readonly scheduleUrl: string | undefined;
++  readonly mapEmbedUrl: string | undefined;
++  readonly hotels: readonly {
++    readonly name: string;
++    readonly note?: string;
++  }[];
+ }
+ 
+ /**
+@@ -195,6 +214,21 @@ const toSeminar = (seminar: DocSeminar, locale: Locale): Seminar => ({
+   description: seminar.description[locale],
+ });
+ 
++/**
++ * Project a document `Hotel` to the boundary shape: the bilingual `name`/`note`
++ * `Text`s collapse to this locale's string, and the optional `note` becomes a
++ * `string | undefined` (omitted when the document carries no note). The `id`
++ * (list identity, ADR 0006) is not part of the read boundary the detail page
++ * renders, so it is dropped here.
++ */
++const toHotel = (
++  hotel: DocConference['hotels'][number],
++  locale: Locale,
++): Conference['hotels'][number] => ({
++  name: hotel.name[locale],
++  ...(hotel.note === undefined ? {} : { note: hotel.note[locale] }),
++});
++
+ const toConference = (
+   conference: DocConference,
+   locale: Locale,
+@@ -231,6 +265,16 @@ const toConference = (
+   speakers: conference.speakers.map((speaker) => toSpeaker(speaker, locale)),
+   seminars: conference.seminars.map((seminar) => toSeminar(seminar, locale)),
+   promos: [...conference.promos],
++  // The optional detail-page fields: each document `Option` projects to
++  // `string | undefined` via `Option.getOrUndefined` (the convention for ALL
++  // new optional Conference fields — `Option` at the document layer, plain
++  // `string | undefined` at the boundary so React never sees an `Option`,
++  // matching the `registration` `Option.isSome` gate above). `hotels` projects
++  // each item to this locale's strings; an empty document list stays `[]`.
++  registrationUrl: Option.getOrUndefined(conference.registrationUrl),
++  scheduleUrl: Option.getOrUndefined(conference.scheduleUrl),
++  mapEmbedUrl: Option.getOrUndefined(conference.mapEmbedUrl),
++  hotels: conference.hotels.map((hotel) => toHotel(hotel, locale)),
+ });
+ 
+ const toTeamMember = (member: DocTeamMember): TeamMember => ({

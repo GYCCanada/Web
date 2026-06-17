@@ -1,0 +1,855 @@
+commit 66c62d7ae85b273819fc9fa663a583b269869134
+Author: cevr <seeve.c@gmail.com>
+Date:   Wed Jun 17 12:10:33 2026 -0400
+
+    feat(conference)(conference-detail): extract data-driven ConferenceDetail from the 2024 fork
+    
+    Extract the conference detail page — forked verbatim across 2024/2025/2026
+    (~620 lines each) — into one shared, data-driven `ConferenceDetail`
+    component (registration-launch Branch 3.3, Candidate 1, settled #4).
+    
+    - small-interface-deep-implementation: public surface is one prop, the
+      boundary `Conference`. Every section (Hero/MobileHero/DesktopHero,
+      MapSection, SpeakersAndSeminars, SpeakerCard + card-rotation machinery,
+      RegistrationSection, FaqSection) is hidden inside.
+    - boundary-discipline / derive-dont-sync: the formerly hard-coded RegFox
+      link, schedule link, map iframe src, and hotel <li>s are now read off
+      `registrationUrl`/`scheduleUrl`/`mapEmbedUrl`/`hotels` (projected by
+      toConference from validated document Options in 3.1/3.2). The fork's
+      `useLoaderData` coupling is replaced by prop-drilling so all three loaders
+      can become thin pass-throughs (3.4).
+    
+    Section-skip (omitting absent sections) is Branch 4's concern; here the
+    data flows through unconditionally. The three forks still exist and are
+    deleted in 3.4.
+    
+    conference-detail.test.tsx render-to-strings a fully-populated conference
+    through createRoutesStub + LocalizationProvider: every section renders, the
+    register/schedule buttons + map src + hotels come from boundary data (not
+    hard-coded constants), mobile/desktop variants, EN + FR.
+
+diff --git a/app/routes/($lang)+/conference-detail.test.tsx b/app/routes/($lang)+/conference-detail.test.tsx
+new file mode 100644
+index 0000000..29f0d38
+--- /dev/null
++++ b/app/routes/($lang)+/conference-detail.test.tsx
+@@ -0,0 +1,206 @@
++import { describe, expect, it } from 'bun:test';
++import { renderToString } from 'react-dom/server';
++import { createRoutesStub } from 'react-router';
++
++import { Breakpoint } from '~/lib/client-hints';
++import type { Conference } from '~/lib/content.server';
++import { LocalizationProvider } from '~/lib/localization/provider';
++import { root as translations } from '~/lib/localization/translations';
++
++import { ConferenceDetail } from './conference-detail';
++
++/**
++ * `ConferenceDetail` is the single deep module the three `/YYYY` loaders render
++ * (registration-launch Branch 3.3). It was extracted verbatim from the
++ * `2024/_index.tsx` fork — the spec — with the formerly hard-coded RegFox link,
++ * schedule link, map iframe `src`, and hotel `<li>`s replaced by reads off the
++ * boundary `Conference` (`registrationUrl` / `scheduleUrl` / `mapEmbedUrl` /
++ * `hotels`, projected by `toConference` from validated document `Option`s).
++ *
++ * These render-to-string tests pin the load-bearing claim of the extraction
++ * (`prove-it-works`): a fully-populated conference renders every section, and
++ * the data-driven sections render the boundary data — NOT the old hard-coded
++ * constants. Section-skip (omitting a section when its data is absent) is
++ * Branch 4's concern and is tested there; here the conference carries every
++ * field, so every section is present.
++ *
++ * The component is server-rendered through `createRoutesStub` (to satisfy the
++ * router hooks it uses — `useSearchParams`, `useLocation` via `Link`, `useParams`
++ * via `useLocale`, and `useRouteLoaderData('root')` via `useHints`) plus a
++ * `LocalizationProvider`. The `root` loader data is supplied directly through
++ * `hydrationData` so the render is synchronous (no async loader suspends).
++ */
++
++/** A fully-populated boundary `Conference` — every detail section has data. */
++const fullConference: Conference = {
++  slug: '2024',
++  title: 'While It Is Day',
++  dates: [Date.UTC(2024, 7, 1), Date.UTC(2024, 7, 4)],
++  hero: {
++    image: {
++      desktop: '/images/2024/hero/desktop.png',
++      mobile: '/images/2024/hero/mobile.png',
++    },
++    alt: 'GYC Canada 2024',
++  },
++  location: '130 Gerstmar Rd, Kelowna, BC V1X 4A7',
++  tagline: 'I must work the works of Him who sent Me while it is day.',
++  bible: { book: 'John', chapter: 9, verse: 4 },
++  speakers: [
++    {
++      name: 'Matt Parra',
++      activity: 'Morning Plenary',
++      img: '/images/2024/speakers/matt.png',
++      bio: 'Matt Parra is a pastor.',
++    },
++  ],
++  seminars: [
++    {
++      title: 'Discipleship',
++      speaker: {
++        name: 'Jane Doe',
++        img: '/images/2024/speakers/jane.png',
++        bio: 'Jane Doe leads a seminar.',
++      },
++      description: 'A seminar on discipleship.',
++    },
++  ],
++  promos: [],
++  theme: '#abcdef',
++  registrationUrl:
++    'https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day',
++  scheduleUrl:
++    'https://docs.google.com/document/d/1gNAOfdW2Yhgg7FABjUqQt2k2mXV_AdhARWUOyiVL9dA/pub',
++  mapEmbedUrl: 'https://www.google.com/maps/embed?pb=!1m18!FAKE',
++  hotels: [
++    { name: 'Super 8 by Wyndham Kelowna BC' },
++    {
++      name: 'Fairfield Inn & Suites Kelowna',
++      note: 'Group Code: GYC',
++    },
++  ],
++};
++
++/**
++ * Render `ConferenceDetail` to an HTML string. `breakpoint` chooses the
++ * server-rendered layout: `Sm`/`Md` render the mobile variants, anything larger
++ * renders desktop (`useBreakpoint`'s server snapshot reads `hints.breakpoint`).
++ */
++const renderConference = (
++  conference: Conference,
++  {
++    breakpoint = Breakpoint.Xl,
++    lang,
++  }: { breakpoint?: Breakpoint; lang?: 'fr' } = {},
++): string => {
++  const Stub = createRoutesStub([
++    {
++      id: 'root',
++      // Mirror the app's optional leading `:lang?` segment so `useLocale`
++      // (which reads `params.lang`) resolves `/fr` → French, `/` → English.
++      path: ':lang?',
++      Component: () => (
++        <LocalizationProvider
++          translation={translations[lang === 'fr' ? 'fr' : 'en']}
++        >
++          <ConferenceDetail conference={conference} />
++        </LocalizationProvider>
++      ),
++    },
++  ]);
++
++  return renderToString(
++    <Stub
++      initialEntries={[lang === 'fr' ? '/fr' : '/']}
++      hydrationData={{
++        loaderData: {
++          root: {
++            requestInfo: {
++              hints: { theme: 'light', timeZone: 'America/Toronto', breakpoint },
++            },
++          },
++        },
++      }}
++    />,
++  );
++};
++
++describe('ConferenceDetail', () => {
++  it('renders every section for a fully-populated conference (desktop)', () => {
++    const html = renderConference(fullConference);
++
++    // Hero
++    expect(html).toContain(fullConference.hero.image.desktop);
++    expect(html).toContain(fullConference.tagline);
++    expect(html).toContain(fullConference.bible.book);
++    expect(html).toContain(fullConference.location);
++    // Speakers + seminars
++    expect(html).toContain('Speakers');
++    expect(html).toContain('Seminars');
++    expect(html).toContain('Matt Parra');
++    expect(html).toContain('Discipleship');
++    // Registration section
++    expect(html).toContain('Register Now');
++    // FAQ section (static links)
++    expect(html).toContain('Got Questions?');
++  });
++
++  it('renders the register button from the boundary registrationUrl, not a hard-coded constant', () => {
++    const html = renderConference(fullConference);
++
++    expect(html).toContain(
++      'href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"',
++    );
++
++    // The component carries no hard-coded RegFox/schedule/map literals: change
++    // the data and the rendered hrefs change with it (`derive-dont-sync`).
++    const other = renderConference({
++      ...fullConference,
++      registrationUrl: 'https://gyccanada.regfox.com/gyc-canada-2026-speak',
++    });
++    expect(other).toContain(
++      'href="https://gyccanada.regfox.com/gyc-canada-2026-speak"',
++    );
++    expect(other).not.toContain('gyc-canada-2024-while-it-is-day');
++  });
++
++  it('renders the schedule button from the boundary scheduleUrl', () => {
++    const html = renderConference(fullConference);
++    expect(html).toContain(`href="${fullConference.scheduleUrl}"`);
++  });
++
++  it('renders the map iframe src from the boundary mapEmbedUrl', () => {
++    const html = renderConference(fullConference);
++    expect(html).toContain(`src="${fullConference.mapEmbedUrl}"`);
++  });
++
++  it('renders the hotels list from the boundary hotels, including notes', () => {
++    const html = renderConference(fullConference);
++
++    expect(html).toContain('Super 8 by Wyndham Kelowna BC');
++    expect(html).toContain('Fairfield Inn &amp; Suites Kelowna');
++    // The optional note is appended after the name.
++    expect(html).toContain('Group Code: GYC');
++  });
++
++  it('renders the mobile hero variant at a small breakpoint', () => {
++    const html = renderConference(fullConference, {
++      breakpoint: Breakpoint.Sm,
++    });
++
++    // Mobile hero uses the mobile crop and still carries the register button.
++    expect(html).toContain(fullConference.hero.image.mobile);
++    expect(html).toContain(
++      'href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"',
++    );
++  });
++
++  it('renders French copy under the /fr locale', () => {
++    const html = renderConference(fullConference, { lang: 'fr' });
++
++    // `registration.faq.title` in French ("Got Questions?" → its FR string).
++    expect(html).toContain(translations.fr['registration.faq.title']);
++    // The data fields (locale-projected upstream) still flow through unchanged.
++    expect(html).toContain(`src="${fullConference.mapEmbedUrl}"`);
++  });
++});
+diff --git a/app/routes/($lang)+/conference-detail.tsx b/app/routes/($lang)+/conference-detail.tsx
+new file mode 100644
+index 0000000..74bf063
+--- /dev/null
++++ b/app/routes/($lang)+/conference-detail.tsx
+@@ -0,0 +1,607 @@
++import { useSearchParams } from 'react-router';
++import clsx from 'clsx';
++import {
++  AnimatePresence,
++  motion,
++  MotionConfig,
++  transform,
++  useMotionValue,
++} from 'framer-motion';
++import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react';
++import * as React from 'react';
++import { useButton } from '@base-ui/react/internals/use-button';
++import { match } from 'ts-pattern';
++
++import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
++import type { Conference } from '~/lib/content.server';
++import { dayjs } from '~/lib/dayjs';
++import { useLocale, useTranslate } from '~/lib/localization/context';
++import { buttonStyle } from '~/ui/button';
++import { ExternalLink } from '~/ui/external-link';
++import { Link } from '~/ui/link';
++import { Main } from '~/ui/main';
++
++/**
++ * The one data-driven conference detail page, shared by every `/YYYY` route
++ * (registration-launch Branch 3, Candidate 1, settled #4). It was forked
++ * verbatim across `2024`/`2025`/`2026/_index.tsx` (~620 lines each, differing
++ * only in hard-coded URLs / hotels / a JSX comment block); this module is the
++ * single deep implementation those three thin loaders now render.
++ *
++ * Principles (see `~/.brain/principles`):
++ *   - `small-interface-deep-implementation`: the public surface is one prop —
++ *     the boundary `Conference`. Every section (`Hero`, `MapSection`,
++ *     `SpeakersAndSeminars`, `RegistrationSection`, `FaqSection`) and all the
++ *     framer-motion card machinery is an implementation detail hidden inside.
++ *   - `boundary-discipline` / `derive-dont-sync`: the formerly hard-coded RegFox
++ *     link, schedule link, map iframe `src`, and hotel list are now read from
++ *     the `Conference` (`registrationUrl` / `scheduleUrl` / `mapEmbedUrl` /
++ *     `hotels`), which `toConference` already projected from validated document
++ *     `Option`s to `string | undefined` (XSS-safe https brands). The component
++ *     consumes plain strings; it never sees an `Option`.
++ *   - `subtract-before-you-add`: the three forks delete down to thin loaders
++ *     (Branch 3.4) once they render this; the duplicated JSX dies.
++ *
++ * Section-skip (rendering nothing when a section's data is absent/empty) is
++ * Branch 4's concern — it gates each section on the `string | undefined` /
++ * empty-array discriminators this boundary already emits. Here the data simply
++ * flows through: an absent `href`/`src` omits the attribute, an empty `hotels`
++ * list maps to nothing.
++ */
++export function ConferenceDetail({ conference }: { conference: Conference }) {
++  return (
++    <Main>
++      <Hero conference={conference} />
++
++      <MapSection conference={conference} />
++
++      <SpeakersAndSeminars conference={conference} />
++
++      <RegistrationSection conference={conference} />
++
++      <FaqSection />
++    </Main>
++  );
++}
++
++function Hero({ conference }: { conference: Conference }) {
++  const breakpoint = useBreakpoint();
++  return match(breakpoint)
++    .when(
++      (b) => b <= Breakpoint.Md,
++      () => <MobileHero conference={conference} />,
++    )
++    .otherwise(() => <DesktopHero conference={conference} />);
++}
++
++function MobileHero({ conference }: { conference: Conference }) {
++  const hints = useHints();
++  const translate = useTranslate();
++  const locale = useLocale();
++
++  return (
++    <section className="flex flex-col gap-10 pb-16">
++      <div>
++        <img
++          src={conference.hero.image.mobile}
++          alt={conference.hero.alt}
++        />
++        <div className="absolute -bottom-6 left-4 flex items-center gap-4">
++          <a
++            className={clsx(buttonStyle)}
++            href={conference.registrationUrl}
++          >
++            {translate('registration.register')}
++          </a>
++          <a
++            className={clsx(buttonStyle)}
++            href={conference.scheduleUrl}
++            target="_blank"
++          >
++            {translate('registration.schedule')}
++          </a>
++        </div>
++      </div>
++      <div className="flex flex-col gap-4 px-4">
++        <div className="flex flex-col gap-2 text-4xl">
++          <h2>
++            {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
++            {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
++            {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
++            {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
++          </h2>
++          <h3>{conference.location}</h3>
++        </div>
++        <p className="text-balance text-xl italic">{conference.tagline}</p>
++        <p className="text-xl uppercase">
++          {conference.bible.book} {conference.bible.chapter}:
++          {conference.bible.verse}
++        </p>
++        <div>
++          <a
++            className={buttonStyle}
++            data-variant="accent"
++            href={`https://www.biblegateway.com/passage/?search=${conference.bible.book}+${conference.bible.chapter}&version=${locale === 'en' ? 'NKJV' : 'LSG'}`}
++          >
++            {translate('main.read_bible')}
++          </a>
++        </div>
++      </div>
++    </section>
++  );
++}
++
++function DesktopHero({ conference }: { conference: Conference }) {
++  const hints = useHints();
++  const translate = useTranslate();
++  return (
++    <section className="full-bleed flex flex-col gap-10 p-4 pb-16">
++      <div className="mx-auto flex w-(--width) gap-10 py-16">
++        <div className="flex flex-1 flex-col gap-10">
++          <img
++            src={conference.hero.image.desktop}
++            alt={conference.hero.alt}
++          />
++          <p className="text-2xl italic">{conference.tagline}</p>
++        </div>
++        <div className="flex w-1/4 flex-col justify-between gap-6">
++          <div
++            className="flex flex-col justify-end uppercase"
++            style={{
++              writingMode: 'vertical-rl',
++            }}
++          >
++            <h1 className="text-[96px] font-black leading-tight tracking-tight">
++              {conference.bible.book}
++            </h1>
++            <h1 className="text-[168px] font-black leading-[0.5]">
++              {conference.bible.chapter}:{conference.bible.verse}
++            </h1>
++          </div>
++          <div className="flex flex-col gap-10">
++            <div className="flex flex-col gap-6">
++              <h2 className="text-5xl">
++                {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
++                {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
++                {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
++                {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
++              </h2>
++              <h3 className="text-5xl">{conference.location}</h3>
++            </div>
++            <div className="flex items-center gap-4">
++              <a
++                className={buttonStyle}
++                href={conference.registrationUrl}
++              >
++                {translate('registration.register')}
++              </a>
++              <a
++                className={clsx(buttonStyle)}
++                href={conference.scheduleUrl}
++                target="_blank"
++              >
++                {translate('registration.schedule')}
++              </a>
++            </div>
++          </div>
++        </div>
++      </div>
++    </section>
++  );
++}
++
++function MapSection({ conference }: { conference: Conference }) {
++  const translate = useTranslate();
++  return (
++    <section className="grid grid-cols-1 gap-10 p-4 pb-16 md:grid-cols-2">
++      <div className="flex flex-col gap-6">
++        <p>
++          {translate('registration.hotels.description', {
++            facebook: (
++              <ExternalLink href="https://www.facebook.com/groups/1741752369173171">
++                {translate('registration.hotels.description.facebook')}
++              </ExternalLink>
++            ),
++          })}
++        </p>
++        <ul>
++          {conference.hotels.map((hotel, i) => (
++            <li key={i}>
++              {hotel.name}
++              {hotel.note === undefined ? null : ` ${hotel.note}`}
++            </li>
++          ))}
++        </ul>
++      </div>
++      <div className="aspect-video">
++        <iframe
++          src={conference.mapEmbedUrl}
++          style={{
++            border: 0,
++          }}
++          className="size-full"
++          allowFullScreen
++          loading="lazy"
++          referrerPolicy="no-referrer-when-downgrade"
++          title="Map"
++        ></iframe>
++      </div>
++    </section>
++  );
++}
++
++function SpeakersAndSeminars({ conference }: { conference: Conference }) {
++  const translate = useTranslate();
++  return (
++    <>
++      <section className="relative flex flex-col gap-6 px-3 py-12">
++        <h2 className="bg-inherit text-4xl font-bold data-[sticky]:fixed data-[sticky]:top-[60px] data-[sticky]:z-10">
++          {translate('registration.speakers.title')}
++        </h2>
++        <div className="flex flex-col gap-20 md:grid md:grid-cols-1">
++          {conference.speakers.map((speaker, i) => (
++            <SpeakerCard
++              key={i}
++              {...speaker}
++            />
++          ))}
++        </div>
++      </section>
++      <section className="flex flex-col gap-6 px-3 py-12">
++        <h2 className="sticky top-0 bg-inherit text-4xl font-bold">
++          {translate('registration.seminars.title')}
++        </h2>
++        <div className="flex flex-col gap-20 md:grid md:grid-cols-1">
++          {conference.seminars.map((seminar, i) => (
++            <SpeakerCard
++              key={i}
++              img={seminar.speaker.img}
++              name={seminar.speaker.name}
++              activity={seminar.title}
++              bio={seminar.speaker.bio}
++            />
++          ))}
++        </div>
++      </section>
++    </>
++  );
++}
++
++interface SpeakerCardProps {
++  name: string;
++  activity: string;
++  img: string;
++  bio: string;
++}
++
++function SpeakerCard(props: SpeakerCardProps) {
++  const breakpoint = useBreakpoint();
++  return match(breakpoint)
++    .when(
++      (b) => b <= Breakpoint.Md,
++      () => <MobileSpeakerCard {...props} />,
++    )
++    .otherwise(() => <DesktopSpeakerCard {...props} />);
++}
++
++function DesktopSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
++  const ref = React.useRef<HTMLDivElement>(null);
++  const id = React.useId();
++  const { position, rotate } = useCardRotation(ref);
++  return (
++    <div className="flex items-start gap-8">
++      <motion.div
++        className="relative aspect-square flex-1"
++        ref={ref}
++        id={id}
++      >
++        <motion.div
++          className="text-link-50 bg-link-600 rota size-[95%] h-[90%] overflow-hidden p-4"
++          style={{
++            left: position,
++            top: position,
++            rotate,
++          }}
++        >
++          <p className="break-words text-[100px] font-black uppercase leading-[0.8] tracking-tight opacity-30">
++            {activity}
++          </p>
++        </motion.div>
++
++        <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
++          <img
++            className="size-full object-cover"
++            src={img}
++            alt={`${name}, ${activity}`}
++          />
++          <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4 text-white">
++            <div className="flex items-center gap-2">
++              <motion.h3 className="shrink text-3xl font-bold leading-8 text-white">
++                {name}
++              </motion.h3>
++            </div>
++            <motion.p className="text-xl text-white">{activity}</motion.p>
++          </div>
++        </div>
++      </motion.div>
++
++      <div className="flex flex-[3] flex-col gap-8">
++        <div className="flex flex-col gap-4">
++          <motion.h3 className="text-3xl font-bold leading-5">{name}</motion.h3>
++          <motion.p className="text-xl">{activity}</motion.p>
++        </div>
++
++        <motion.p className="text-xl">{bio}</motion.p>
++      </div>
++    </div>
++  );
++}
++
++function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
++  const id = React.useId();
++  const ref = React.useRef<HTMLDivElement>(null);
++
++  const [searchParams, setSearchParams] = useSearchParams();
++  const isActive =
++    searchParams.has('speaker') && searchParams.get('speaker') === id;
++  const { position, rotate } = useCardRotation(ref, isActive);
++
++  function onPress() {
++    if (isActive) {
++      setSearchParams((searchParams) => {
++        searchParams.delete('speaker');
++        return searchParams;
++      });
++    } else {
++      setSearchParams((searchParams) => {
++        searchParams.set('speaker', id);
++        return searchParams;
++      });
++    }
++  }
++
++  const containerRef = React.useRef<HTMLDivElement>(null);
++
++  const heightRef = React.useRef<number | null>(null);
++
++  React.useEffect(() => {
++    const container = containerRef.current;
++    if (!container) return;
++    const height = container.offsetHeight;
++    heightRef.current = height;
++  }, [isActive]);
++
++  const bioRef = React.useRef<HTMLDivElement>(null);
++
++  const cardButton = useButton({ native: false });
++  const bioButton = useButton({ native: false });
++
++  return (
++    <MotionConfig transition={{ type: 'spring', duration: 0.3, bounce: 0 }}>
++      <motion.div
++        animate={{
++          height: heightRef.current || undefined,
++        }}
++      >
++        <div
++          className="overflow-hidden"
++          ref={containerRef}
++        >
++          <AnimatePresence
++            mode="popLayout"
++            initial={false}
++          >
++            {isActive ? (
++              <motion.div
++                key="bio"
++                custom={isActive}
++                variants={SpeakerCardVariants}
++                initial="initial"
++                animate="enter"
++                exit="exit"
++                className="flex flex-col gap-8 p-4 outline-none"
++                ref={bioRef}
++                {...bioButton.getButtonProps({ onClick: onPress })}
++              >
++                <div className="flex flex-col gap-2">
++                  <div className="flex items-center gap-2">
++                    <ArrowLeftIcon className="size-8" />
++                    <motion.h3 className="text-3xl font-bold leading-5">
++                      {name}
++                    </motion.h3>
++                  </div>
++                  <motion.p className="text-xl">{activity}</motion.p>
++                </div>
++
++                <motion.p className="text-xl">{bio}</motion.p>
++              </motion.div>
++            ) : (
++              <motion.div
++                className="relative aspect-square w-full outline-none"
++                ref={ref}
++                id={id}
++                key="image"
++                custom={isActive}
++                variants={SpeakerCardVariants}
++                initial="initial"
++                animate="enter"
++                exit="exit"
++                {...cardButton.getButtonProps({ onClick: onPress })}
++              >
++                <motion.div
++                  className="text-link-50 bg-link-600 rota size-[95%] h-[90%] overflow-hidden p-4"
++                  style={{
++                    left: position,
++                    top: position,
++                    rotate,
++                  }}
++                >
++                  <p className="break-words text-[100px] font-black uppercase leading-[0.8] tracking-tight opacity-30">
++                    {activity}
++                  </p>
++                </motion.div>
++
++                <div className="absolute bottom-0 right-0 size-[90%] overflow-hidden rounded-md">
++                  <img
++                    className="size-full object-cover"
++                    src={img}
++                    alt={`${name}, ${activity}`}
++                  />
++                  <div className="absolute inset-x-0 bottom-0 flex flex-col bg-black/30 p-4 text-white">
++                    <div className="flex items-center gap-2">
++                      <motion.h3 className="text-3xl font-bold leading-5 text-white">
++                        {name}
++                      </motion.h3>
++                      <ArrowRightIcon className="size-8" />
++                    </div>
++                    <motion.p className="text-xl text-white">
++                      {activity}
++                    </motion.p>
++                  </div>
++                </div>
++              </motion.div>
++            )}
++          </AnimatePresence>
++        </div>
++      </motion.div>
++    </MotionConfig>
++  );
++}
++
++const SpeakerCardVariants = {
++  initial: (isActive: boolean) => ({
++    opacity: 0,
++    x: isActive ? '-100%' : '100%',
++  }),
++  enter: {
++    opacity: 1,
++    x: 0,
++  },
++  exit: (isActive: boolean) => ({
++    opacity: 0,
++    x: isActive ? '-100%' : '100%',
++  }),
++};
++
++function useCardRotation(
++  ref: React.RefObject<HTMLDivElement | null>,
++  isActive?: boolean,
++) {
++  const position = useMotionValue(20);
++  const rotate = useMotionValue(0);
++  React.useEffect(() => {
++    const scrollContainer = document.querySelector('[data-scroll-container]');
++
++    if (!scrollContainer) return;
++    if (!ref.current) return;
++
++    let isInViewport = false;
++
++    const observer = new IntersectionObserver(
++      (entries) => {
++        const entry = entries[0];
++        if (entry?.isIntersecting) {
++          isInViewport = true;
++        } else {
++          isInViewport = false;
++        }
++      },
++      {
++        root: scrollContainer,
++
++        threshold: 0,
++      },
++    );
++
++    observer.observe(ref.current!);
++
++    const initialCardRect = ref.current?.getBoundingClientRect();
++
++    if (!initialCardRect) return;
++    const bounds = [
++      initialCardRect.top,
++      initialCardRect.top + initialCardRect.height,
++    ];
++
++    function onScroll() {
++      const containerEle = document.querySelector(
++        '[data-scroll-container]',
++      ) as HTMLElement;
++      if (!containerEle) return;
++      if (!isInViewport) return;
++      const scrollY = containerEle.scrollTop + containerEle.clientHeight;
++
++      const nextPosition = transform(scrollY, bounds, [20, 4]);
++      const nextRotate = transform(scrollY, bounds, [0, -3]);
++
++      position.set(nextPosition);
++      rotate.set(nextRotate);
++    }
++
++    scrollContainer.addEventListener('scroll', onScroll);
++    return () => {
++      observer.disconnect();
++      scrollContainer.removeEventListener('scroll', onScroll);
++    };
++  }, [position, rotate, ref, isActive]);
++
++  return {
++    position,
++    rotate,
++  };
++}
++
++function RegistrationSection({ conference }: { conference: Conference }) {
++  const translate = useTranslate();
++
++  return (
++    <section className="flex flex-col gap-6 p-4 md:py-32">
++      <h2 className="text-accent-600 text-4xl font-bold">
++        {translate('registration.register.title')}
++      </h2>
++      <p>{translate('registration.register.subtitle')}</p>
++
++      <div>
++        <a
++          href={conference.registrationUrl}
++          className={buttonStyle}
++          data-variant="accent"
++        >
++          {translate('registration.register.button')}
++        </a>
++      </div>
++    </section>
++  );
++}
++
++function FaqSection() {
++  const translate = useTranslate();
++  return (
++    <section className="flex flex-col gap-6 p-4 md:py-32">
++      <h2 className="text-accent-600 text-4xl font-bold">
++        {translate('registration.faq.title')}
++      </h2>
++      <p>{translate('registration.faq.subtitle')}</p>
++      <div className="flex flex-col gap-4">
++        <div>
++          <Link
++            to="/contact"
++            className={buttonStyle}
++            data-variant="accent"
++          >
++            {translate('registration.faq.contact')}
++          </Link>
++        </div>
++        <div>
++          <Link
++            to="/faq"
++            className={buttonStyle}
++            data-variant="default"
++          >
++            {translate('registration.faq.view')}
++          </Link>
++        </div>
++      </div>
++    </section>
++  );
++}
