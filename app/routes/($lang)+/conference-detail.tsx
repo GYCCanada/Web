@@ -42,11 +42,32 @@ import { Main } from '~/ui/main';
  *   - `subtract-before-you-add`: the three forks delete down to thin loaders
  *     (Branch 3.4) once they render this; the duplicated JSX dies.
  *
- * Section-skip (rendering nothing when a section's data is absent/empty) is
- * Branch 4's concern — it gates each section on the `string | undefined` /
- * empty-array discriminators this boundary already emits. Here the data simply
- * flows through: an absent `href`/`src` omits the attribute, an empty `hotels`
- * list maps to nothing.
+ * Section-skip (registration-launch Branch 4, Candidate 2, settled #3, CONTEXT
+ * §"Section skip"): a section renders only when its data is present. The
+ * discriminator is the boundary data this module already consumes — the
+ * `Option`/empty-array the document modelled, projected by `toConference` to
+ * `string | undefined` / `[]`. The component branches on that; there are NO JSX
+ * comments and NO dormant `eslint-disable` render paths (the pre-fork
+ * scaffolding the collapse already deleted). Skip is section-LEVEL — a *present*
+ * item with a blank required bilingual field is still a hard `Text` decode error
+ * upstream (the both-locales invariant lives in the schema, never the
+ * component), so this module never sees half-filled content.
+ *
+ * Each gate is independent (`make-impossible-states-unrepresentable` at the
+ * presentation seam):
+ *   - speakers / seminars: each renders only when its list is non-empty;
+ *   - the map column renders when `mapEmbedUrl !== undefined`, the hotels column
+ *     when `hotels.length > 0` — each half of `MapSection` independently, and
+ *     the whole section is skipped when neither half has data;
+ *   - the RegFox register button / `RegistrationSection`: `registrationUrl`
+ *     present;
+ *   - the schedule button: `scheduleUrl` present;
+ *   - `FaqSection`: always present (static contact/FAQ links, no conference
+ *     data).
+ *
+ * `2026` (RegFox-only) thus renders hero + register button + FAQ with no empty
+ * Speakers/Map sections; `2025` (cancelled) renders hero + FAQ only; `2024`
+ * (fully populated) renders every section.
  */
 export function ConferenceDetail({ conference }: { conference: Conference }) {
   return (
@@ -87,19 +108,23 @@ function MobileHero({ conference }: { conference: Conference }) {
           alt={conference.hero.alt}
         />
         <div className="absolute -bottom-6 left-4 flex items-center gap-4">
-          <a
-            className={clsx(buttonStyle)}
-            href={conference.registrationUrl}
-          >
-            {translate('registration.register')}
-          </a>
-          <a
-            className={clsx(buttonStyle)}
-            href={conference.scheduleUrl}
-            target="_blank"
-          >
-            {translate('registration.schedule')}
-          </a>
+          {conference.registrationUrl === undefined ? null : (
+            <a
+              className={clsx(buttonStyle)}
+              href={conference.registrationUrl}
+            >
+              {translate('registration.register')}
+            </a>
+          )}
+          {conference.scheduleUrl === undefined ? null : (
+            <a
+              className={clsx(buttonStyle)}
+              href={conference.scheduleUrl}
+              target="_blank"
+            >
+              {translate('registration.schedule')}
+            </a>
+          )}
         </div>
       </div>
       <div className="flex flex-col gap-4 px-4">
@@ -169,19 +194,23 @@ function DesktopHero({ conference }: { conference: Conference }) {
               <h3 className="text-5xl">{conference.location}</h3>
             </div>
             <div className="flex items-center gap-4">
-              <a
-                className={buttonStyle}
-                href={conference.registrationUrl}
-              >
-                {translate('registration.register')}
-              </a>
-              <a
-                className={clsx(buttonStyle)}
-                href={conference.scheduleUrl}
-                target="_blank"
-              >
-                {translate('registration.schedule')}
-              </a>
+              {conference.registrationUrl === undefined ? null : (
+                <a
+                  className={buttonStyle}
+                  href={conference.registrationUrl}
+                >
+                  {translate('registration.register')}
+                </a>
+              )}
+              {conference.scheduleUrl === undefined ? null : (
+                <a
+                  className={clsx(buttonStyle)}
+                  href={conference.scheduleUrl}
+                  target="_blank"
+                >
+                  {translate('registration.schedule')}
+                </a>
+              )}
             </div>
           </div>
         </div>
@@ -192,40 +221,56 @@ function DesktopHero({ conference }: { conference: Conference }) {
 
 function MapSection({ conference }: { conference: Conference }) {
   const translate = useTranslate();
+
+  const hasHotels = conference.hotels.length > 0;
+  const hasMap = conference.mapEmbedUrl !== undefined;
+
+  // Skip the whole section when neither half has data (each half gated
+  // independently below): a conference with no hotels and no map embed renders
+  // nothing here.
+  if (!hasHotels && !hasMap) return null;
+
   return (
-    <section className="grid grid-cols-1 gap-10 p-4 pb-16 md:grid-cols-2">
-      <div className="flex flex-col gap-6">
-        <p>
-          {translate('registration.hotels.description', {
-            facebook: (
-              <ExternalLink href="https://www.facebook.com/groups/1741752369173171">
-                {translate('registration.hotels.description.facebook')}
-              </ExternalLink>
-            ),
-          })}
-        </p>
-        <ul>
-          {conference.hotels.map((hotel, i) => (
-            <li key={i}>
-              {hotel.name}
-              {hotel.note === undefined ? null : ` ${hotel.note}`}
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="aspect-video">
-        <iframe
-          src={conference.mapEmbedUrl}
-          style={{
-            border: 0,
-          }}
-          className="size-full"
-          allowFullScreen
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-          title="Map"
-        ></iframe>
-      </div>
+    <section
+      aria-label="Venue and accommodations"
+      className="grid grid-cols-1 gap-10 p-4 pb-16 md:grid-cols-2"
+    >
+      {hasHotels ? (
+        <div className="flex flex-col gap-6">
+          <p>
+            {translate('registration.hotels.description', {
+              facebook: (
+                <ExternalLink href="https://www.facebook.com/groups/1741752369173171">
+                  {translate('registration.hotels.description.facebook')}
+                </ExternalLink>
+              ),
+            })}
+          </p>
+          <ul>
+            {conference.hotels.map((hotel, i) => (
+              <li key={i}>
+                {hotel.name}
+                {hotel.note === undefined ? null : ` ${hotel.note}`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {conference.mapEmbedUrl === undefined ? null : (
+        <div className="aspect-video">
+          <iframe
+            src={conference.mapEmbedUrl}
+            style={{
+              border: 0,
+            }}
+            className="size-full"
+            allowFullScreen
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+            title="Map"
+          ></iframe>
+        </div>
+      )}
     </section>
   );
 }
@@ -234,35 +279,39 @@ function SpeakersAndSeminars({ conference }: { conference: Conference }) {
   const translate = useTranslate();
   return (
     <>
-      <section className="relative flex flex-col gap-6 px-3 py-12">
-        <h2 className="bg-inherit text-4xl font-bold data-[sticky]:fixed data-[sticky]:top-[60px] data-[sticky]:z-10">
-          {translate('registration.speakers.title')}
-        </h2>
-        <div className="flex flex-col gap-20 md:grid md:grid-cols-1">
-          {conference.speakers.map((speaker, i) => (
-            <SpeakerCard
-              key={i}
-              {...speaker}
-            />
-          ))}
-        </div>
-      </section>
-      <section className="flex flex-col gap-6 px-3 py-12">
-        <h2 className="sticky top-0 bg-inherit text-4xl font-bold">
-          {translate('registration.seminars.title')}
-        </h2>
-        <div className="flex flex-col gap-20 md:grid md:grid-cols-1">
-          {conference.seminars.map((seminar, i) => (
-            <SpeakerCard
-              key={i}
-              img={seminar.speaker.img}
-              name={seminar.speaker.name}
-              activity={seminar.title}
-              bio={seminar.speaker.bio}
-            />
-          ))}
-        </div>
-      </section>
+      {conference.speakers.length === 0 ? null : (
+        <section className="relative flex flex-col gap-6 px-3 py-12">
+          <h2 className="bg-inherit text-4xl font-bold data-[sticky]:fixed data-[sticky]:top-[60px] data-[sticky]:z-10">
+            {translate('registration.speakers.title')}
+          </h2>
+          <div className="flex flex-col gap-20 md:grid md:grid-cols-1">
+            {conference.speakers.map((speaker, i) => (
+              <SpeakerCard
+                key={i}
+                {...speaker}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+      {conference.seminars.length === 0 ? null : (
+        <section className="flex flex-col gap-6 px-3 py-12">
+          <h2 className="sticky top-0 bg-inherit text-4xl font-bold">
+            {translate('registration.seminars.title')}
+          </h2>
+          <div className="flex flex-col gap-20 md:grid md:grid-cols-1">
+            {conference.seminars.map((seminar, i) => (
+              <SpeakerCard
+                key={i}
+                img={seminar.speaker.img}
+                name={seminar.speaker.name}
+                activity={seminar.title}
+                bio={seminar.speaker.bio}
+              />
+            ))}
+          </div>
+        </section>
+      )}
     </>
   );
 }
@@ -553,6 +602,10 @@ function useCardRotation(
 
 function RegistrationSection({ conference }: { conference: Conference }) {
   const translate = useTranslate();
+
+  // The RegFox register button is the section's reason to exist; with no
+  // `registrationUrl` (e.g. a cancelled year) the whole section is skipped.
+  if (conference.registrationUrl === undefined) return null;
 
   return (
     <section className="flex flex-col gap-6 p-4 md:py-32">
