@@ -1,17 +1,22 @@
 export * as DraftEditor from './draft-editor.server';
 
-import { Context, Effect, Layer, Option, Schema } from 'effect';
+import { Context, Effect, Layer, Option, Schema, SchemaIssue } from 'effect';
 
 import {
+  Content,
   SITE_CONTENT_DRAFT_KEY,
   SITE_CONTENT_KEY,
   type AdminContent,
 } from '../content.server';
+import { deepMerge, setAtPath, type Json } from './admin-form';
 import { defaultContent } from './defaults';
 import { SiteContent } from './schema';
 import type { SiteContent as SiteContentType } from './schema';
 import { Storage } from '../storage.server';
 import type { ObjectHead } from '../storage.server';
+
+/** The document encoded to its on-bucket object shape, returned to the view. */
+export type EncodedDoc = typeof SiteContent.Encoded;
 
 /**
  * `DraftEditor` is the deep module the `/admin` editor write path talks to
@@ -75,12 +80,51 @@ export const scopeKeys = (scope: ContentScope): ScopeKeys => {
 };
 
 // ---------------------------------------------------------------------------
+// Error
+// ---------------------------------------------------------------------------
+
+/**
+ * The single failure a `DraftEditor` write surfaces to the route. It carries a
+ * human `message`, the dotted-path `issues` of a rejected decode (empty for a
+ * storage failure), and the HTTP `status` the route maps to a `Response` (400
+ * for a validation reject, 502 for a storage failure). Keeping the status here
+ * means the route maps every outcome the same way regardless of which operation
+ * produced it (`small-interface-deep-implementation`).
+ */
+export class IssueError extends Schema.TaggedErrorClass<IssueError>()(
+  'DraftEditor.IssueError',
+  {
+    message: Schema.String,
+    issues: Schema.Array(Schema.String),
+    status: Schema.Number,
+  },
+) {}
+
+const formatIssue = SchemaIssue.makeFormatterStandardSchemaV1();
+
+/** Flatten a schema `Issue` tree to dotted-path messages for the editor. */
+const issueMessages = (issue: SchemaIssue.Issue): readonly string[] =>
+  formatIssue(issue).issues.map((entry) => {
+    const path = entry.path?.map((segment) => String(segment)).join('.');
+    return path ? `${path}: ${entry.message}` : entry.message;
+  });
+
+// ---------------------------------------------------------------------------
 // Codecs (the document's on-bucket JSON ↔ decoded value)
 // ---------------------------------------------------------------------------
 
 const decodeDocumentJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(SiteContent),
 );
+// `encodeDocument` yields the encoded OBJECT (handed back to the view);
+// `encodeDocumentJson` yields the JSON STRING stored in the bucket (Effect
+// Schema's JSON codec, not `JSON.stringify`, per the project lint rule);
+// `decodeDocument` decodes a merged object at the single boundary.
+const encodeDocument = Schema.encodeUnknownEffect(SiteContent);
+const encodeDocumentJson = Schema.encodeUnknownEffect(
+  Schema.fromJsonString(SiteContent),
+);
+const decodeDocument = Schema.decodeUnknownEffect(SiteContent);
 
 // ---------------------------------------------------------------------------
 // Service
@@ -98,6 +142,37 @@ export class Service extends Context.Service<
      * bad draft is logged and ignored), so the editor always opens.
      */
     readonly load: (scope: ContentScope) => Effect.Effect<AdminContent>;
+    /**
+     * The whole encode→merge→decode→re-encode→store-draft pipeline as ONE call:
+     * `override` (the route's parsed form override) is deep-merged onto the
+     * encoded current document, decoded at the single boundary (rejecting with a
+     * 400 `IssueError` carrying the dotted field issues), re-encoded to its
+     * canonical JSON, and stored at the scope's draft key. Returns the encoded
+     * document so the route can revalidate the view without a re-read.
+     */
+    readonly editDocument: (
+      scope: ContentScope,
+      override: Json,
+    ) => Effect.Effect<EncodedDoc, IssueError>;
+    /**
+     * Point the `targetPath` `…key` field at a freshly-uploaded bucket object
+     * `key` on the current draft and persist it, so the new image survives a
+     * reload and a later publish. The raw-bytes upload + content-type gate stays
+     * in the route; this rewrites the draft only.
+     */
+    readonly applyImageUpload: (
+      scope: ContentScope,
+      targetPath: string,
+      key: string,
+    ) => Effect.Effect<EncodedDoc, IssueError>;
+    /**
+     * Promote the scope's current edit source (the draft if newer, else the
+     * published document) to the published key, delete the draft best-effort,
+     * and bust the public read cache so the change is live on the next read with
+     * no redeploy. A storage failure on the published write rejects with a 502
+     * `IssueError`; the best-effort draft delete never fails the publish.
+     */
+    readonly publish: (scope: ContentScope) => Effect.Effect<void, IssueError>;
   }
 >()('gycc/lib/content/draft-editor.server/Service') {}
 
@@ -105,6 +180,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const storage = yield* Storage.Service;
+    const content = yield* Content.Service;
 
     /**
      * Read + decode the document at `key`, or `Option.none()` when it is absent
@@ -164,14 +240,116 @@ export const layer = Layer.effect(
       return { content: defaultContent, source: 'defaults' as const };
     });
 
-    return Service.of({ load });
+    /**
+     * Decode a merged candidate document, rejecting with a 400 `IssueError`
+     * carrying its dotted field issues. Shared by `editDocument` (form merge)
+     * and `applyImageUpload` (key rewrite) — the single decode boundary.
+     */
+    const decodeOrReject = (
+      candidate: Json,
+    ): Effect.Effect<SiteContentType, IssueError> =>
+      decodeDocument(candidate).pipe(
+        Effect.mapError(
+          (error) =>
+            new IssueError({
+              message: 'Validation failed — fix the fields below and resubmit.',
+              issues: issueMessages(error.issue),
+              status: 400,
+            }),
+        ),
+      );
+
+    /**
+     * Re-encode a decoded document to its canonical JSON and store it at
+     * `draftKey`, rejecting with a 502 `IssueError` on a storage failure.
+     * Returns the encoded object so callers can hand it back to the view.
+     */
+    const storeDraft = (
+      draftKey: string,
+      decoded: SiteContentType,
+    ): Effect.Effect<EncodedDoc, IssueError> =>
+      Effect.gen(function* () {
+        // A decoded `SiteContent` always re-encodes — a failure here is a bug,
+        // not a user error, so it dies rather than masquerading as an
+        // `IssueError`.
+        const json = yield* encodeDocumentJson(decoded).pipe(Effect.orDie);
+        yield* storage.put(draftKey, json, 'application/json').pipe(
+          Effect.mapError(
+            (cause) =>
+              new IssueError({
+                message: `Saving the draft failed — is the bucket configured? ${String(cause)}`,
+                issues: [],
+                status: 502,
+              }),
+          ),
+        );
+        return (yield* encodeDocument(decoded).pipe(Effect.orDie)) as EncodedDoc;
+      });
+
+    const editDocument = Effect.fn('DraftEditor.editDocument')(function* (
+      scope: ContentScope,
+      override: Json,
+    ) {
+      const { draftKey } = scopeKeys(scope);
+      const { content: current } = yield* load(scope);
+      const base = (yield* encodeDocument(current).pipe(Effect.orDie)) as Json;
+      const merged = deepMerge(base, override);
+      const decoded = yield* decodeOrReject(merged);
+      return yield* storeDraft(draftKey, decoded);
+    });
+
+    const applyImageUpload = Effect.fn('DraftEditor.applyImageUpload')(
+      function* (scope: ContentScope, targetPath: string, key: string) {
+        const { draftKey } = scopeKeys(scope);
+        const { content: current } = yield* load(scope);
+        const encoded = (yield* encodeDocument(current).pipe(
+          Effect.orDie,
+        )) as Json;
+        const next = setAtPath(encoded, targetPath, key);
+        const decoded = yield* decodeOrReject(next);
+        return yield* storeDraft(draftKey, decoded);
+      },
+    );
+
+    const publish = Effect.fn('DraftEditor.publish')(function* (
+      scope: ContentScope,
+    ) {
+      const { draftKey, publishedKey } = scopeKeys(scope);
+      const { content: current } = yield* load(scope);
+      const json = yield* encodeDocumentJson(current).pipe(Effect.orDie);
+      yield* storage.put(publishedKey, json, 'application/json').pipe(
+        Effect.mapError(
+          (cause) =>
+            new IssueError({
+              message: `Publishing failed — is the bucket configured? ${String(cause)}`,
+              issues: [],
+              status: 502,
+            }),
+        ),
+      );
+      // Best-effort cleanup; correctness does NOT depend on it (`load`
+      // reconciles draft-vs-published by `lastModified` and only reopens a
+      // strictly-newer draft, so a leftover draft can never reopen stale
+      // content). Hence it must not fail the publish — the live document is
+      // already written.
+      yield* storage.delete(draftKey).pipe(Effect.ignore);
+      yield* content.bust();
+    });
+
+    return Service.of({ load, editDocument, applyImageUpload, publish });
   }),
 );
 
 /**
- * The admin write path's `DraftEditor`, with its `Storage` dependency
- * pre-provided as the never-fails-to-build `Storage.layerOptional` (mirroring
- * `Content.defaultLayer`). Only `Env` stays open, discharged by the surrounding
+ * The admin write path's `DraftEditor`, self-contained except for `Env`. Its
+ * `Storage` and `Content` dependencies are pre-provided from ONE shared
+ * `Storage.layerOptional` so `publish`'s `Content.bust()` busts the very cache
+ * the public read path serves from, and the editor's writes and the read
+ * path's reads hit the same bucket instance (`make-impossible-states-
+ * unrepresentable` — no chance of a write-path Storage drifting from the
+ * read-path Storage). Only `Env` stays open, discharged by the surrounding
  * app-runtime merge.
  */
-export const defaultLayer = layer.pipe(Layer.provide(Storage.layerOptional));
+export const defaultLayer = layer.pipe(
+  Layer.provide(Layer.provideMerge(Content.layer, Storage.layerOptional)),
+);
