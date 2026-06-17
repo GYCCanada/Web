@@ -4,7 +4,11 @@ import { Clock, Context, DateTime, Effect, Layer, Schema } from 'effect';
 
 import { Content } from '../content.server';
 import { type FormId, submissionKey } from '../content/pages/registry';
-import { IsoDate, newListItemId } from '../content/schema';
+import {
+  deterministicListItemId,
+  IsoDate,
+  newListItemId,
+} from '../content/schema';
 import { Storage, type StorageError } from '../storage.server';
 
 import type { DecodedForm } from './decode';
@@ -66,16 +70,25 @@ export class Service extends Context.Service<
   {
     /**
      * Persist one decoded form as a durable `Submission` object and return the
-     * stored record. Mints a fresh id, stamps `submittedAt` with the current
-     * calendar date, encodes the envelope + the definition-derived payload to JSON,
-     * and `Storage.put`s it at `submissions/<form>/<id>.json`. Persistence ONLY —
-     * the notification is a separate step (Branch 7.3); `persist` returning the
-     * record before any notification runs is what makes the record durable across a
-     * notify failure.
+     * stored record. Stamps `submittedAt` with the current calendar date, encodes
+     * the envelope + the definition-derived payload to JSON, and `Storage.put`s it
+     * at `submissions/<form>/<id>.json`. Persistence ONLY — the notification is a
+     * separate step (Branch 7.3); `persist` returning the record before any
+     * notification runs is what makes the record durable across a notify failure.
+     *
+     * `idempotencyKey` (optional) makes the write retry-safe: when supplied, the
+     * record's `id` is **derived deterministically** from it (`deterministicListItemId`)
+     * instead of a fresh random nanoid, so persisting the same logical record twice
+     * (e.g. a user retrying a partially-failed multi-registrant registration) writes
+     * to the SAME bucket key and overwrites rather than minting a duplicate object.
+     * Omit it for single-record submissions (contact/volunteer) where each submit is
+     * a genuinely new record. The caller owns what makes a record "the same"
+     * (registration scopes by per-request fingerprint + registrant index).
      */
     readonly persist: (
       form: FormId,
       decoded: DecodedForm,
+      idempotencyKey?: string,
     ) => Effect.Effect<Submission, StorageError>;
   }
 >()('gycc/lib/forms/submissions.server/Service') {}
@@ -95,6 +108,7 @@ export const layer = Layer.effect(
     const persist = Effect.fn('Submissions.persist')(function* (
       form: FormId,
       decoded: DecodedForm,
+      idempotencyKey?: string,
     ) {
       // The form's CMS-editable definition (Branch 5.3) — the payload codec is
       // derived from it, never re-declared (`derive-dont-sync`).
@@ -102,7 +116,15 @@ export const layer = Layer.effect(
       const schema = submissionSchema(definition);
 
       const now = yield* Clock.currentTimeMillis;
-      const id = newListItemId();
+      // With an idempotency key the id is content-addressed (a retry of the same
+      // logical record re-derives the same id → the same key → `put` overwrites);
+      // without one, a fresh random id per submit (the default for single-record
+      // forms). `idempotencyKey` is namespaced by `form` so the same key under two
+      // forms cannot collide onto one object.
+      const id =
+        idempotencyKey === undefined
+          ? newListItemId()
+          : deterministicListItemId(`${form}:${idempotencyKey}`);
       // `submittedAt` round-trips through the branded `IsoDate`: a clock-derived
       // `YYYY-MM-DD` is always a real calendar date, so a decode failure here is a
       // bug, not a user error — it dies rather than masquerading as a failure.

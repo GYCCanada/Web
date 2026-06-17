@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { Effect, Result, Schema } from 'effect';
 
 import { Content } from '../content.server';
@@ -110,9 +112,28 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
     // object apiece, written + returned before any notification runs, so a `notify`
     // failure provably cannot lose a record (settled #8). A `StorageError` aborts the
     // submission (losing a registrant must never look like success).
+    //
+    // Idempotency (the deep review's escalated partial-write): the loop is sequential
+    // and a `StorageError` on registrant K aborts after 0..K-1 are already durable. A
+    // user retry would otherwise re-mint fresh ids and DUPLICATE the records that did
+    // land. Scoping each registrant's id to `<request fingerprint>:<index>` makes the
+    // retry overwrite the same K objects instead: the fingerprint is a stable hash of
+    // THIS submission's payload (identical on a verbatim retry, different for a new
+    // submission even with identical data), and the index pins each registrant to its
+    // position. So retrying a group of 4 that failed at #3 re-writes #1/#2 in place and
+    // completes #3/#4 — no duplicates — while a genuinely new submission gets new ids.
+    const requestFingerprint = createHash('sha256')
+      .update(JSON.stringify(submission.payload))
+      .digest('hex');
     const stored: Array<Submission> = [];
-    for (const registrant of decoded.success.registrants) {
-      stored.push(yield* submissions.persist('registration', registrant));
+    for (const [index, registrant] of decoded.success.registrants.entries()) {
+      stored.push(
+        yield* submissions.persist(
+          'registration',
+          registrant,
+          `${requestFingerprint}:${index}`,
+        ),
+      );
     }
 
     yield* config.notify(stored);
