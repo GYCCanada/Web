@@ -1,0 +1,1869 @@
+commit 2d85fa632ce3918f7a52bf6555adec6e99464632
+Author: cevr <seeve.c@gmail.com>
+Date:   Wed Jun 17 14:30:04 2026 -0400
+
+    feat(cms)(per-page-content): per-page /admin sections via DraftEditor + ListEdit
+    
+    Add a per-Page `/admin` editor (registration-launch Branch 5.5, ADR 0008,
+    settled #5). One dynamic route (`admin/pages/:page`) edits any evergreen Page
+    object through `DraftEditor` scoped to that page's `pageScope`, reusing the
+    Branch-2 `ListEdit` add/remove/reorder machinery and the Branch-1 draft/publish
+    pipeline — no new write path.
+    
+    - Draft page variants (`DraftFaqPage`/`DraftGivePage`/`DraftAboutPage`/
+      `DraftArchivePage`): a freshly-added id-only list item is draft-valid yet
+      publish-invalid until filled (ADR 0006). Pages without lists keep
+      draftSchema === schema.
+    - Registry `ObjectSpec` gains `draftSchema`; `DraftEditor`'s `objectCodec`
+      decodes the draft through it and gates publish through the strict schema —
+      the same split the site scope already has, so the reconciliation never forks.
+    - Shared admin field/list controls hoisted to `routes/admin/controls.tsx`;
+      the site editor (content.tsx) migrates to them (subtract-before-you-add).
+    - Dashboard lists each per-page editor, driven by the closed PAGE_IDS registry.
+    - RichText fields are shown read-only (the closed token model has no id-keyed
+      nodes, so the identity-keyed merge cannot target a node in place).
+    
+    Tests: draft variants tolerate id-only adds but the strict schema blocks publish;
+    per-page add→fill→publish goes live via getPage with no redeploy; publishing a
+    page busts only that page's cache, not About's (ADR 0008 per-object isolation).
+
+diff --git a/app/lib/content/cms-e2e.test.ts b/app/lib/content/cms-e2e.test.ts
+index abe8bbb..9294184 100644
+--- a/app/lib/content/cms-e2e.test.ts
++++ b/app/lib/content/cms-e2e.test.ts
+@@ -11,9 +11,12 @@ import {
+   uploadedImageKey,
+   type Json,
+ } from './admin-form';
+-import { DraftEditor, siteScope } from './draft-editor.server';
++import { DraftEditor, pageScope, siteScope } from './draft-editor.server';
+ import { defaultContent } from './defaults';
+ import { addOp, fieldName, removeOp, reorderOp } from './list-edit';
++import { defaultAboutPage } from './pages/defaults';
++import { pageObjectKey } from './pages/registry';
++import { AboutPage } from './pages/schema';
+ import { newListItemId, SiteContent } from './schema';
+ 
+ /**
+@@ -488,3 +491,128 @@ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', ()
+     );
+   });
+ });
++
++/**
++ * The per-Page `/admin` editor (registration-launch Branch 5.5, ADR 0008) drives
++ * the SAME `DraftEditor` the site editor does, just scoped to a page via
++ * `pageScope(id)`. These prove the per-page write path end-to-end against the
++ * in-memory bucket:
++ *   - "Add item" on a page list appends an id-only stub the page's laxer DRAFT
++ *     schema reopens (settled #10), yet publish REJECTS it until filled (ADR 0006);
++ *   - filling every required field then publishing makes the page live on the next
++ *     `getPage` read with NO redeploy;
++ *   - publishing a page busts ONLY that page's read cache — another page (and the
++ *     conference `site` doc) is untouched (ADR 0008's per-object isolation).
++ */
++const faqScope = pageScope('faq');
++const faqItems = 'items';
++
++describe('per-page /admin editor via DraftEditor (page scope, ADR 0008/0006)', () => {
++  it('add → fill question+answer → publish makes the FAQ page live (no redeploy)', async () => {
++    const newId = newListItemId();
++
++    const result = await run(
++      Effect.gen(function* () {
++        const editor = yield* DraftEditor.Service;
++        const content = yield* Content.Service;
++
++        // The FAQ page has no bucket object yet — the editor opens on the bundled
++        // default (the same `getPage` fallback the public read uses).
++        const opened = yield* editor.load(faqScope);
++
++        // "Add a question" appends an id-only stub; the DRAFT (laxer `DraftFaqPage`)
++        // reopens it, but publishing the incomplete page is rejected (the new item
++        // has no bilingual question/answer — publish-invalid, ADR 0006).
++        yield* TestClock.adjust('1 second');
++        yield* editor.applyListOps(faqScope, [addOp(faqItems, newId)]);
++        const stub = yield* editor.load(faqScope);
++        const stubItem = stub.content.items.find((i) => String(i.id) === String(newId));
++        const publishStubExit = yield* Effect.exit(editor.publish(faqScope));
++
++        // Fill the new item's required bilingual question + a one-token answer (the
++        // override a fill-form submits), then publish — now it goes live.
++        yield* TestClock.adjust('1 second');
++        const fillExit = yield* Effect.exit(
++          editor.editDocument(faqScope, {
++            items: {
++              [String(newId)]: {
++                question: { en: 'New question?', fr: 'Nouvelle question ?' },
++                answer: [
++                  { _tag: 'text', value: { en: 'An answer.', fr: 'Une réponse.' } },
++                ],
++              },
++            },
++          } as Json),
++        );
++        const publishExit = yield* Effect.exit(editor.publish(faqScope));
++
++        // The public read reflects the new item with no TTL advance / redeploy.
++        const live = yield* content.getPage('faq');
++
++        return {
++          openedSource: opened.source,
++          stubKeys: Object.keys(stubItem ?? {}),
++          publishStubTag: publishStubExit._tag,
++          fillTag: fillExit._tag,
++          publishTag: publishExit._tag,
++          liveQuestions: live.items.map((i) => i.question.en),
++        };
++      }),
++    );
++
++    expect(result.openedSource).toBe('defaults');
++    // The appended stub carries ONLY its id (draft-valid, publish-invalid).
++    expect(result.stubKeys).toEqual(['id']);
++    expect(result.publishStubTag).toBe('Failure');
++    expect(result.fillTag).toBe('Success');
++    expect(result.publishTag).toBe('Success');
++    expect(result.liveQuestions).toContain('New question?');
++  });
++
++  it('editing a FAQ item is visible on the next read but does NOT bust About', async () => {
++    // Seed a published About page so its cache can be primed and then asserted
++    // untouched after a FAQ publish (ADR 0008 per-object isolation).
++    const aboutBody = await Effect.runPromise(
++      Schema.encodeUnknownEffect(Schema.fromJsonString(AboutPage))(defaultAboutPage),
++    );
++
++    const result = await run(
++      Effect.gen(function* () {
++        const editor = yield* DraftEditor.Service;
++        const content = yield* Content.Service;
++
++        // Prime both caches with a read.
++        const aboutBefore = yield* content.getPage('about');
++        yield* content.getPage('faq');
++
++        // Edit the FIRST seeded FAQ question by its id and publish.
++        const faq = yield* editor.load(faqScope);
++        const firstId = faq.content.items[0]?.id;
++        yield* TestClock.adjust('1 second');
++        yield* editor.editDocument(faqScope, {
++          items: {
++            [String(firstId)]: {
++              question: { en: 'Edited?', fr: 'Modifié ?' },
++            },
++          },
++        } as Json);
++        yield* editor.publish(faqScope);
++
++        // FAQ reflects the edit on the next read; About is the SAME cached
++        // reference (its cache was never busted by the FAQ publish).
++        const faqAfter = yield* content.getPage('faq');
++        const aboutAfter = yield* content.getPage('about');
++
++        return {
++          faqEdited: faqAfter.items[0]?.question.en,
++          aboutSameRef: aboutBefore === aboutAfter,
++        };
++      }),
++      { [pageObjectKey('about')]: { body: aboutBody } },
++    );
++
++    expect(result.faqEdited).toBe('Edited?');
++    // About's cache survived the FAQ publish — per-object isolation holds.
++    expect(result.aboutSameRef).toBe(true);
++  });
++});
+diff --git a/app/lib/content/draft-editor.server.ts b/app/lib/content/draft-editor.server.ts
+index 380fcf2..b8e78c0 100644
+--- a/app/lib/content/draft-editor.server.ts
++++ b/app/lib/content/draft-editor.server.ts
+@@ -331,32 +331,45 @@ const siteCodec: ScopeCodec = {
+ 
+ /**
+  * Build a codec bundle for a Page/Form object from its registry `ObjectSpec`.
+- * Draft and publish share the schema (no lax draft variant yet), and there is no
+- * id-backfill: these objects are brand-new storage (ADR 0008), so no pre-existing
+- * id-less document needs repairing. When Branch 5.5 gives pages the add-item flow
+- * it introduces a page draft variant and wires it here, exactly as the site scope
+- * already is — the draft/publish split lives in this bundle, so the
+- * reconciliation never forks.
++ *
++ * Branch 5.5 gives the list-bearing pages (FAQ, give, about, archive) an add-item
++ * flow, so their draft boundary is the LAXER `spec.draftSchema` (a freshly-added
++ * id-only item is draft-valid) and the publish boundary the STRICT `spec.schema`
++ * (re-enforcing the both-locales `Text` invariant) — exactly the site scope's
++ * `DraftSiteContent`/`SiteContent` split. A page/form with no add-item flow wires
++ * `draftSchema === schema` in the registry, so this same code path keeps draft and
++ * publish identical for it without a special case (`derive-dont-sync`). There is
++ * still no id-backfill: these objects are brand-new storage (ADR 0008), so no
++ * pre-existing id-less document needs repairing.
++ *
++ * The DRAFT codecs (`fromBucket`, `decodeDraft`, `encodeObject`, `encodeDraftJson`)
++ * move the object between bucket-JSON / decoded-draft / view-object through
++ * `draftSchema`; the PUBLISH codecs (`decodePublish`, `encodePublishJson`) gate the
++ * promotion through `schema`.
+  */
+ const objectCodec = (
+   spec: ObjectSpec<unknown, unknown>,
+   keys: ScopeKeys,
+ ): ScopeCodec => {
+-  const decode = Schema.decodeUnknownEffect(spec.schema);
+-  const encodeObject = Schema.encodeUnknownEffect(spec.schema);
+-  const encodeJson = Schema.encodeUnknownEffect(
++  const decodeDraft = Schema.decodeUnknownEffect(spec.draftSchema);
++  const decodePublish = Schema.decodeUnknownEffect(spec.schema);
++  const encodeObject = Schema.encodeUnknownEffect(spec.draftSchema);
++  const encodeDraftJson = Schema.encodeUnknownEffect(
++    Schema.fromJsonString(spec.draftSchema),
++  );
++  const encodePublishJson = Schema.encodeUnknownEffect(
+     Schema.fromJsonString(spec.schema),
+   );
+   return {
+     keys,
+     default: spec.default,
+-    fromBucket: (json) => parseJson(json).pipe(Effect.flatMap(decode)),
+-    decodeDraft: decode,
+-    decodePublish: decode,
++    fromBucket: (json) => parseJson(json).pipe(Effect.flatMap(decodeDraft)),
++    decodeDraft,
++    decodePublish,
+     encodeObject: (value) =>
+       encodeObject(value) as Effect.Effect<Json, Schema.SchemaError>,
+-    encodeDraftJson: encodeJson,
+-    encodePublishJson: encodeJson,
++    encodeDraftJson,
++    encodePublishJson,
+   };
+ };
+ 
+diff --git a/app/lib/content/pages/registry.ts b/app/lib/content/pages/registry.ts
+index bb1d950..5ee350f 100644
+--- a/app/lib/content/pages/registry.ts
++++ b/app/lib/content/pages/registry.ts
+@@ -16,6 +16,10 @@ import {
+   AboutPage,
+   ArchivePage,
+   ContactPage,
++  DraftAboutPage,
++  DraftArchivePage,
++  DraftFaqPage,
++  DraftGivePage,
+   FaqPage,
+   FormDefinition,
+   GivePage,
+@@ -114,16 +118,48 @@ export const formDraftKey = (form: FormId): string =>
+  * through, and the bundled default to fall back to (and seed on first publish).
+  * `default` is the *decoded* value (its type is the schema's `Type`), so the
+  * record is total over `PageId` with no `unknown` escape hatch.
++ *
++ * `draftSchema` is the LAXER admin-draft boundary (ADR 0006, Branch 5.5): a page
++ * whose `/admin` "Add item" appends an id-only stub (FAQ items, give-directions,
++ * About paragraphs/quotes, Archive entries) decodes the *draft* through this — its
++ * list items' content fields are optional — while `schema` is the STRICT publish
++ * boundary that re-enforces the both-locales `Text` invariant. A page with no
++ * add-item flow wires `draftSchema === schema` (there is no laxer state), so
++ * `DraftEditor`'s reconciliation never forks: it always reads `draftSchema` for the
++ * draft and `schema` for publish (`derive-dont-sync`).
+  */
+ export interface ObjectSpec<A, I> {
+   readonly schema: Schema.Codec<A, I>;
++  readonly draftSchema: Schema.Codec<unknown, unknown>;
+   readonly default: A;
+ }
+ 
++/**
++ * Build a spec whose draft and publish boundaries DIFFER — the page carries an
++ * editable list, so a freshly-added id-only item must be draft-valid (decoded
++ * through `draftSchema`) yet publish-invalid until filled (re-decoded through the
++ * strict `schema`).
++ */
++const draftPageSpec = <A, I>(
++  schema: Schema.Codec<A, I>,
++  draftSchema: Schema.Codec<unknown, unknown>,
++  defaultValue: A,
++): ObjectSpec<A, I> => ({ schema, draftSchema, default: defaultValue });
++
++/**
++ * Build a spec with NO laxer draft variant: the draft boundary IS the strict
++ * schema. Used by pages/forms without an add-item flow (contact, volunteer, home,
++ * and the placeholder forms) — there is no id-only intermediate state, so the draft
++ * and publish boundaries coincide.
++ */
+ const pageSpec = <A, I>(
+   schema: Schema.Codec<A, I>,
+   defaultValue: A,
+-): ObjectSpec<A, I> => ({ schema, default: defaultValue });
++): ObjectSpec<A, I> => ({
++  schema,
++  draftSchema: schema as Schema.Codec<unknown, unknown>,
++  default: defaultValue,
++});
+ 
+ /**
+  * The Page registry — one entry per `PageId`. The mapped type ties each id to its
+@@ -131,12 +167,12 @@ const pageSpec = <A, I>(
+  * lookup is statically the right typed object, not a widened union.
+  */
+ export const PAGE_SPECS = {
+-  about: pageSpec(AboutPage, defaultAboutPage),
+-  faq: pageSpec(FaqPage, defaultFaqPage),
+-  give: pageSpec(GivePage, defaultGivePage),
++  about: draftPageSpec(AboutPage, DraftAboutPage, defaultAboutPage),
++  faq: draftPageSpec(FaqPage, DraftFaqPage, defaultFaqPage),
++  give: draftPageSpec(GivePage, DraftGivePage, defaultGivePage),
+   contact: pageSpec(ContactPage, defaultContactPage),
+   volunteer: pageSpec(VolunteerPage, defaultVolunteerPage),
+-  archive: pageSpec(ArchivePage, defaultArchivePage),
++  archive: draftPageSpec(ArchivePage, DraftArchivePage, defaultArchivePage),
+   home: pageSpec(HomePage, defaultHomePage),
+ } as const satisfies { readonly [P in PageId]: ObjectSpec<unknown, unknown> };
+ 
+diff --git a/app/lib/content/pages/schema.test.ts b/app/lib/content/pages/schema.test.ts
+index b7a70d6..2b19aa2 100644
+--- a/app/lib/content/pages/schema.test.ts
++++ b/app/lib/content/pages/schema.test.ts
+@@ -17,6 +17,10 @@ import {
+   AboutPage,
+   ArchivePage,
+   ContactPage,
++  DraftAboutPage,
++  DraftArchivePage,
++  DraftFaqPage,
++  DraftGivePage,
+   FaqPage,
+   FormDefinition,
+   GivePage,
+@@ -204,3 +208,78 @@ describe('present-but-empty content is a hard decode error (skip != tolerance)',
+     expect(result._tag).toBe('Failure');
+   });
+ });
++
++/**
++ * The DRAFT page variants (Branch 5.5, ADR 0006) tolerate an id-only added list
++ * item (settled #10) so "Add item" → auto-save works, while the STRICT page schema
++ * still rejects the same incomplete item on publish. This proves the add-then-fill
++ * loop: a freshly-added FAQ item / give-direction / About paragraph-or-quote /
++ * Archive entry is draft-valid yet publish-invalid until its bilingual fields are
++ * filled — section-skip is for *absence*, never half-filled content
++ * (CONTEXT §Section skip).
++ */
++describe('draft page variants tolerate id-only adds; strict schema blocks publish', () => {
++  const ID = 'd'.repeat(21);
++
++  test('an id-only FAQ item is draft-valid but publish-invalid', () => {
++    const base = { title: { en: 'FAQ', fr: 'FAQ' }, items: [{ id: ID }] };
++    expect(Schema.decodeUnknownResult(DraftFaqPage)(base)._tag).toBe('Success');
++    expect(Schema.decodeUnknownResult(FaqPage)(base)._tag).toBe('Failure');
++  });
++
++  test('an id-only give-direction is draft-valid but publish-invalid', () => {
++    const base = {
++      title: { en: 'Give', fr: 'Donner' },
++      reason: { en: 'r', fr: 'r' },
++      directions: [{ id: ID }],
++      donateUrl: 'https://example.org/donate',
++    };
++    expect(Schema.decodeUnknownResult(DraftGivePage)(base)._tag).toBe('Success');
++    expect(Schema.decodeUnknownResult(GivePage)(base)._tag).toBe('Failure');
++  });
++
++  test('an id-only About paragraph AND quote are draft-valid but publish-invalid', () => {
++    const base = {
++      title: { en: 'About', fr: 'À propos' },
++      paragraphs: [{ id: ID }],
++      disclaimer: { en: 'd', fr: 'd' },
++      quotes: [{ id: 'e'.repeat(21) }],
++    };
++    expect(Schema.decodeUnknownResult(DraftAboutPage)(base)._tag).toBe('Success');
++    expect(Schema.decodeUnknownResult(AboutPage)(base)._tag).toBe('Failure');
++  });
++
++  test('an id-only Archive entry is draft-valid but publish-invalid', () => {
++    const base = { title: { en: 'Archive', fr: 'Archives' }, entries: [{ id: ID }] };
++    expect(Schema.decodeUnknownResult(DraftArchivePage)(base)._tag).toBe('Success');
++    expect(Schema.decodeUnknownResult(ArchivePage)(base)._tag).toBe('Failure');
++  });
++
++  test('the draft still rejects a MALFORMED present value (not merely absent)', () => {
++    // A present donateUrl that is not https crosses the strict `ExternalHttpsUrl`
++    // boundary even in the draft — the draft tolerates ABSENCE, never a malformed
++    // value (`make-impossible-states-unrepresentable` still holds for what is set).
++    const result = Schema.decodeUnknownResult(DraftGivePage)({
++      title: { en: 'Give', fr: 'Donner' },
++      reason: { en: 'r', fr: 'r' },
++      directions: [],
++      donateUrl: 'javascript:alert(1)',
++    });
++    expect(result._tag).toBe('Failure');
++  });
++
++  test('a fully-filled draft FAQ item publishes cleanly through the strict schema', () => {
++    const filled = {
++      title: { en: 'FAQ', fr: 'FAQ' },
++      items: [
++        {
++          id: ID,
++          question: { en: 'Q?', fr: 'Q ?' },
++          answer: [{ _tag: 'text', value: { en: 'A.', fr: 'R.' } }],
++        },
++      ],
++    };
++    expect(Schema.decodeUnknownResult(DraftFaqPage)(filled)._tag).toBe('Success');
++    expect(Schema.decodeUnknownResult(FaqPage)(filled)._tag).toBe('Success');
++  });
++});
+diff --git a/app/lib/content/pages/schema.ts b/app/lib/content/pages/schema.ts
+index f95d4e9..3f0ed30 100644
+--- a/app/lib/content/pages/schema.ts
++++ b/app/lib/content/pages/schema.ts
+@@ -256,6 +256,88 @@ export type HomePage = typeof HomePage.Type;
+ // FormDefinition — placeholder (Branch 6 replaces with the structural field graph)
+ // ---------------------------------------------------------------------------
+ 
++// ---------------------------------------------------------------------------
++// Draft page variants — the laxer admin-draft schemas (ADR 0006, Branch 5.5)
++// ---------------------------------------------------------------------------
++
++/**
++ * The DRAFT variants of the Pages that carry editable lists (registration-launch
++ * Branch 5.5, ADR 0006). "Add item" on a page list (a FAQ entry, a give-direction,
++ * an About paragraph/quote, an Archive entry) appends an item carrying ONLY its
++ * `id` (settled #10) and auto-saves the draft; the admin then fills the bilingual
++ * fields incrementally. The strict page schemas above would reject every such
++ * intermediate state (`Text` both-locales-non-empty, a required `ExternalHttpsUrl`
++ * on an Archive entry), but ADR 0006 is explicit: an incomplete required field
++ * blocks **publish, not draft save**.
++ *
++ * The tolerance mirrors the site draft (`schema.ts`): a list item's per-locale
++ * **content text** relaxes to optional plain strings (`DraftText`) so a half-typed
++ * (or untouched-empty) value is draft-valid, while the **identity** (`id`) and any
++ * present **branded leaf** (an `ExternalHttpsUrl`) stay strict — the draft tolerates
++ * an *absent* value, never a *malformed* one. A `RichText` answer relaxes to
++ * `optionalKey` (a freshly-added FAQ item carries no answer until edited); a present
++ * answer still decodes through the strict closed-token model.
++ *
++ * Pages WITHOUT editable lists (`ContactPage`, `VolunteerPage`, `HomePage`) have no
++ * add-item flow, so their draft schema IS the strict schema — the registry wires
++ * them with `draftSchema === schema` and `DraftEditor` never forks
++ * (`make-impossible-states-unrepresentable`: there is no laxer state to represent).
++ */
++const DraftText = Schema.Struct({
++  en: Schema.optionalKey(Schema.String),
++  fr: Schema.optionalKey(Schema.String),
++});
++
++export const DraftAboutPage = Schema.Struct({
++  title: Text,
++  paragraphs: IdListArray(
++    Schema.Struct({ id: ListItemId, text: Schema.optionalKey(DraftText) }),
++  ),
++  disclaimer: Text,
++  quotes: IdListArray(
++    Schema.Struct({
++      id: ListItemId,
++      text: Schema.optionalKey(DraftText),
++      attribution: Schema.optionalKey(DraftText),
++    }),
++  ),
++});
++export type DraftAboutPage = typeof DraftAboutPage.Type;
++
++export const DraftFaqPage = Schema.Struct({
++  title: Text,
++  items: IdListArray(
++    Schema.Struct({
++      id: ListItemId,
++      question: Schema.optionalKey(DraftText),
++      answer: Schema.optionalKey(RichText),
++    }),
++  ),
++});
++export type DraftFaqPage = typeof DraftFaqPage.Type;
++
++export const DraftGivePage = Schema.Struct({
++  title: Text,
++  reason: Text,
++  directions: IdListArray(
++    Schema.Struct({ id: ListItemId, text: Schema.optionalKey(DraftText) }),
++  ),
++  donateUrl: ExternalHttpsUrl,
++});
++export type DraftGivePage = typeof DraftGivePage.Type;
++
++export const DraftArchivePage = Schema.Struct({
++  title: Text,
++  entries: IdListArray(
++    Schema.Struct({
++      id: ListItemId,
++      label: Schema.optionalKey(DraftText),
++      url: Schema.optionalKey(ExternalHttpsUrl),
++    }),
++  ),
++});
++export type DraftArchivePage = typeof DraftArchivePage.Type;
++
+ /**
+  * A PLACEHOLDER `FormDefinition` schema (registration-launch Branch 5.1). ADR 0007 /
+  * Branch 6 build the full structural field-graph (a closed set of ~8 `FieldKind`s,
+diff --git a/app/routes.ts b/app/routes.ts
+index ff5b43f..58b1e74 100644
+--- a/app/routes.ts
++++ b/app/routes.ts
+@@ -48,5 +48,6 @@ export default [
+   layout('routes/admin/_layout.tsx', [
+     route('admin', 'routes/admin/_index.tsx'),
+     route('admin/content', 'routes/admin/content.tsx'),
++    route('admin/pages/:page', 'routes/admin/pages.$page.tsx'),
+   ]),
+ ] satisfies RouteConfig;
+diff --git a/app/routes/admin/_index.tsx b/app/routes/admin/_index.tsx
+index 9c92694..08f66c7 100644
+--- a/app/routes/admin/_index.tsx
++++ b/app/routes/admin/_index.tsx
+@@ -1,26 +1,70 @@
+ import { Link } from 'react-router';
+ 
+ import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
++import { PAGE_IDS } from '~/lib/content/pages/registry';
+ 
+ export const meta = adminMeta;
+ 
+ export const headers = adminSecurityHeaders;
+ 
++/** Human label per `PageId` for the dashboard's per-page editor links. */
++const PAGE_LABELS: Record<string, string> = {
++  about: 'About',
++  faq: 'FAQ',
++  give: 'Give',
++  contact: 'Contact',
++  volunteer: 'Volunteer',
++  archive: 'Archive',
++  home: 'Home (evergreen)',
++};
++
+ /**
+  * The authenticated admin landing page. Reaching it means the `_layout` guard
+- * already validated the session cookie. Links into the content editor (C5).
++ * already validated the session cookie. Links into the site-content editor (C5)
++ * and each per-Page editor (registration-launch Branch 5.5): the page set is
++ * driven by `PAGE_IDS` (the same closed registry the editor + read path use), so
++ * adding a Page surfaces its editor link automatically (`derive-dont-sync`).
+  */
+ export default function AdminIndex() {
+   return (
+-    <div className="space-y-4">
+-      <h1 className="text-2xl font-semibold">Dashboard</h1>
+-      <p className="text-neutral-600">You are signed in.</p>
+-      <Link
+-        to="/admin/content"
+-        className="inline-flex min-h-11 items-center rounded-md bg-neutral-900 px-4 text-sm font-medium text-white transition-colors hover:bg-neutral-700"
+-      >
+-        Edit site content
+-      </Link>
++    <div className="space-y-6">
++      <div className="space-y-2">
++        <h1 className="text-2xl font-semibold">Dashboard</h1>
++        <p className="text-neutral-600">You are signed in.</p>
++      </div>
++
++      <section className="space-y-3">
++        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
++          Conference &amp; team
++        </h2>
++        <Link
++          to="/admin/content"
++          className="inline-flex min-h-11 items-center rounded-md bg-neutral-900 px-4 text-sm font-medium text-white transition-colors hover:bg-neutral-700"
++        >
++          Edit site content
++        </Link>
++      </section>
++
++      <section className="space-y-3">
++        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
++          Pages
++        </h2>
++        <ul className="grid gap-2 sm:grid-cols-2">
++          {PAGE_IDS.map((page) => (
++            <li key={page}>
++              <Link
++                to={`/admin/pages/${page}`}
++                className="flex min-h-11 items-center justify-between rounded-md border border-neutral-300 px-4 text-sm font-medium transition-colors hover:bg-neutral-100"
++              >
++                <span>{PAGE_LABELS[page] ?? page}</span>
++                <span aria-hidden className="text-neutral-400">
++                  →
++                </span>
++              </Link>
++            </li>
++          ))}
++        </ul>
++      </section>
+     </div>
+   );
+ }
+diff --git a/app/routes/admin/content.tsx b/app/routes/admin/content.tsx
+index 702dd18..cf83d98 100644
+--- a/app/routes/admin/content.tsx
++++ b/app/routes/admin/content.tsx
+@@ -1,15 +1,22 @@
+ import { Cause, Clock, Effect, Option, Schema } from 'effect';
+-import { useRef } from 'react';
+ import {
+   Form,
+   redirect,
+   useActionData,
+-  useFetcher,
+   useLoaderData,
+   useNavigation,
+ } from 'react-router';
+ 
+ import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
++import {
++  AddItemButton,
++  Bilingual,
++  type ActionResult,
++  ImageUpload,
++  ItemControls,
++  Section,
++  Text,
++} from './controls';
+ import { Auth } from '~/lib/auth.server';
+ import { Env } from '~/lib/env.server';
+ import {
+@@ -27,11 +34,7 @@ import {
+   uploadedImageKey,
+   type Json,
+ } from '~/lib/content/admin-form';
+-import {
+-  collectListOps,
+-  fieldName,
+-  listOpFieldName,
+-} from '~/lib/content/list-edit';
++import { collectListOps, fieldName } from '~/lib/content/list-edit';
+ import {
+   DraftSiteContent,
+   ListItemId,
+@@ -76,10 +79,6 @@ const encodeDocument = Schema.encodeUnknownEffect(DraftSiteContent);
+ 
+ type EncodedDocument = typeof DraftSiteContent.Encoded;
+ 
+-type ActionResult =
+-  | { readonly ok: true }
+-  | { readonly ok: false; readonly error: string; readonly issues: readonly string[] };
+-
+ /** Map a `DraftEditor` `IssueError` to the editor's JSON action response. */
+ const issueResponse = (error: IssueError): Response =>
+   Response.json(
+@@ -239,39 +238,6 @@ export const action = routeAction(function* () {
+ // View
+ // ---------------------------------------------------------------------------
+ 
+-function Text({
+-  label,
+-  name,
+-  defaultValue,
+-  multiline = false,
+-}: {
+-  readonly label: string;
+-  readonly name: string;
+-  readonly defaultValue: string;
+-  readonly multiline?: boolean;
+-}) {
+-  return (
+-    <label className="block space-y-1">
+-      <span className="block text-xs font-medium text-neutral-600">{label}</span>
+-      {multiline ? (
+-        <textarea
+-          name={name}
+-          defaultValue={defaultValue}
+-          rows={4}
+-          className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900/20"
+-        />
+-      ) : (
+-        <input
+-          type="text"
+-          name={name}
+-          defaultValue={defaultValue}
+-          className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900/20"
+-        />
+-      )}
+-    </label>
+-  );
+-}
+-
+ /**
+  * The board-position picker for a team member. A `TeamMember.position` is a
+  * required `TeamPosition` literal (`schema.ts`), so a freshly-added member (which
+@@ -307,239 +273,6 @@ function PositionSelect({
+   );
+ }
+ 
+-function Bilingual({
+-  label,
+-  name,
+-  value,
+-  multiline = false,
+-}: {
+-  readonly label: string;
+-  readonly name: string;
+-  readonly value: { readonly en: string; readonly fr: string };
+-  readonly multiline?: boolean;
+-}) {
+-  return (
+-    <fieldset className="space-y-2">
+-      <legend className="text-sm font-medium text-neutral-800">{label}</legend>
+-      <div className="grid gap-2 sm:grid-cols-2">
+-        <Text label="EN" name={`${name}.en`} defaultValue={value.en} multiline={multiline} />
+-        <Text label="FR" name={`${name}.fr`} defaultValue={value.fr} multiline={multiline} />
+-      </div>
+-    </fieldset>
+-  );
+-}
+-
+-/**
+- * A per-image uploader. It posts to this route's action independently of the
+- * surrounding save/publish form via a `useFetcher` — *not* a nested `<form>`
+- * (HTML forbids nesting forms, and the editor's main `<Form>` wraps every
+- * section, so rendering an inner form here would let SSR/hydration close or drop
+- * either form's tags and silently break submission). Instead the uploader is a
+- * plain element tree; the "Upload" button hands a one-off `FormData` (carrying
+- * `intent=upload:<keyPath>` and the chosen `file`) to `fetcher.submit` as
+- * multipart. The action stores the bytes and rewrites that key on the draft,
+- * then redirects, which revalidates this route's loader so the new key shows.
+- */
+-function ImageUpload({
+-  keyPath,
+-  currentKey,
+-}: {
+-  readonly keyPath: string;
+-  readonly currentKey: string;
+-}) {
+-  const fetcher = useFetcher<ActionResult>();
+-  const fileRef = useRef<HTMLInputElement>(null);
+-  const uploading = fetcher.state !== 'idle';
+-
+-  const upload = () => {
+-    const file = fileRef.current?.files?.[0];
+-    if (!file) return;
+-    const data = new FormData();
+-    data.set('intent', `upload:${keyPath}`);
+-    data.set('file', file);
+-    void fetcher.submit(data, { method: 'post', encType: 'multipart/form-data' });
+-  };
+-
+-  return (
+-    <div className="space-y-1 rounded-md border border-dashed border-neutral-300 p-2">
+-      <p className="text-xs text-neutral-600">
+-        Current: <code className="text-neutral-800">{currentKey}</code>
+-      </p>
+-      <div className="flex items-center gap-2">
+-        <input
+-          ref={fileRef}
+-          type="file"
+-          accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+-          className="text-xs"
+-        />
+-        <button
+-          type="button"
+-          onClick={upload}
+-          disabled={uploading}
+-          className="inline-flex min-h-9 cursor-pointer items-center rounded-md border border-neutral-300 px-3 text-xs font-medium hover:bg-neutral-100 disabled:opacity-50"
+-        >
+-          {uploading ? 'Uploading…' : 'Upload'}
+-        </button>
+-      </div>
+-      {fetcher.data && !fetcher.data.ok && (
+-        <p className="text-xs text-rose-700">{fetcher.data.error}</p>
+-      )}
+-    </div>
+-  );
+-}
+-
+-function Section({
+-  title,
+-  children,
+-  open = false,
+-}: {
+-  readonly title: string;
+-  readonly children: React.ReactNode;
+-  readonly open?: boolean;
+-}) {
+-  return (
+-    <details open={open} className="rounded-lg border border-neutral-200 bg-white">
+-      <summary className="cursor-pointer list-none p-4 text-sm font-medium hover:bg-neutral-50">
+-        {title}
+-      </summary>
+-      <div className="space-y-6 border-t border-neutral-200 p-4">{children}</div>
+-    </details>
+-  );
+-}
+-
+-/**
+- * Submit a single id-keyed list op (ADR 0006) out-of-band via `useFetcher`,
+- * exactly like `ImageUpload` — *not* a nested `<form>` (the editor's main
+- * `<Form>` wraps every section, and HTML forbids nested forms). The button
+- * builds a one-off `FormData` carrying `intent=list-op` and the
+- * `list:<path>:<kind>` control field, hands it to `fetcher.submit`, and the
+- * action applies the op and redirects, revalidating the loader so the changed
+- * list re-renders.
+- *
+- * The `value` carries the op payload: an item `id` for add/remove, or the
+- * comma-joined surviving ids for a reorder. An "Add" mints a fresh `ListItemId`
+- * client-side so the appended item's id is known before submit; the server
+- * appends an item carrying only that id (draft-valid, publish-invalid until
+- * edited).
+- */
+-function ListOpButton({
+-  listPath,
+-  kind,
+-  value,
+-  label,
+-  variant = 'default',
+-  disabled = false,
+-}: {
+-  readonly listPath: string;
+-  readonly kind: 'add' | 'remove' | 'reorder';
+-  readonly value: string;
+-  readonly label: string;
+-  readonly variant?: 'default' | 'add' | 'danger';
+-  readonly disabled?: boolean;
+-}) {
+-  const fetcher = useFetcher<ActionResult>();
+-  const pending = fetcher.state !== 'idle';
+-  const className =
+-    variant === 'add'
+-      ? 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-emerald-300 bg-emerald-50 px-3 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50'
+-      : variant === 'danger'
+-        ? 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-rose-300 px-3 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50'
+-        : 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-neutral-300 px-2 text-xs font-medium hover:bg-neutral-100 disabled:opacity-50';
+-
+-  const submit = () => {
+-    const data = new FormData();
+-    data.set('intent', 'list-op');
+-    data.set(listOpFieldName(listPath, kind), value);
+-    void fetcher.submit(data, { method: 'post' });
+-  };
+-
+-  return (
+-    <button
+-      type="button"
+-      onClick={submit}
+-      disabled={disabled || pending}
+-      className={className}
+-    >
+-      {pending ? '…' : label}
+-    </button>
+-  );
+-}
+-
+-/**
+- * The per-item structural controls (ADR 0006): move up / down (a reorder
+- * submitting the full new id order so a partial/stale order never drops an item)
+- * and remove. Rendered next to each list item; the `ids` is the list's current
+- * id order so a move computes the swapped permutation client-side.
+- */
+-function ItemControls({
+-  listPath,
+-  ids,
+-  index,
+-}: {
+-  readonly listPath: string;
+-  readonly ids: readonly string[];
+-  readonly index: number;
+-}) {
+-  const id = ids[index];
+-  if (id === undefined) return null;
+-  // Swap two positions to compute the reorder permutation, guarding the bounds
+-  // so the disabled edge buttons (first item's "↑", last item's "↓") never
+-  // index past the array; out of range, the order is returned unchanged.
+-  const swapped = (a: number, b: number): string => {
+-    const aId = ids[a];
+-    const bId = ids[b];
+-    if (aId === undefined || bId === undefined) return ids.join(',');
+-    const next = [...ids];
+-    next[a] = bId;
+-    next[b] = aId;
+-    return next.join(',');
+-  };
+-  return (
+-    <div className="flex items-center gap-1">
+-      <ListOpButton
+-        listPath={listPath}
+-        kind="reorder"
+-        value={index > 0 ? swapped(index, index - 1) : ids.join(',')}
+-        label="↑"
+-        disabled={index === 0}
+-      />
+-      <ListOpButton
+-        listPath={listPath}
+-        kind="reorder"
+-        value={index < ids.length - 1 ? swapped(index, index + 1) : ids.join(',')}
+-        label="↓"
+-        disabled={index === ids.length - 1}
+-      />
+-      <ListOpButton
+-        listPath={listPath}
+-        kind="remove"
+-        value={id}
+-        label="Remove"
+-        variant="danger"
+-      />
+-    </div>
+-  );
+-}
+-
+-/** The "Add item" control: mints a fresh id client-side and appends an empty item. */
+-function AddItemButton({
+-  listPath,
+-  label,
+-}: {
+-  readonly listPath: string;
+-  readonly label: string;
+-}) {
+-  return (
+-    <ListOpButton
+-      listPath={listPath}
+-      kind="add"
+-      value={newListItemId()}
+-      label={label}
+-      variant="add"
+-    />
+-  );
+-}
+-
+ export default function AdminContentEditor() {
+   const { document, source, bucketConfigured } = useLoaderData<typeof loader>();
+   const actionData = useActionData<ActionResult>();
+@@ -718,7 +451,11 @@ export default function AdminContentEditor() {
+               <fieldset className="space-y-3">
+                 <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
+                   <span>Speakers</span>
+-                  <AddItemButton listPath={speakersPath} label="+ Add speaker" />
++                  <AddItemButton
++                    listPath={speakersPath}
++                    label="+ Add speaker"
++                    newId={newListItemId()}
++                  />
+                 </legend>
+                 {conference.speakers.map((speaker, si) => {
+                   // Re-assert the `ListItemId` brand at this view boundary: the
+@@ -775,7 +512,11 @@ export default function AdminContentEditor() {
+ 
+         <Section title="Team">
+           <div className="flex items-center justify-end">
+-            <AddItemButton listPath="team" label="+ Add team member" />
++            <AddItemButton
++              listPath="team"
++              label="+ Add team member"
++              newId={newListItemId()}
++            />
+           </div>
+           {team.map((member, ti) => {
+             // Re-assert the brand at this boundary (see the speakers note).
+diff --git a/app/routes/admin/controls.tsx b/app/routes/admin/controls.tsx
+new file mode 100644
+index 0000000..32883fc
+--- /dev/null
++++ b/app/routes/admin/controls.tsx
+@@ -0,0 +1,302 @@
++import { useRef } from 'react';
++import { useFetcher } from 'react-router';
++
++import { listOpFieldName } from '~/lib/content/list-edit';
++
++/**
++ * Shared `/admin` editor controls + field inputs (registration-launch Branch 5.5).
++ *
++ * The site editor (`content.tsx`) and the per-Page editor (`pages.$page.tsx`) both
++ * build the same surface: a collapsible `Section`, bilingual / plain `Text` inputs,
++ * an image uploader, and the id-keyed list controls (Add / Remove / move). They
++ * used to live inline in `content.tsx`; Branch 5.5's per-page sections reuse the
++ * SAME controls, so they are hoisted here once rather than copied
++ * (`subtract-before-you-add`, `derive-dont-sync`). This is a plain component module
++ * (no `loader` / `action`), not a route — `routes.ts` is explicit, so it is never
++ * mounted as a route.
++ *
++ * Every list control submits out-of-band via `useFetcher` (NOT a nested `<form>`):
++ * the editor's main `<Form>` wraps every section, and HTML forbids nested forms, so
++ * a control posts a one-off `FormData` carrying `intent=list-op` + the
++ * `list:<path>:<kind>` control field, and the action revalidates the loader so the
++ * changed list re-renders.
++ */
++
++/** The shape every `/admin` editor action returns on a non-redirect failure. */
++export type ActionResult =
++  | { readonly ok: true }
++  | {
++      readonly ok: false;
++      readonly error: string;
++      readonly issues: readonly string[];
++    };
++
++const inputClassName =
++  'block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900/20';
++
++/** A single labelled text / textarea input bound to a dotted form-field `name`. */
++export function Text({
++  label,
++  name,
++  defaultValue,
++  multiline = false,
++}: {
++  readonly label: string;
++  readonly name: string;
++  readonly defaultValue: string;
++  readonly multiline?: boolean;
++}) {
++  return (
++    <label className="block space-y-1">
++      <span className="block text-xs font-medium text-neutral-600">{label}</span>
++      {multiline ? (
++        <textarea
++          name={name}
++          defaultValue={defaultValue}
++          rows={4}
++          className={inputClassName}
++        />
++      ) : (
++        <input
++          type="text"
++          name={name}
++          defaultValue={defaultValue}
++          className={inputClassName}
++        />
++      )}
++    </label>
++  );
++}
++
++/** An EN/FR pair of `Text` inputs for one bilingual field (`<name>.en` / `<name>.fr`). */
++export function Bilingual({
++  label,
++  name,
++  value,
++  multiline = false,
++}: {
++  readonly label: string;
++  readonly name: string;
++  readonly value: { readonly en: string; readonly fr: string };
++  readonly multiline?: boolean;
++}) {
++  return (
++    <fieldset className="space-y-2">
++      <legend className="text-sm font-medium text-neutral-800">{label}</legend>
++      <div className="grid gap-2 sm:grid-cols-2">
++        <Text
++          label="EN"
++          name={`${name}.en`}
++          defaultValue={value.en}
++          multiline={multiline}
++        />
++        <Text
++          label="FR"
++          name={`${name}.fr`}
++          defaultValue={value.fr}
++          multiline={multiline}
++        />
++      </div>
++    </fieldset>
++  );
++}
++
++/** A collapsible titled section wrapping a group of fields. */
++export function Section({
++  title,
++  children,
++  open = false,
++}: {
++  readonly title: string;
++  readonly children: React.ReactNode;
++  readonly open?: boolean;
++}) {
++  return (
++    <details open={open} className="rounded-lg border border-neutral-200 bg-white">
++      <summary className="cursor-pointer list-none p-4 text-sm font-medium hover:bg-neutral-50">
++        {title}
++      </summary>
++      <div className="space-y-6 border-t border-neutral-200 p-4">{children}</div>
++    </details>
++  );
++}
++
++/**
++ * A per-image uploader. Posts to the editor route's action via `useFetcher` (not a
++ * nested `<form>`); the "Upload" button hands a one-off `FormData` carrying
++ * `intent=upload:<keyPath>` and the chosen `file` as multipart. The action stores
++ * the bytes and rewrites that key on the draft, then redirects, revalidating this
++ * route's loader so the new key shows.
++ */
++export function ImageUpload({
++  keyPath,
++  currentKey,
++}: {
++  readonly keyPath: string;
++  readonly currentKey: string;
++}) {
++  const fetcher = useFetcher<ActionResult>();
++  const fileRef = useRef<HTMLInputElement>(null);
++  const uploading = fetcher.state !== 'idle';
++
++  const upload = () => {
++    const file = fileRef.current?.files?.[0];
++    if (!file) return;
++    const data = new FormData();
++    data.set('intent', `upload:${keyPath}`);
++    data.set('file', file);
++    void fetcher.submit(data, { method: 'post', encType: 'multipart/form-data' });
++  };
++
++  return (
++    <div className="space-y-1 rounded-md border border-dashed border-neutral-300 p-2">
++      <p className="text-xs text-neutral-600">
++        Current: <code className="text-neutral-800">{currentKey}</code>
++      </p>
++      <div className="flex items-center gap-2">
++        <input
++          ref={fileRef}
++          type="file"
++          accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
++          className="text-xs"
++        />
++        <button
++          type="button"
++          onClick={upload}
++          disabled={uploading}
++          className="inline-flex min-h-9 cursor-pointer items-center rounded-md border border-neutral-300 px-3 text-xs font-medium hover:bg-neutral-100 disabled:opacity-50"
++        >
++          {uploading ? 'Uploading…' : 'Upload'}
++        </button>
++      </div>
++      {fetcher.data && !fetcher.data.ok && (
++        <p className="text-xs text-rose-700">{fetcher.data.error}</p>
++      )}
++    </div>
++  );
++}
++
++/**
++ * Submit a single id-keyed list op (ADR 0006) out-of-band via `useFetcher`. The
++ * `value` carries the op payload: an item `id` for add/remove, or the comma-joined
++ * surviving ids for a reorder.
++ */
++export function ListOpButton({
++  listPath,
++  kind,
++  value,
++  label,
++  variant = 'default',
++  disabled = false,
++}: {
++  readonly listPath: string;
++  readonly kind: 'add' | 'remove' | 'reorder';
++  readonly value: string;
++  readonly label: string;
++  readonly variant?: 'default' | 'add' | 'danger';
++  readonly disabled?: boolean;
++}) {
++  const fetcher = useFetcher<ActionResult>();
++  const pending = fetcher.state !== 'idle';
++  const className =
++    variant === 'add'
++      ? 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-emerald-300 bg-emerald-50 px-3 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50'
++      : variant === 'danger'
++        ? 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-rose-300 px-3 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50'
++        : 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-neutral-300 px-2 text-xs font-medium hover:bg-neutral-100 disabled:opacity-50';
++
++  const submit = () => {
++    const data = new FormData();
++    data.set('intent', 'list-op');
++    data.set(listOpFieldName(listPath, kind), value);
++    void fetcher.submit(data, { method: 'post' });
++  };
++
++  return (
++    <button
++      type="button"
++      onClick={submit}
++      disabled={disabled || pending}
++      className={className}
++    >
++      {pending ? '…' : label}
++    </button>
++  );
++}
++
++/**
++ * The per-item structural controls (ADR 0006): move up / down (a reorder
++ * submitting the full new id order so a partial/stale order never drops an item)
++ * and remove. The `ids` is the list's current id order so a move computes the
++ * swapped permutation client-side.
++ */
++export function ItemControls({
++  listPath,
++  ids,
++  index,
++}: {
++  readonly listPath: string;
++  readonly ids: readonly string[];
++  readonly index: number;
++}) {
++  const id = ids[index];
++  if (id === undefined) return null;
++  // Swap two positions to compute the reorder permutation, guarding the bounds so
++  // the disabled edge buttons never index past the array; out of range, the order
++  // is returned unchanged.
++  const swapped = (a: number, b: number): string => {
++    const aId = ids[a];
++    const bId = ids[b];
++    if (aId === undefined || bId === undefined) return ids.join(',');
++    const next = [...ids];
++    next[a] = bId;
++    next[b] = aId;
++    return next.join(',');
++  };
++  return (
++    <div className="flex items-center gap-1">
++      <ListOpButton
++        listPath={listPath}
++        kind="reorder"
++        value={index > 0 ? swapped(index, index - 1) : ids.join(',')}
++        label="↑"
++        disabled={index === 0}
++      />
++      <ListOpButton
++        listPath={listPath}
++        kind="reorder"
++        value={index < ids.length - 1 ? swapped(index, index + 1) : ids.join(',')}
++        label="↓"
++        disabled={index === ids.length - 1}
++      />
++      <ListOpButton
++        listPath={listPath}
++        kind="remove"
++        value={id}
++        label="Remove"
++        variant="danger"
++      />
++    </div>
++  );
++}
++
++/** The "Add item" control: mints a fresh id client-side and appends an empty item. */
++export function AddItemButton({
++  listPath,
++  label,
++  newId,
++}: {
++  readonly listPath: string;
++  readonly label: string;
++  readonly newId: string;
++}) {
++  return (
++    <ListOpButton
++      listPath={listPath}
++      kind="add"
++      value={newId}
++      label={label}
++      variant="add"
++    />
++  );
++}
+diff --git a/app/routes/admin/pages.$page.tsx b/app/routes/admin/pages.$page.tsx
+new file mode 100644
+index 0000000..ce44b3d
+--- /dev/null
++++ b/app/routes/admin/pages.$page.tsx
+@@ -0,0 +1,591 @@
++import { Effect, Option, Schema } from 'effect';
++import {
++  Form,
++  redirect,
++  useActionData,
++  useLoaderData,
++  useNavigation,
++} from 'react-router';
++
++import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
++import { Auth } from '~/lib/auth.server';
++import {
++  DraftEditor,
++  pageScope,
++  type IssueError,
++} from '~/lib/content/draft-editor.server';
++import {
++  assembleOverrides,
++  type Json,
++} from '~/lib/content/admin-form';
++import { collectListOps, fieldName } from '~/lib/content/list-edit';
++import { PAGE_SPECS, PageId } from '~/lib/content/pages/registry';
++import { ListItemId, newListItemId } from '~/lib/content/schema';
++import { Env } from '~/lib/env.server';
++import { ReactRouterContext } from '~/lib/effect/router-context';
++import { routeAction, routeHandler } from '~/lib/effect/route';
++import {
++  AddItemButton,
++  Bilingual,
++  type ActionResult,
++  ItemControls,
++  Section,
++  Text,
++} from './controls';
++
++export const meta = adminMeta;
++
++export const headers = adminSecurityHeaders;
++
++/**
++ * The per-Page `/admin` editor (registration-launch Branch 5.5, ADR 0008, settled
++ * #5). ONE dynamic route edits any evergreen Page object (`content/pages/<page>.json`)
++ * — its `page` param is decoded to the closed `PageId`, and every read/write routes
++ * through `DraftEditor` with that page's `pageScope`. The page set is enumerated
++ * once in `pages/registry`; this route adds no second list of pages
++ * (`derive-dont-sync`).
++ *
++ * The write path is the SAME deep `DraftEditor` the site editor uses (Branch 1),
++ * just scoped to a page: "Save draft" decodes the merged override at the page's
++ * laxer DRAFT boundary and stores `…draft.json`; "Publish" re-decodes at the STRICT
++ * boundary (re-enforcing the both-locales `Text` invariant — an empty added item
++ * blocks publish, not save, per ADR 0006) and busts ONLY that page's read cache so
++ * the change is live with no redeploy and no other page/form/conference cache is
++ * touched (ADR 0008's per-object isolation). List add/remove/reorder reuses the
++ * Branch-2 `ListEdit` machinery (`intent=list-op` → `DraftEditor.applyListOps`).
++ *
++ * The page schemas are heterogeneous, so the EDITABLE FIELDS are rendered per page
++ * by `PageEditor` (a closed switch over `PageId`). The shared field/list controls
++ * (`Bilingual`, `Section`, the id-keyed list buttons) come from `./controls`, the
++ * same module the site editor uses (`subtract-before-you-add`). `RichText` fields
++ * (FAQ answers, contact/volunteer rich copy) are shown read-only here: the closed
++ * token model has no id-keyed nodes, so the identity-keyed merge cannot target a
++ * node in place — a token-aware editor is a separate concern; the structural list
++ * edits (add/remove/reorder a FAQ item) and every plain-`Text` field ARE editable.
++ */
++
++/** Decode the `:page` route param to a `PageId`, or `Option.none` if unknown. */
++const decodePageId = Schema.decodeUnknownOption(PageId);
++
++/** A human label for each page (the admin nav + heading). */
++const PAGE_LABELS: { readonly [P in PageId]: string } = {
++  about: 'About',
++  faq: 'FAQ',
++  give: 'Give',
++  contact: 'Contact',
++  volunteer: 'Volunteer',
++  archive: 'Archive',
++  home: 'Home (evergreen sections)',
++};
++
++type ActionResponse = ActionResult;
++
++/** Map a `DraftEditor` `IssueError` to the editor's JSON action response. */
++const issueResponse = (error: IssueError): Response =>
++  Response.json(
++    { ok: false, error: error.message, issues: error.issues },
++    { status: error.status },
++  );
++
++/** Auth gate shared by the loader + action (404 when admin is disabled). */
++const requireAdmin = Effect.fn('admin/pages.requireAdmin')(function* () {
++  const { request } = yield* ReactRouterContext;
++  const auth = yield* Auth.Service;
++  yield* auth.checkCookie(request.headers.get('cookie')).pipe(
++    Effect.catchTags({
++      'Auth.Disabled': () =>
++        Effect.fail(new Response('Not Found', { status: 404 })),
++      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
++    }),
++  );
++});
++
++/** Resolve the `:page` param to a `PageId` or 404 the route. */
++const requirePageId = Effect.fn('admin/pages.requirePageId')(function* () {
++  const { params } = yield* ReactRouterContext;
++  const id = decodePageId(params['page']);
++  if (Option.isNone(id)) {
++    return yield* Effect.fail(new Response('Not Found', { status: 404 }));
++  }
++  return id.value;
++});
++
++export const loader = routeHandler(function* () {
++  yield* requireAdmin();
++  const page = yield* requirePageId();
++
++  const editor = yield* DraftEditor.Service;
++  const env = yield* Env.Service;
++  const { content, source } = yield* editor.load(pageScope(page));
++  // Encode the decoded DRAFT page to the JSON the form renders from — the same
++  // encoded shape `DraftEditor.editDocument` merges the form override onto.
++  const encode = Schema.encodeUnknownEffect(PAGE_SPECS[page].draftSchema);
++  const encoded = (yield* encode(content)) as Json;
++  const bucketConfigured = Option.isSome(env.bucket);
++
++  return { page, encoded, source, bucketConfigured };
++});
++
++export const action = routeAction(function* () {
++  yield* requireAdmin();
++  const page = yield* requirePageId();
++  const scope = pageScope(page);
++
++  const editor = yield* DraftEditor.Service;
++  const { request } = yield* ReactRouterContext;
++  const form = yield* Effect.promise(() => request.formData());
++  const intent = String(form.get('intent') ?? 'save-draft');
++
++  // ---- list op (add / remove / reorder) ------------------------------------
++  if (intent === 'list-op') {
++    const ops = collectListOps(form.entries());
++    if (ops.length === 0) {
++      return Response.json(
++        { ok: false, error: 'No list change to apply.', issues: [] },
++        { status: 400 },
++      );
++    }
++    const applied = yield* editor.applyListOps(scope, ops).pipe(Effect.result);
++    if (applied._tag === 'Failure') return issueResponse(applied.failure);
++    return redirect(`/admin/pages/${page}?status=List%20updated.`);
++  }
++
++  if (intent !== 'save-draft' && intent !== 'publish') {
++    return Response.json(
++      { ok: false, error: 'Unknown submit intent.', issues: [] },
++      { status: 400 },
++    );
++  }
++
++  // ---- save / publish ------------------------------------------------------
++  // The page form carries only dotted-path fields (no translation god-bag — page
++  // copy lives in the typed object now), so `assembleOverrides` is the whole
++  // override; `DraftEditor.editDocument` merges it onto the current page, decodes
++  // at the page's DRAFT boundary, and stores `…draft.json`.
++  const override = assembleOverrides(form.entries());
++  const edited = yield* editor.editDocument(scope, override).pipe(Effect.result);
++  if (edited._tag === 'Failure') return issueResponse(edited.failure);
++
++  if (intent === 'save-draft') {
++    return redirect(`/admin/pages/${page}?status=Draft%20saved.`);
++  }
++
++  const published = yield* editor.publish(scope).pipe(Effect.result);
++  if (published._tag === 'Failure') return issueResponse(published.failure);
++  return redirect(
++    `/admin/pages/${page}?status=Published.%20Live%20on%20the%20next%20page%20load.`,
++  );
++});
++
++// ---------------------------------------------------------------------------
++// View
++// ---------------------------------------------------------------------------
++
++/** A bilingual `Text` value the form renders, tolerating the draft's optional halves. */
++type DraftText = { readonly en?: string; readonly fr?: string } | undefined;
++
++/** Coerce a draft (possibly-absent-half) bilingual value to a full `{ en, fr }`. */
++const text = (value: DraftText): { readonly en: string; readonly fr: string } => ({
++  en: value?.en ?? '',
++  fr: value?.fr ?? '',
++});
++
++/**
++ * A read-only `RichText` preview: the closed token model has no id-keyed nodes, so
++ * its runs cannot be edited in place through the identity-keyed merge (see the
++ * route doc). The plain/bold/italic runs and link labels are shown so the admin can
++ * see the rendered copy; editing rich copy is a separate concern (Branch 6+).
++ */
++function RichTextPreview({
++  label,
++  nodes,
++}: {
++  readonly label: string;
++  readonly nodes: ReadonlyArray<Record<string, unknown>> | undefined;
++}) {
++  const runs = (nodes ?? [])
++    .map((node) => {
++      if (node['_tag'] === 'link') {
++        const linkText = node['text'] as DraftText;
++        return linkText?.en ?? '';
++      }
++      const value = node['value'] as DraftText;
++      return value?.en ?? '';
++    })
++    .join('');
++  return (
++    <div className="space-y-1">
++      <p className="text-xs font-medium text-neutral-600">{label} (read-only)</p>
++      <p className="rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-700">
++        {runs || '—'}
++      </p>
++    </div>
++  );
++}
++
++/** The list item shape the page editors read off the encoded draft. */
++type DraftListItem = {
++  readonly id: string;
++  readonly [key: string]: unknown;
++};
++
++/** A titled list-section wrapper with an "Add" control and per-item move/remove. */
++function ListSection({
++  title,
++  listPath,
++  addLabel,
++  items,
++  renderItem,
++}: {
++  readonly title: string;
++  readonly listPath: string;
++  readonly addLabel: string;
++  readonly items: readonly DraftListItem[];
++  readonly renderItem: (item: DraftListItem, id: ListItemId) => React.ReactNode;
++}) {
++  const ids = items.map((item) => item.id);
++  return (
++    <fieldset className="space-y-3">
++      <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
++        <span>{title}</span>
++        <AddItemButton listPath={listPath} label={addLabel} newId={newListItemId()} />
++      </legend>
++      {items.map((item, index) => {
++        // Re-assert the `ListItemId` brand at this view boundary: the encoded
++        // draft carries the id as a bare `string` (encode drops the brand), but it
++        // decoded through `ListItemId`, so it matches the nanoid pattern — `make`
++        // validates rather than casts, keeping `fieldName`'s "no `.`-bearing id"
++        // guarantee load-bearing (`boundary-discipline`), exactly as the site
++        // editor does for speakers/team.
++        const id = ListItemId.make(item.id);
++        return (
++          <div key={item.id} className="space-y-2 rounded-md bg-neutral-50 p-3">
++            <div className="flex items-center justify-end">
++              <ItemControls listPath={listPath} ids={ids} index={index} />
++            </div>
++            {renderItem(item, id)}
++          </div>
++        );
++      })}
++    </fieldset>
++  );
++}
++
++/**
++ * Render the editable fields for one page (a closed switch over `PageId`). The
++ * `encoded` value is the page's DRAFT-encoded JSON; each branch reads the fields it
++ * owns. Exhaustive over `PageId` so adding a Page without an editor is a type error
++ * (`make-impossible-states-unrepresentable`).
++ */
++function PageEditor({
++  page,
++  encoded,
++}: {
++  readonly page: PageId;
++  readonly encoded: Record<string, unknown>;
++}) {
++  switch (page) {
++    case 'about': {
++      const paragraphs = (encoded['paragraphs'] ?? []) as readonly DraftListItem[];
++      const quotes = (encoded['quotes'] ?? []) as readonly DraftListItem[];
++      return (
++        <>
++          <Bilingual label="Title" name="title" value={text(encoded['title'] as DraftText)} />
++          <Bilingual
++            label="Disclaimer"
++            name="disclaimer"
++            value={text(encoded['disclaimer'] as DraftText)}
++            multiline
++          />
++          <ListSection
++            title="Paragraphs"
++            listPath="paragraphs"
++            addLabel="+ Add paragraph"
++            items={paragraphs}
++            renderItem={(item, id) => (
++              <Bilingual
++                label="Text"
++                name={fieldName('paragraphs', id, 'text')}
++                value={text(item['text'] as DraftText)}
++                multiline
++              />
++            )}
++          />
++          <ListSection
++            title="Quotes"
++            listPath="quotes"
++            addLabel="+ Add quote"
++            items={quotes}
++            renderItem={(item, id) => (
++              <>
++                <Bilingual
++                  label="Quote"
++                  name={fieldName('quotes', id, 'text')}
++                  value={text(item['text'] as DraftText)}
++                  multiline
++                />
++                <Bilingual
++                  label="Attribution"
++                  name={fieldName('quotes', id, 'attribution')}
++                  value={text(item['attribution'] as DraftText)}
++                />
++              </>
++            )}
++          />
++        </>
++      );
++    }
++    case 'faq': {
++      const items = (encoded['items'] ?? []) as readonly DraftListItem[];
++      return (
++        <>
++          <Bilingual label="Title" name="title" value={text(encoded['title'] as DraftText)} />
++          <ListSection
++            title="Questions"
++            listPath="items"
++            addLabel="+ Add question"
++            items={items}
++            renderItem={(item, id) => (
++              <>
++                <Bilingual
++                  label="Question"
++                  name={fieldName('items', id, 'question')}
++                  value={text(item['question'] as DraftText)}
++                />
++                <RichTextPreview
++                  label="Answer"
++                  nodes={item['answer'] as ReadonlyArray<Record<string, unknown>> | undefined}
++                />
++              </>
++            )}
++          />
++        </>
++      );
++    }
++    case 'give': {
++      const directions = (encoded['directions'] ?? []) as readonly DraftListItem[];
++      return (
++        <>
++          <Bilingual label="Title" name="title" value={text(encoded['title'] as DraftText)} />
++          <Bilingual
++            label="Reason"
++            name="reason"
++            value={text(encoded['reason'] as DraftText)}
++            multiline
++          />
++          <Text
++            label="Donate URL (https://…)"
++            name="donateUrl"
++            defaultValue={String(encoded['donateUrl'] ?? '')}
++          />
++          <ListSection
++            title="Directions"
++            listPath="directions"
++            addLabel="+ Add direction"
++            items={directions}
++            renderItem={(item, id) => (
++              <Bilingual
++                label="Step"
++                name={fieldName('directions', id, 'text')}
++                value={text(item['text'] as DraftText)}
++              />
++            )}
++          />
++        </>
++      );
++    }
++    case 'archive': {
++      const entries = (encoded['entries'] ?? []) as readonly DraftListItem[];
++      return (
++        <>
++          <Bilingual label="Title" name="title" value={text(encoded['title'] as DraftText)} />
++          <ListSection
++            title="Entries"
++            listPath="entries"
++            addLabel="+ Add entry"
++            items={entries}
++            renderItem={(item, id) => (
++              <>
++                <Bilingual
++                  label="Label"
++                  name={fieldName('entries', id, 'label')}
++                  value={text(item['label'] as DraftText)}
++                />
++                <Text
++                  label="URL (https://…)"
++                  name={fieldName('entries', id, 'url')}
++                  defaultValue={String(item['url'] ?? '')}
++                />
++              </>
++            )}
++          />
++        </>
++      );
++    }
++    case 'contact':
++      return (
++        <>
++          <Bilingual label="Title" name="title" value={text(encoded['title'] as DraftText)} />
++          <RichTextPreview
++            label="Directions"
++            nodes={encoded['directions'] as ReadonlyArray<Record<string, unknown>> | undefined}
++          />
++        </>
++      );
++    case 'volunteer':
++      return (
++        <>
++          <RichTextPreview
++            label="Title"
++            nodes={encoded['title'] as ReadonlyArray<Record<string, unknown>> | undefined}
++          />
++          <Bilingual
++            label="Subtitle"
++            name="subtitle"
++            value={text(encoded['subtitle'] as DraftText)}
++            multiline
++          />
++          <Bilingual
++            label="Directions heading"
++            name="directions"
++            value={text(encoded['directions'] as DraftText)}
++          />
++        </>
++      );
++    case 'home': {
++      const join = (encoded['join'] ?? {}) as Record<string, unknown>;
++      const mission = (encoded['mission'] ?? {}) as Record<string, unknown>;
++      const newsletter = (encoded['newsletter'] ?? {}) as Record<string, unknown>;
++      return (
++        <>
++          <Bilingual label="Tagline" name="tagline" value={text(encoded['tagline'] as DraftText)} />
++          <Bilingual
++            label="Mission · read-story label"
++            name="mission.readStoryLabel"
++            value={text(mission['readStoryLabel'] as DraftText)}
++          />
++          <Bilingual label="Join · title" name="join.title" value={text(join['title'] as DraftText)} />
++          <Bilingual
++            label="Join · subtitle"
++            name="join.subtitle"
++            value={text(join['subtitle'] as DraftText)}
++            multiline
++          />
++          <Bilingual
++            label="Join · donate label"
++            name="join.donateLabel"
++            value={text(join['donateLabel'] as DraftText)}
++          />
++          <Bilingual
++            label="Join · volunteer label"
++            name="join.volunteerLabel"
++            value={text(join['volunteerLabel'] as DraftText)}
++          />
++          <Bilingual
++            label="Newsletter · title"
++            name="newsletter.title"
++            value={text(newsletter['title'] as DraftText)}
++          />
++          <Bilingual
++            label="Newsletter · subtitle"
++            name="newsletter.subtitle"
++            value={text(newsletter['subtitle'] as DraftText)}
++            multiline
++          />
++          <Bilingual
++            label="Newsletter · socials"
++            name="newsletter.socials"
++            value={text(newsletter['socials'] as DraftText)}
++            multiline
++          />
++        </>
++      );
++    }
++  }
++}
++
++export default function AdminPageEditor() {
++  const { page, encoded, source, bucketConfigured } =
++    useLoaderData<typeof loader>();
++  const actionData = useActionData<ActionResponse>();
++  const navigation = useNavigation();
++  const submitting = navigation.state === 'submitting';
++
++  const status =
++    typeof window === 'undefined'
++      ? null
++      : new URLSearchParams(window.location.search).get('status');
++
++  return (
++    <div className="space-y-6">
++      <div>
++        <h1 className="text-2xl font-semibold">{PAGE_LABELS[page]} page</h1>
++        <p className="mt-1 text-sm text-neutral-600">
++          Edit this page&rsquo;s bilingual copy. Save a draft to keep it private;
++          publish to make it live on the next page load — no redeploy.
++        </p>
++        <p className="mt-2 inline-block rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700">
++          Editing source: <strong>{source}</strong>
++        </p>
++        {!bucketConfigured && (
++          <p className="mt-2 inline-block rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">
++            No bucket configured — saving and publishing will fail.
++          </p>
++        )}
++      </div>
++
++      {status && (
++        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
++          {status}
++        </div>
++      )}
++
++      {actionData && !actionData.ok && (
++        <div className="space-y-2 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
++          <strong>{actionData.error}</strong>
++          {actionData.issues.length > 0 && (
++            <ul className="space-y-1 text-xs">
++              {actionData.issues.map((issue, i) => (
++                <li key={i}>• {issue}</li>
++              ))}
++            </ul>
++          )}
++        </div>
++      )}
++
++      <Form method="post" className="space-y-4">
++        <Section title={`${PAGE_LABELS[page]} content`} open>
++          <PageEditor page={page} encoded={encoded as Record<string, unknown>} />
++        </Section>
++
++        <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-neutral-200 bg-white/95 py-3 backdrop-blur">
++          <p className="text-xs text-neutral-500">
++            Draft writes <code>content/pages/{page}.draft.json</code>. Publish
++            writes <code>content/pages/{page}.json</code> and busts only this
++            page&rsquo;s read cache.
++          </p>
++          <div className="flex items-center gap-2">
++            <button
++              type="submit"
++              name="intent"
++              value="save-draft"
++              disabled={submitting}
++              className="inline-flex min-h-11 cursor-pointer items-center rounded-md border border-neutral-300 px-4 text-sm font-medium hover:bg-neutral-100 disabled:opacity-50"
++            >
++              {submitting ? 'Saving…' : 'Save draft'}
++            </button>
++            <button
++              type="submit"
++              name="intent"
++              value="publish"
++              disabled={submitting}
++              className="inline-flex min-h-11 cursor-pointer items-center rounded-md bg-neutral-900 px-4 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
++            >
++              {submitting ? 'Publishing…' : 'Publish'}
++            </button>
++          </div>
++        </div>
++      </Form>
++    </div>
++  );
++}
