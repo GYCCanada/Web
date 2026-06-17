@@ -191,6 +191,27 @@ const fieldToStructEntry = (
   if (field._tag === 'checkboxBoolean' && field.optional === true) {
     return [field.name, Schema.optionalKey(stringToBoolean(field.requiredMessage))];
   }
+  // An `optional: true` text/email/url is optional-at-KEY (absence valid) but
+  // keeps its full non-empty + format codec for a PRESENT value — the empty
+  // present value still emits `requiredMessage`. This is the cross-field-gated
+  // `email`/`phone` of contact/volunteer (`Schema.optional(Email)` in the
+  // oracle, where `Email` itself enforces `isMinLength(1)`): the rule governs
+  // presence, the field forbids a blank present value. `Schema.optional` (not
+  // `optionalKey`) so an explicit `undefined` is also accepted, matching the
+  // oracle wrapper.
+  if (
+    (field._tag === 'requiredText' ||
+      field._tag === 'email' ||
+      field._tag === 'url') &&
+    field.optional === true
+  ) {
+    return [
+      field.name,
+      Schema.optional(
+        fieldToRequiredSchema(field) as Schema.Codec<unknown, unknown>,
+      ),
+    ];
+  }
   return [field.name, fieldToRequiredSchema(field)];
 };
 
@@ -238,83 +259,155 @@ const buildVariantOptionalFields = (
   return entries;
 };
 
-/**
- * The struct-level filter that requires each variant's fields — at their own
- * paths — when the discriminator selects that variant. Emits the field's own
- * required `MessageKey` so an absent variant-required field renders the same copy
- * it would as a non-variant required field.
- */
-const makeVariantFilter = (variant: FormVariantSet) =>
-  Schema.makeFilter(
-    (value: Record<string, unknown>) => {
-      const selected = value[variant.discriminator];
-      const issues: Array<{
-        path: ReadonlyArray<PropertyKey>;
-        issue: string;
-      }> = [];
-      const branch = variant.variants.find((v) => v.value === selected);
-      if (branch) {
-        for (const field of branch.fields) {
-          // optionalText / optional checkbox are legitimately absent; their
-          // presence is never required by the variant. A `nestedGroup`'s own
-          // absence surfaces at the group key through its inner required fields
-          // (the registration nested groups are common, not variant, fields), so
-          // the variant filter never imposes group-level presence.
-          if (
-            field._tag === 'optionalText' ||
-            field._tag === 'nestedGroup' ||
-            (field._tag === 'checkboxBoolean' && field.optional === true)
-          ) {
-            continue;
-          }
-          if (value[field.name] === undefined) {
-            issues.push({
-              path: [field.name],
-              issue: requiredMessageOf(field),
-            });
-          }
-        }
-      }
-      return issues.length === 0 ? undefined : issues;
-    },
-    { title: 'FormVariantSet.presence' },
-  );
+/** One presence issue a struct-level predicate reports, at a field path. */
+type PresenceIssue = {
+  readonly path: ReadonlyArray<PropertyKey>;
+  readonly issue: string;
+};
 
 /**
- * The `MessageKey` a presence-requirable field emits when absent. `optionalText`
- * and `nestedGroup` are never presence-required by a variant (the caller skips
- * them), so they are excluded from the input type — there is no required key to
- * return for them.
+ * The required `MessageKey` a presence-requirable LEAF emits when absent. A
+ * `nestedGroup` (handled by {@link groupPresenceIssue}) and an `optionalText`
+ * (never presence-required) are excluded from the input type — they have no
+ * single required key to return.
  */
 const requiredMessageOf = (
-  field: Extract<
-    FieldKind,
-    { requiredMessage: MessageKey }
-  >,
+  field: Extract<FieldKind, { requiredMessage: MessageKey }>,
 ): string => field.requiredMessage;
+
+/**
+ * The presence issue an ABSENT selected-variant `nestedGroup` surfaces: a real
+ * key at the group's FIRST presence-requirable inner field path (e.g.
+ * `['extra', <first required inner field>]`), mirroring the registration
+ * oracle's `['extra', 'tos']` (`registration-schema.ts:274-279`) — a selected
+ * attendee branch that omits the whole `extra` group is an error, not a success
+ * (`make-impossible-states-unrepresentable`). An empty group (no presence-
+ * requirable inner field) cannot anchor a key, so it imposes no group-level
+ * presence — its own (absent) inner fields carry no requirement anyway.
+ */
+const groupPresenceIssue = (
+  group: Extract<FieldKind, { _tag: 'nestedGroup' }>,
+): PresenceIssue | undefined => {
+  for (const inner of group.fields) {
+    if (!isPresenceRequirableLeaf(inner)) continue;
+    return { path: [group.name, inner.name], issue: requiredMessageOf(inner) };
+  }
+  return undefined;
+};
+
+/**
+ * A leaf whose PRESENCE a variant/group can require when its branch is selected:
+ * everything except `optionalText` (empty-allowed), an `optional: true` leaf
+ * (checkbox / scalar — legitimately absent), and a `nestedGroup` (its own
+ * presence is anchored by {@link groupPresenceIssue}, not a single key). The
+ * survivors all carry a `requiredMessage`, so the narrowed type is the input to
+ * {@link requiredMessageOf}.
+ */
+const isPresenceRequirableLeaf = (
+  field: FieldKind,
+): field is Extract<FieldKind, { requiredMessage: MessageKey }> => {
+  if (field._tag === 'optionalText' || field._tag === 'nestedGroup') {
+    return false;
+  }
+  if ('optional' in field && field.optional === true) return false;
+  return true;
+};
+
+/**
+ * The presence requirements a discriminated `variant` imposes on the SELECTED
+ * branch's fields — at their own paths — collected (not aborted) so a payload
+ * missing several branch fields surfaces them all at once, exactly as the
+ * oracle's single accumulating struct filter does
+ * (`registration-schema.ts:239-302`). A selected branch's leaf that is absent
+ * emits the leaf's required key at `[name]`; a selected branch's absent
+ * `nestedGroup` emits a real key at its first inner required field
+ * ({@link groupPresenceIssue}). An off-variant field is never demanded.
+ */
+const variantPresenceIssues = (
+  variant: FormVariantSet,
+  value: Record<string, unknown>,
+): ReadonlyArray<PresenceIssue> => {
+  const selected = value[variant.discriminator];
+  const branch = variant.variants.find((v) => v.value === selected);
+  if (!branch) return [];
+  const issues: Array<PresenceIssue> = [];
+  for (const field of branch.fields) {
+    if (field._tag === 'nestedGroup') {
+      if (value[field.name] === undefined) {
+        const issue = groupPresenceIssue(field);
+        if (issue) issues.push(issue);
+      }
+      continue;
+    }
+    if (!isPresenceRequirableLeaf(field)) continue;
+    if (value[field.name] === undefined) {
+      issues.push({ path: [field.name], issue: requiredMessageOf(field) });
+    }
+  }
+  return issues;
+};
 
 // ---------------------------------------------------------------------------
 // Cross-field rules
 // ---------------------------------------------------------------------------
 
 /**
- * The struct-level filter for one `requiredWhenEquals` rule: when the `when`
- * field's value is one of `equals`, the `target` field is required, and a missing
- * target emits `message` at the target's path. Mirrors the `method`-gated
- * email/phone requirement of `contact.tsx:91-109`.
+ * The presence requirement one `requiredWhenEquals` rule imposes: when the
+ * `when` field's value is one of `equals`, the `target` field is required, and
+ * an absent-OR-empty target emits `message` at the target's path. Mirrors the
+ * `method`-gated email/phone requirement of `contact.tsx:91-109`.
+ *
+ * The "required" sense here is PRESENCE-and-non-emptiness, not mere
+ * key-presence. The oracle gates `email` as `Schema.optional(Email)` where
+ * `Email` enforces `isMinLength(1)`, so `{ method: 'email', email: '' }` is a
+ * decode error, not a success: a visibly-blank required field must never be
+ * representable as valid (`make-impossible-states-unrepresentable`). The
+ * recommended modelling pairs this rule with an `optional: true` `email`/text
+ * target (optional-at-key, non-empty-when-present), where the FIELD codec
+ * already rejects a present `''` (and does so BEFORE this struct-level filter
+ * runs, so no duplicate issue is reported); this predicate additionally rejects
+ * the absent/empty target so the requirement holds even if a definition gates
+ * an empty-permitting `optionalText` target.
  */
-const makeRuleFilter = (rule: CrossFieldRule) =>
+const rulePresenceIssue = (
+  rule: CrossFieldRule,
+  value: Record<string, unknown>,
+): PresenceIssue | undefined => {
+  const trigger = value[rule.when];
+  const triggered =
+    typeof trigger === 'string' && rule.equals.includes(trigger as never);
+  const target = value[rule.target];
+  const unsatisfied = target === undefined || target === '';
+  return triggered && unsatisfied
+    ? { path: [rule.target], issue: rule.message }
+    : undefined;
+};
+
+/**
+ * The SINGLE struct-level presence filter for a definition: the variant's
+ * selected-branch requirements plus every cross-field rule, accumulated into one
+ * issue list. Composing one accumulating filter (rather than chaining a
+ * `.check` per concern) matches the oracle's single struct-level
+ * `Schema.makeFilter` and is REQUIRED for fidelity — chained `.check`s ABORT
+ * after the first failing filter (Effect's default), so two unsatisfied rules
+ * (the contact/volunteer `email`+`phone` pair) would surface only one. One
+ * filter collecting all issues reproduces the oracle's "report multiple failures
+ * at once" behaviour without depending on a non-default `errors: 'all'` decode.
+ */
+const makePresenceFilter = (definition: FormDefinition) =>
   Schema.makeFilter(
     (value: Record<string, unknown>) => {
-      const trigger = value[rule.when];
-      const triggered =
-        typeof trigger === 'string' && rule.equals.includes(trigger as never);
-      if (triggered && value[rule.target] === undefined) {
-        return [{ path: [rule.target], issue: rule.message }];
+      const issues: Array<PresenceIssue> = [];
+      if (definition.variant) {
+        issues.push(...variantPresenceIssues(definition.variant, value));
       }
-      return undefined;
+      for (const rule of definition.rules ?? []) {
+        const issue = rulePresenceIssue(rule, value);
+        if (issue) issues.push(issue);
+      }
+      return issues.length === 0 ? undefined : issues;
     },
-    { title: `CrossFieldRule.${rule.when}` },
+    { title: 'FormDefinition.presence' },
   );
 
 // ---------------------------------------------------------------------------
@@ -323,11 +416,14 @@ const makeRuleFilter = (rule: CrossFieldRule) =>
 
 /**
  * Compile a `FormDefinition` into the Effect Schema codec that validates its
- * submissions. The common `fields`, the optional variant fields, the variant
- * presence filter, and every cross-field rule filter are composed into one
- * `Schema.Struct` whose `Issue` tree feeds `formatSchemaResult` unchanged. The
- * struct-level filters run in declaration order (variant presence first, then
- * rules), each attaching its issues to its own field paths.
+ * submissions. The common `fields` and the optional variant fields form one
+ * `Schema.Struct`; a SINGLE struct-level presence filter
+ * ({@link makePresenceFilter}) re-imposes the variant's selected-branch
+ * requirements and every cross-field rule, accumulating all issues at their own
+ * field paths. The struct's `Issue` tree feeds `formatSchemaResult` unchanged.
+ * One accumulating filter (not a chain of `.check`s) is required so multiple
+ * unsatisfied requirements all surface, matching the oracle's single struct
+ * filter.
  */
 export const definitionToSchema = (
   definition: FormDefinition,
@@ -339,14 +435,9 @@ export const definitionToSchema = (
     Object.assign(fields, buildVariantOptionalFields(definition.variant));
   }
 
-  let struct = Schema.Struct(fields);
-  const filters = [
-    ...(definition.variant ? [makeVariantFilter(definition.variant)] : []),
-    ...(definition.rules ?? []).map(makeRuleFilter),
-  ];
-  for (const filter of filters) {
-    struct = struct.check(filter as never) as typeof struct;
-  }
+  const struct = Schema.Struct(fields).check(
+    makePresenceFilter(definition) as never,
+  );
   return struct as unknown as Schema.Codec<DecodedForm, Encoded>;
 };
 

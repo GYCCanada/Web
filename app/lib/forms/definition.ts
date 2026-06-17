@@ -134,15 +134,21 @@ type FieldChrome<Name, Txt> = {
   readonly placeholder?: Txt;
 };
 type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
-  | ({ readonly _tag: 'requiredText'; readonly requiredMessage: Msg } & FieldChrome<Name, Txt>)
+  | ({
+      readonly _tag: 'requiredText';
+      readonly optional?: Bool;
+      readonly requiredMessage: Msg;
+    } & FieldChrome<Name, Txt>)
   | ({ readonly _tag: 'optionalText'; readonly invalidMessage: Msg } & FieldChrome<Name, Txt>)
   | ({
       readonly _tag: 'email';
+      readonly optional?: Bool;
       readonly requiredMessage: Msg;
       readonly invalidMessage: Msg;
     } & FieldChrome<Name, Txt>)
   | ({
       readonly _tag: 'url';
+      readonly optional?: Bool;
       readonly requiredMessage: Msg;
       readonly invalidMessage: Msg;
     } & FieldChrome<Name, Txt>)
@@ -225,14 +231,22 @@ const fieldChrome = {
  * translation key by construction.
  *
  *   - `requiredText`    — a non-empty free-text field (the empty, absent, and
- *     non-string cases all emit `requiredMessage`).
+ *     non-string cases all emit `requiredMessage`). `optional: true` makes the
+ *     field optional-at-key (absence valid, never a missing-key error) while a
+ *     PRESENT value is still non-empty (an empty string emits `requiredMessage`):
+ *     the cross-field-gated text whose presence a rule governs but which still
+ *     rejects a visibly-blank value (contact/volunteer `phone`).
  *   - `optionalText`    — a present-but-empty-allowed free-text field (the old
  *     zod-permissive "other notes"); a present non-string emits `invalidMessage`,
- *     absence is valid.
+ *     an empty string and an absent value are both valid.
  *   - `email`           — a required email; emptiness/absence emit
- *     `requiredMessage`, a malformed address emits `invalidMessage`.
+ *     `requiredMessage`, a malformed address emits `invalidMessage`. `optional:
+ *     true` makes it optional-at-key but NON-EMPTY-when-present (the empty present
+ *     value still emits `requiredMessage`): the `method`-gated contact/volunteer
+ *     `email` whose presence a `requiredWhenEquals` rule governs.
  *   - `url`             — a required absolute URL; emptiness/absence emit
- *     `requiredMessage`, an unparseable value emits `invalidMessage`.
+ *     `requiredMessage`, an unparseable value emits `invalidMessage`. `optional:
+ *     true` makes it optional-at-key but non-empty-when-present, mirroring `email`.
  *   - `literal`         — a single choice from a closed `OptionList` (a radio /
  *     select); an off-list or absent value emits `requiredMessage`.
  *   - `checkboxBoolean` — a `true` / `false` / `on` checkbox-boolean; an off-token
@@ -244,22 +258,38 @@ const fieldChrome = {
  *     `extra`, and `volunteer` groups registration nests). Recursive via
  *     `Schema.suspend`.
  *
- * Optionality of a WHOLE field at the form level (an exhibitor-only field on an
- * attendee) is the enclosing `variant`'s concern, not a per-kind flag — a single
- * `requiredText` is always required WHERE it appears; whether it APPEARS is the
- * variant's concern (`make-impossible-states-unrepresentable`: there is no
- * per-field "required: false" knob to forget).
+ * Two ORTHOGONAL optionality axes, never conflated:
+ *   - WHICH FIELDS APPEAR for a registrant (an exhibitor-only field on an
+ *     attendee) is the enclosing `variant`'s concern, not a per-kind flag.
+ *   - PRESENCE-AT-KEY of a field that always appears but whose value may be
+ *     absent (the `method`-gated contact/volunteer `email`/`phone`, present only
+ *     when the user picks that contact method) is the `optional: true` flag on
+ *     `requiredText`/`email`/`url`. Crucially `optional` governs ONLY whether the
+ *     key may be ABSENT; a PRESENT value still runs the kind's full non-empty +
+ *     format checks (an `optional` email with value `""` still emits its
+ *     `requiredMessage`). This is what makes a `requiredWhenEquals` rule's target
+ *     model the oracle exactly — the rule re-imposes PRESENCE when triggered, the
+ *     field forbids a visibly-blank PRESENT value either way
+ *     (`make-impossible-states-unrepresentable`: a blank-but-present required
+ *     value is not representable as valid). There is still no "required: false"
+ *     knob that would let a present value skip its checks.
  */
 export const FieldKind = Schema.TaggedUnion({
-  requiredText: { ...fieldChrome, requiredMessage: MessageKey },
+  requiredText: {
+    ...fieldChrome,
+    optional: Schema.optionalKey(Schema.Boolean),
+    requiredMessage: MessageKey,
+  },
   optionalText: { ...fieldChrome, invalidMessage: MessageKey },
   email: {
     ...fieldChrome,
+    optional: Schema.optionalKey(Schema.Boolean),
     requiredMessage: MessageKey,
     invalidMessage: MessageKey,
   },
   url: {
     ...fieldChrome,
+    optional: Schema.optionalKey(Schema.Boolean),
     requiredMessage: MessageKey,
     invalidMessage: MessageKey,
   },

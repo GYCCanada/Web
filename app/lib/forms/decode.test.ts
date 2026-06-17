@@ -393,6 +393,121 @@ describe('variant (discriminated-union presence)', () => {
   });
 });
 
+// A selected variant branch carrying a `nestedGroup` (registration's attendee-
+// only `extra` group): the WHOLE group can be omitted from the payload, and the
+// engine must still demand it — surfacing a real key at the group's first
+// presence-requirable inner field, mirroring the oracle's `['extra', …]`
+// requirement (`registration-schema.ts:268-279`). Without this, a selected
+// attendee that omits `extra` would decode SUCCESS — a behaviour divergence.
+const variantGroupDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'requiredText',
+      name: 'name',
+      label: text('Name', 'Nom'),
+      requiredMessage: 'registration.form.name.required',
+    },
+  ],
+  variant: {
+    discriminator: 'type',
+    requiredMessage: 'registration.form.type.required',
+    options: [
+      { value: 'attendee', label: text('Attendee', 'Participant') },
+      { value: 'exhibitor', label: text('Exhibitor', 'Exposant') },
+    ],
+    variants: [
+      {
+        value: 'attendee',
+        label: text('Attendee', 'Participant'),
+        fields: [
+          {
+            _tag: 'nestedGroup',
+            name: 'extra',
+            label: text('Extra', 'Extra'),
+            fields: [
+              {
+                _tag: 'requiredText',
+                name: 'howDidYouHear',
+                label: text('How', 'Comment'),
+                requiredMessage:
+                  'registration.form.how-did-you-hear.required',
+              },
+              {
+                _tag: 'checkboxBoolean',
+                name: 'tos',
+                label: text('Accept', 'Accepter'),
+                requiredMessage: 'registration.form.tos.required',
+              },
+            ],
+          },
+        ],
+      },
+      {
+        value: 'exhibitor',
+        label: text('Exhibitor', 'Exposant'),
+        fields: [
+          {
+            _tag: 'requiredText',
+            name: 'company',
+            label: text('Company', 'Entreprise'),
+            requiredMessage: 'registration.form.company.required',
+          },
+        ],
+      },
+    ],
+  },
+});
+
+describe('variant nestedGroup presence', () => {
+  test('a selected branch with the whole group omitted emits a real key at the first inner field', () => {
+    const errors = errorsFor(variantGroupDef, { name: 'Ada', type: 'attendee' });
+    expect(errors?.fieldErrors['extra.howDidYouHear']).toEqual([
+      'registration.form.how-did-you-hear.required',
+    ]);
+  });
+
+  test('a present, valid group decodes', () => {
+    expect(
+      Result.isSuccess(
+        decodeForm(variantGroupDef, {
+          name: 'Ada',
+          type: 'attendee',
+          extra: { howDidYouHear: 'web', tos: 'true' },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  test('a present group with a missing inner required field emits its key on the nested path', () => {
+    const errors = errorsFor(variantGroupDef, {
+      name: 'Ada',
+      type: 'attendee',
+      extra: { howDidYouHear: '', tos: 'true' },
+    });
+    expect(errors?.fieldErrors['extra.howDidYouHear']).toEqual([
+      'registration.form.how-did-you-hear.required',
+    ]);
+  });
+
+  test('the OTHER branch never demands the group', () => {
+    expect(
+      Result.isSuccess(
+        decodeForm(variantGroupDef, {
+          name: 'Ada',
+          type: 'exhibitor',
+          company: 'Acme',
+        }),
+      ),
+    ).toBe(true);
+  });
+});
+
+// Mirrors contact/volunteer: the `method`-gated `email`/`phone` are
+// `optional: true` (optional-at-key, NON-EMPTY-when-present) — the oracle's
+// `Schema.optional(Email)` where `Email` enforces `isMinLength(1)`. Two rules,
+// like the real forms, so the "multiple unsatisfied rules surface at once" path
+// is exercised.
 const ruleDef = asDefinition({
   title: text('F', 'F'),
   fields: [
@@ -408,10 +523,19 @@ const ruleDef = asDefinition({
       ],
     },
     {
-      _tag: 'optionalText',
+      _tag: 'email',
       name: 'email',
       label: text('Email', 'Courriel'),
+      optional: true,
+      requiredMessage: 'contact.form.email.required',
       invalidMessage: 'contact.form.email.error',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'phone',
+      label: text('Phone', 'Tél'),
+      optional: true,
+      requiredMessage: 'contact.form.phone.required',
     },
   ],
   rules: [
@@ -421,6 +545,13 @@ const ruleDef = asDefinition({
       equals: ['email', 'both'],
       target: 'email',
       message: 'contact.form.email.required',
+    },
+    {
+      _tag: 'requiredWhenEquals',
+      when: 'method',
+      equals: ['phone', 'both'],
+      target: 'phone',
+      message: 'contact.form.phone.required',
     },
   ],
 });
@@ -433,16 +564,50 @@ describe('requiredWhenEquals cross-field rule', () => {
     ]);
   });
 
+  test('an empty (present-but-blank) target with the trigger active emits the required key', () => {
+    // The oracle gates `email` as `Schema.optional(Email)`, and `Email` enforces
+    // `isMinLength(1)`, so `{ method: 'email', email: '' }` is a decode error —
+    // a visibly-blank required field must never decode SUCCESS. The empty present
+    // value is rejected by the field codec (the `optional: true` email is
+    // non-empty-when-present), surfacing exactly one error on the field.
+    const errors = errorsFor(ruleDef, { method: 'email', email: '' });
+    expect(errors?.fieldErrors['email']).toEqual([
+      'contact.form.email.required',
+    ]);
+  });
+
+  test('an empty present target with the trigger INACTIVE still rejects (non-empty-when-present)', () => {
+    // Even when `method` is `phone` (so the email rule is not triggered), a
+    // present `email: ''` is a blank value the field codec rejects, matching the
+    // oracle's always-on `isMinLength(1)`.
+    const errors = errorsFor(ruleDef, { method: 'phone', email: '', phone: '5' });
+    expect(errors?.fieldErrors['email']).toEqual([
+      'contact.form.email.required',
+    ]);
+  });
+
+  test('two unsatisfied rules both surface (the accumulating presence filter)', () => {
+    // `both` triggers both the email and phone rules; with neither present, BOTH
+    // keys must fire — a chained-`.check` composition would abort after the first.
+    const errors = errorsFor(ruleDef, { method: 'both' });
+    expect(errors?.fieldErrors['email']).toEqual([
+      'contact.form.email.required',
+    ]);
+    expect(errors?.fieldErrors['phone']).toEqual([
+      'contact.form.phone.required',
+    ]);
+  });
+
   test('the target is not required when the trigger field does not match', () => {
     expect(
-      Result.isSuccess(decodeForm(ruleDef, { method: 'phone' })),
+      Result.isSuccess(decodeForm(ruleDef, { method: 'phone', phone: '5' })),
     ).toBe(true);
   });
 
   test('a present target with the trigger active decodes', () => {
     expect(
       Result.isSuccess(
-        decodeForm(ruleDef, { method: 'both', email: 'a@b.co' }),
+        decodeForm(ruleDef, { method: 'both', email: 'a@b.co', phone: '5' }),
       ),
     ).toBe(true);
   });
