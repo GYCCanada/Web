@@ -11,6 +11,9 @@ import { Storage } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
 import {
   assembleOverrides,
+  collectTranslations,
+  deepMerge,
+  translationFieldName,
   uploadedImageKey,
   type Json,
 } from './admin-form';
@@ -293,6 +296,168 @@ describe('DraftEditor.applyImageUpload (rewrite a key on the draft)', () => {
   );
 });
 
+// ---------------------------------------------------------------------------
+// Edit-equivalence corpus — the extraction is behaviour-preserving against the
+// deleted inline write path (registration-launch-plan.md:51-52).
+//
+// `inlineOracle` is a TEST-LOCAL reproduction of the exact algorithm the old
+// `admin/content.tsx` action ran for the save/publish intent (verified against
+// `feature/registration-launch:app/routes/admin/content.tsx`):
+//   base = encodeDocument(current)
+//   merged = deepMerge(deepMerge(base, assembleOverrides(entries)),
+//                      { translations: collectTranslations(entries) })
+//   decoded = decodeDocument(merged)
+//   stored  = encodeDocumentJson(decoded)
+// The corpus asserts `DraftEditor.editDocument(scope, routeOverride(entries))`
+// produces a draft byte-identical to the oracle's `stored` JSON across every
+// override shape the route's two override-builders emit: dotted-path leaves,
+// translation fields (`t:<locale>:<key>` → `collectTranslations`), numeric
+// coercions (bible.chapter/verse), nested hero keys, team fields, and the
+// preserved-unedited `registration` Option deep-field survival.
+// ---------------------------------------------------------------------------
+
+const encodeObject = Schema.encodeUnknownEffect(SiteContent);
+const encodeObjectJson = Schema.encodeUnknownEffect(
+  Schema.fromJsonString(SiteContent),
+);
+const decodeMerged = Schema.decodeUnknownEffect(SiteContent);
+
+/** The exact override the migrated route hands `editDocument` (content.tsx:183). */
+const routeOverride = (
+  entries: ReadonlyArray<readonly [string, string]>,
+): Json =>
+  deepMerge(assembleOverrides(entries), {
+    translations: collectTranslations(entries),
+  } as Json);
+
+/** The deleted inline algorithm, reproduced verbatim, returning the stored JSON. */
+const inlineOracle = (
+  current: SiteContentType,
+  entries: ReadonlyArray<readonly [string, string]>,
+) =>
+  Effect.gen(function* () {
+    const base = (yield* encodeObject(current)) as Json;
+    const overrides = assembleOverrides(entries);
+    const translations = collectTranslations(entries);
+    const merged = deepMerge(deepMerge(base, overrides), {
+      translations,
+    } as Json);
+    const decoded = yield* decodeMerged(merged);
+    return yield* encodeObjectJson(decoded);
+  });
+
+interface CorpusCase {
+  readonly name: string;
+  readonly entries: ReadonlyArray<readonly [string, string]>;
+  /** A field on the decoded result the case proves the edit reached. */
+  readonly proof: (doc: SiteContentType) => unknown;
+  readonly expected: unknown;
+}
+
+const corpus: readonly CorpusCase[] = [
+  {
+    name: 'dotted-path leaf — rename the 2026 theme (EN)',
+    entries: [['conferences.2.themeName.en', 'Speak Boldly']],
+    proof: themeName2026,
+    expected: 'Speak Boldly',
+  },
+  {
+    name: 'translation field — t:<locale>:<key> folds onto translations.en',
+    entries: [[translationFieldName('en', 'main.reserve'), 'Reserve a Spot']],
+    proof: (doc) => doc.translations.en['main.reserve'],
+    expected: 'Reserve a Spot',
+  },
+  {
+    name: 'translation field — both locales of the same key',
+    entries: [
+      [translationFieldName('en', 'main.reserve'), 'Reserve a Spot'],
+      [translationFieldName('fr', 'main.reserve'), 'Réservez une place'],
+    ],
+    proof: (doc) => `${doc.translations.en['main.reserve']}|${doc.translations.fr['main.reserve']}`,
+    expected: 'Reserve a Spot|Réservez une place',
+  },
+  {
+    name: 'numeric coercion — bible.chapter/verse parse to Int',
+    entries: [
+      ['conferences.2.bible.chapter', '3'],
+      ['conferences.2.bible.verse', '16'],
+    ],
+    proof: (doc) => {
+      const c = doc.conferences.find((x) => x.slug === '/2026');
+      return `${c?.bible.chapter}/${c?.bible.verse}`;
+    },
+    expected: '3/16',
+  },
+  {
+    name: 'nested hero key — alt text on a deep hero crop',
+    entries: [['conferences.0.hero.desktop.alt.en', 'A brand new alt']],
+    proof: (doc) =>
+      doc.conferences.find((x) => x.slug === '/2024')?.hero.desktop.alt.en,
+    expected: 'A brand new alt',
+  },
+  {
+    name: 'team field — rename a board member',
+    entries: [['team.0.name', 'Renamed Member']],
+    proof: (doc) => doc.team[0]?.name,
+    expected: 'Renamed Member',
+  },
+  {
+    name: 'mixed override — dotted + translation + numeric in one submit',
+    entries: [
+      ['conferences.2.themeName.en', 'Combined Edit'],
+      ['conferences.2.bible.verse', '7'],
+      [translationFieldName('fr', 'main.reserve'), 'Réservez'],
+    ],
+    proof: (doc) => {
+      const c = doc.conferences.find((x) => x.slug === '/2026');
+      return `${c?.themeName.en}|${c?.bible.verse}|${doc.translations.fr['main.reserve']}`;
+    },
+    expected: 'Combined Edit|7|Réservez',
+  },
+];
+
+describe('DraftEditor.editDocument equivalence corpus (vs the deleted inline path)', () => {
+  for (const testCase of corpus) {
+    it.effect(testCase.name, () =>
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        // The seeded published doc is at epoch; advance so the edit's draft is
+        // strictly newer and `load` reopens it as the edit source.
+        yield* TestClock.adjust('1 second');
+        const encoded = yield* editor.editDocument(
+          siteScope,
+          routeOverride(testCase.entries),
+        );
+
+        // (a) The returned EncodedDoc carries the edit.
+        const returned = yield* decodeObject(encoded);
+        expect(testCase.proof(returned)).toEqual(testCase.expected);
+
+        // (b) The stored draft JSON is BYTE-IDENTICAL to the oracle's output —
+        // the extraction is behaviour-preserving against the old inline path.
+        const draftBody = yield* readStoredText(SITE_CONTENT_DRAFT_KEY);
+        const oracleJson = yield* inlineOracle(
+          defaultContent,
+          testCase.entries,
+        );
+        expect(draftBody).toEqual(oracleJson);
+
+        // (c) The preserved-unedited `registration` Option deep-field survives:
+        // 2024 carries `Option.some(RegistrationWindows)`; no corpus case edits
+        // it, so it round-trips untouched through the merge (the deep-field
+        // survival the old index-merge had).
+        const storedDraft = yield* decodeJson(draftBody);
+        expect(
+          storedDraft.conferences.find((c) => c.slug === '/2024')?.registration,
+        ).toEqual(
+          defaultContent.conferences.find((c) => c.slug === '/2024')
+            ?.registration,
+        );
+      }).pipe(seededPublished(defaultContent)),
+    );
+  }
+});
+
 describe('DraftEditor.publish (promote draft → published, drop draft, bust)', () => {
   it.effect(
     'promotes the current draft to the published key and makes it live on the next public read',
@@ -333,6 +498,42 @@ describe('DraftEditor.publish (promote draft → published, drop draft, bust)', 
         // The editor now reopens from the published document (no pending draft).
         const reopened = yield* editor.load(siteScope);
         expect(reopened.source).toBe('published');
+      }).pipe(seededPublished(defaultContent)),
+  );
+
+  it.effect(
+    'publishes the just-saved edit even when draft and published share a same-second timestamp (no clock advance)',
+    () =>
+      // REGRESSION (silent data loss): on a second-granular backend (S3/MinIO)
+      // a draft saved and published within the same second has `lastModified`
+      // EQUAL to the published doc. The old `publish` routed through `load`,
+      // whose strict `draftHead > publishedHead` reconciliation then returned
+      // the OLD published doc (draftIsNewer === false), re-published stale
+      // content, and deleted the just-saved edit — losing it silently. The
+      // fix promotes the draft DIRECTLY. This test asserts that WITHOUT any
+      // `TestClock.adjust` between edit and publish: the published seed, the
+      // saved draft, and the publish all share epoch's second. It FAILS on the
+      // pre-fix code (publishes 'Speak', the stale seed) and passes on the fix.
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+
+        // NO TestClock.adjust — edit and publish land in the same second as the
+        // epoch-seeded published document.
+        const override = assembleOverrides([
+          ['conferences.2.themeName.en', 'Same Second Edit'],
+        ]) as Json;
+        yield* editor.editDocument(siteScope, override);
+        yield* editor.publish(siteScope);
+
+        // The published document carries the just-saved edit, NOT the stale seed.
+        const publishedBody = yield* readStoredText(SITE_CONTENT_KEY);
+        const publishedDoc = yield* decodeJson(publishedBody);
+        expect(themeName2026(publishedDoc)).toBe('Same Second Edit');
+
+        // And the public read reflects it (publish busted the cache).
+        const after = yield* content.getConference('en', 2026);
+        expect(after.title).toBe('Same Second Edit');
       }).pipe(seededPublished(defaultContent)),
   );
 });

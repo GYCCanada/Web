@@ -166,11 +166,14 @@ export class Service extends Context.Service<
       key: AssetKey,
     ) => Effect.Effect<EncodedDoc, IssueError>;
     /**
-     * Promote the scope's current edit source (the draft if newer, else the
-     * published document) to the published key, delete the draft best-effort,
-     * and bust the public read cache so the change is live on the next read with
-     * no redeploy. A storage failure on the published write rejects with a 502
-     * `IssueError`; the best-effort draft delete never fails the publish.
+     * Promote the scope's pending edit to the published key, delete the draft
+     * best-effort, and bust the public read cache so the change is live on the
+     * next read with no redeploy. When a draft exists it is promoted *directly*
+     * (it is the just-saved edit — never re-reconciled against the published
+     * document, so a same-second `lastModified` cannot drop it); only when no
+     * draft exists does publish re-publish the already-live document. A storage
+     * failure on the published write rejects with a 502 `IssueError`; the
+     * best-effort draft delete never fails the publish.
      */
     readonly publish: (scope: ContentScope) => Effect.Effect<void, IssueError>;
   }
@@ -315,8 +318,25 @@ export const layer = Layer.effect(
       scope: ContentScope,
     ) {
       const { draftKey, publishedKey } = scopeKeys(scope);
-      const { content: current } = yield* load(scope);
-      const json = yield* encodeDocumentJson(current).pipe(Effect.orDie);
+      // Promote the just-saved edit. A pending draft is ALWAYS the publish
+      // source — it is what the admin just edited and saved, so it is published
+      // directly and never re-reconciled against the published document by
+      // `lastModified`. This is the behaviour the old inline path had (it wrote
+      // the freshly-merged document straight to the published key) and is the
+      // reason `publish` must NOT route through `load`: `load`'s strict
+      // `draftHead > publishedHead` reconciliation is for *editor-open* only, and
+      // on a second-granular backend (S3/MinIO) a draft saved and published
+      // within the same second compares EQUAL — routing publish through `load`
+      // would silently re-publish the stale document and then delete the edit.
+      // With no draft, the already-live document is re-published.
+      const draft = yield* readDocument(draftKey);
+      const published = yield* readDocument(publishedKey);
+      const source = Option.isSome(draft)
+        ? draft.value
+        : Option.isSome(published)
+          ? published.value
+          : defaultContent;
+      const json = yield* encodeDocumentJson(source).pipe(Effect.orDie);
       yield* storage.put(publishedKey, json, 'application/json').pipe(
         Effect.mapError(
           (cause) =>
@@ -327,29 +347,16 @@ export const layer = Layer.effect(
             }),
         ),
       );
-      // Best-effort cleanup; correctness does NOT depend on it (`load`
-      // reconciles draft-vs-published by `lastModified` and only reopens a
-      // strictly-newer draft, so a leftover draft can never reopen stale
-      // content). Hence it must not fail the publish — the live document is
-      // already written.
+      // Best-effort cleanup so the bucket stays tidy. Correctness does NOT
+      // depend on it: the published document above already carries the promoted
+      // draft, so a leftover draft (from a failed delete) only governs what the
+      // *editor* reopens, where `load`'s strictly-newer reconciliation keeps it
+      // from reopening as stale content. Hence it must not fail the publish —
+      // the live document is already written.
       yield* storage.delete(draftKey).pipe(Effect.ignore);
       yield* content.bust();
     });
 
     return Service.of({ load, editDocument, applyImageUpload, publish });
   }),
-);
-
-/**
- * The admin write path's `DraftEditor`, self-contained except for `Env`. Its
- * `Storage` and `Content` dependencies are pre-provided from ONE shared
- * `Storage.layerOptional` so `publish`'s `Content.bust()` busts the very cache
- * the public read path serves from, and the editor's writes and the read
- * path's reads hit the same bucket instance (`make-impossible-states-
- * unrepresentable` — no chance of a write-path Storage drifting from the
- * read-path Storage). Only `Env` stays open, discharged by the surrounding
- * app-runtime merge.
- */
-export const defaultLayer = layer.pipe(
-  Layer.provide(Layer.provideMerge(Content.layer, Storage.layerOptional)),
 );
