@@ -7,9 +7,8 @@ import { ExternalHttpsUrl, ListItemId, Text } from '../schema';
  * Branch 5). Each evergreen `Page` (about, faq, give, contact, volunteer, archive,
  * and the home page's non-conference sections) owns ONE typed schema modelling its
  * real structure, stored as its own `content/pages/<page>.json` object. The three
- * forms own a `FormDefinition` object each (`forms/<form>.json`); this slice (5.1)
- * lands a typed PLACEHOLDER for it so the per-form read path (Branch 6) has a real
- * decode boundary, and the structural field-graph schema replaces it in Branch 6.
+ * forms own a `FormDefinition` object each (`forms/<form>.json`), modelled by the
+ * structural field-graph schema in `lib/forms/definition.ts` (Branch 6).
  *
  * Modelling principles (`~/.brain/principles`):
  *   - `make-impossible-states-unrepresentable`: every author-facing string is the
@@ -253,10 +252,6 @@ export const HomePage = Schema.Struct({
 export type HomePage = typeof HomePage.Type;
 
 // ---------------------------------------------------------------------------
-// FormDefinition — placeholder (Branch 6 replaces with the structural field graph)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Draft page variants — the laxer admin-draft schemas (ADR 0006, Branch 5.5)
 // ---------------------------------------------------------------------------
 
@@ -338,18 +333,3 @@ export const DraftArchivePage = Schema.Struct({
 });
 export type DraftArchivePage = typeof DraftArchivePage.Type;
 
-/**
- * A PLACEHOLDER `FormDefinition` schema (registration-launch Branch 5.1). ADR 0007 /
- * Branch 6 build the full structural field-graph (a closed set of ~8 `FieldKind`s,
- * discriminated-union variants, cross-field rules); until then this models only the
- * page-level copy a form object owns — its bilingual title and intro — so Branch 5.3's
- * per-form `getForm` read path has a REAL typed decode boundary to read
- * `forms/<form>.json` through, not a hypothetical. Branch 6 GROWS this schema (adds
- * `fields`) rather than replacing the object, so the per-form storage object and its
- * read path are proven before the field graph lands (`migrate-callers-then-delete`).
- */
-export const FormDefinition = Schema.Struct({
-  title: Text,
-  intro: Schema.optionalKey(Text),
-});
-export type FormDefinition = typeof FormDefinition.Type;

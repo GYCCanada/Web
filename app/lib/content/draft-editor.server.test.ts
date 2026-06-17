@@ -35,7 +35,8 @@ import {
   pageDraftKey,
   pageObjectKey,
 } from './pages/registry';
-import { FaqPage, FormDefinition } from './pages/schema';
+import { FormDefinition } from '../forms/definition';
+import { FaqPage } from './pages/schema';
 import { SiteContent } from './schema';
 import type {
   DraftSiteContent as DraftSiteContentType,

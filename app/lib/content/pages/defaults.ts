@@ -1,12 +1,12 @@
 import { Schema } from 'effect';
 
+import { FormDefinition } from '../../forms/definition';
 import { newListItemId } from '../schema';
 import {
   AboutPage,
   ArchivePage,
   ContactPage,
   FaqPage,
-  FormDefinition,
   GivePage,
   HomePage,
   VolunteerPage,
@@ -383,23 +383,35 @@ export const defaultHomePage: HomePage = Schema.decodeUnknownSync(HomePage)({
 });
 
 // ---------------------------------------------------------------------------
-// Form definitions (placeholder — page-level copy only until Branch 6)
+// Form definitions (structural — Branch 6.1)
 // ---------------------------------------------------------------------------
 
+/**
+ * The bundled-default `FormDefinition`s. Branch 6.1 lands the structural schema
+ * (the closed `FieldKind` set, variants, cross-field rules); these defaults carry
+ * the CMS-editable page copy with an EMPTY `fields` graph for now. Each form's
+ * actual field graph is authored when that form migrates onto the engine
+ * (contact 6.3, volunteer 6.4, registration 6.5) — until then a form falls back
+ * to its hand-tuned schema, and `Content.getForm` reads this typed default so the
+ * per-form object + read path stay proven (`migrate-callers-then-delete-legacy-apis`).
+ */
 export const defaultContactForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
 )({
   title: { en: 'Contact', fr: 'Contact' },
+  fields: [],
 });
 
 export const defaultVolunteerForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
 )({
   title: { en: 'Volunteer', fr: 'Bénévolat' },
+  fields: [],
 });
 
 export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
 )({
   title: { en: 'Registration', fr: 'Inscription' },
+  fields: [],
 });
