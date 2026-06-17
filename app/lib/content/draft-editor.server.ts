@@ -10,6 +10,7 @@ import {
 } from '../content.server';
 import { deepMerge, setAtPath, type Json } from './admin-form';
 import { defaultContent } from './defaults';
+import { backfillListItemIds } from './id-backfill';
 import { SiteContent, type AssetKey } from './schema';
 import type { SiteContent as SiteContentType } from './schema';
 import { Storage } from '../storage.server';
@@ -113,18 +114,28 @@ const issueMessages = (issue: SchemaIssue.Issue): readonly string[] =>
 // Codecs (the document's on-bucket JSON ↔ decoded value)
 // ---------------------------------------------------------------------------
 
-const decodeDocumentJson = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(SiteContent),
+// `decodeDocumentJson` reads a document FROM the bucket: parse → id-backfill →
+// decode, so a draft/published document published before list-item ids existed
+// (ADR 0006) still decodes (every id-less item gets a fresh `nanoid` before the
+// required `id` field is checked). `encodeDocument` yields the encoded OBJECT
+// (handed back to the view); `encodeDocumentJson` yields the JSON STRING stored
+// in the bucket (Effect Schema's JSON codec, not `JSON.stringify`, per the
+// project lint rule); `decodeDocument` decodes an already-id-complete merged
+// object (built from the loaded current document) at the single edit boundary —
+// no backfill, so a genuinely missing id is rejected rather than masked.
+const parseJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Unknown),
 );
-// `encodeDocument` yields the encoded OBJECT (handed back to the view);
-// `encodeDocumentJson` yields the JSON STRING stored in the bucket (Effect
-// Schema's JSON codec, not `JSON.stringify`, per the project lint rule);
-// `decodeDocument` decodes a merged object at the single boundary.
+const decodeDocument = Schema.decodeUnknownEffect(SiteContent);
+const decodeDocumentJson = (json: string) =>
+  parseJson(json).pipe(
+    Effect.map(backfillListItemIds),
+    Effect.flatMap(decodeDocument),
+  );
 const encodeDocument = Schema.encodeUnknownEffect(SiteContent);
 const encodeDocumentJson = Schema.encodeUnknownEffect(
   Schema.fromJsonString(SiteContent),
 );
-const decodeDocument = Schema.decodeUnknownEffect(SiteContent);
 
 // ---------------------------------------------------------------------------
 // Service

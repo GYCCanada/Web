@@ -8,6 +8,8 @@ import {
   DateRange,
   HexColour,
   IsoDate,
+  ListItemId,
+  newListItemId,
   SiteContent,
 } from './schema';
 import type {
@@ -15,6 +17,7 @@ import type {
   ConferenceSlug as ConferenceSlugType,
   HexColour as HexColourType,
   IsoDate as IsoDateType,
+  ListItemId as ListItemIdType,
 } from './schema';
 
 /**
@@ -184,6 +187,46 @@ describe('ConferenceSlug validation', () => {
   });
 });
 
+const isValidListItemId = (value: string): boolean =>
+  Schema.decodeUnknownResult(ListItemId)(value)._tag === 'Success';
+
+describe('ListItemId validation', () => {
+  test('accepts a nanoid (21 chars from the URL-safe alphabet)', () => {
+    for (const value of [
+      '-3YbWuMRYEEr5Pd-MLdvP',
+      'fk_vA5xNiXblPj040_K4v',
+      'YOQ7GeACwaTCKjY6y3HAV',
+      'aaaaaaaaaaaaaaaaaaaaa', // 21 plain chars
+      '___-------___---___--', // 21 underscore/hyphen chars (URL-safe)
+    ]) {
+      expect(isValidListItemId(value)).toBe(true);
+    }
+  });
+
+  test('rejects wrong length, the wrong alphabet, and non-id smuggle attempts', () => {
+    for (const value of [
+      '', // empty
+      'tooshort', // < 21
+      'aaaaaaaaaaaaaaaaaaaaaa', // 22 chars
+      'aaaaaaaaaaaaaaaaaaaa.', // a dot (would break a `speakers.<id>.name` path)
+      'aaaaaaaaaaaaaaaaaaaa/', // a slash
+      'aaaaaaaaaaaaaaaaaaaa ', // trailing space
+      'aaaaaaaaaaaaaaaaaaaa!', // punctuation outside the alphabet
+      'aaaaaaaaaa aaaaaaaaaa', // embedded space
+    ]) {
+      expect(isValidListItemId(value)).toBe(false);
+    }
+  });
+
+  test('newListItemId mints a fresh, schema-valid, unique id each call', () => {
+    const a = newListItemId();
+    const b = newListItemId();
+    expect(isValidListItemId(String(a))).toBe(true);
+    expect(isValidListItemId(String(b))).toBe(true);
+    expect(String(a)).not.toBe(String(b));
+  });
+});
+
 /**
  * Branding is encode/decode-transparent — the round-trip above proves the values
  * still pass through losslessly — but it makes the validation guarantee
@@ -203,12 +246,14 @@ describe('branded primitives carry their nominal brand', () => {
     const date: IsoDateType = IsoDate.make('2026-06-10');
     const colour: HexColourType = HexColour.make('#D4A24E');
     const slug: ConferenceSlugType = ConferenceSlug.make('/2026');
+    const itemId: ListItemIdType = ListItemId.make('YOQ7GeACwaTCKjY6y3HAV');
 
     // …and erase to their base string at runtime (brands are type-only).
     expect(String(key)).toBe('2026/en/hero.png');
     expect(String(date)).toBe('2026-06-10');
     expect(String(colour)).toBe('#D4A24E');
     expect(String(slug)).toBe('/2026');
+    expect(String(itemId)).toBe('YOQ7GeACwaTCKjY6y3HAV');
 
     // A raw `string` must NOT be assignable where a brand is required: each line
     // is a deliberate type error guarded by `@ts-expect-error`, so the typecheck
@@ -221,15 +266,18 @@ describe('branded primitives carry their nominal brand', () => {
     const notColour: HexColourType = '#D4A24E';
     // @ts-expect-error a raw string is not a ConferenceSlug until it crosses the decoder
     const notSlug: ConferenceSlugType = '/2026';
+    // @ts-expect-error a raw string is not a ListItemId until it crosses the decoder
+    const notItemId: ListItemIdType = 'YOQ7GeACwaTCKjY6y3HAV';
 
     // Reference the locals so they are not flagged as unused; their string
     // values are intentionally identical to the branded ones above (widen to
     // base string so the matcher compares plain strings).
-    expect([notKey, notDate, notColour, notSlug].map(String)).toEqual([
+    expect([notKey, notDate, notColour, notSlug, notItemId].map(String)).toEqual([
       '2026/en/hero.png',
       '2026-06-10',
       '#D4A24E',
       '/2026',
+      'YOQ7GeACwaTCKjY6y3HAV',
     ]);
   });
 });

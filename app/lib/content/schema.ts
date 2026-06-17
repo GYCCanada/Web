@@ -1,4 +1,5 @@
 import { Schema } from 'effect';
+import { nanoid } from 'nanoid';
 
 /**
  * The CMS content model (CMS plan §"Content schema", decisions D2 / D5).
@@ -116,6 +117,31 @@ export const HexColour = Schema.NonEmptyString.check(
 export type HexColour = typeof HexColour.Type;
 
 /**
+ * The stable identity of a CMS list item (a speaker, seminar, team member, and
+ * the hotel / FAQ / give items that follow) — a `nanoid` (ADR 0006). Identity is
+ * **content, not derived**: an id is authored once, round-trips through the
+ * schema, and persists in the bucket document, so an edit can address a list
+ * item by id rather than by array position. The index-aligned merge it replaces
+ * could only edit existing positions; id-keyed merge can add, remove, and
+ * reorder (ADR 0006, registration-launch Branch 2).
+ *
+ * Validated to nanoid's URL-safe default alphabet (`A-Za-z0-9_-`, length 21) so
+ * a hand-edited document cannot smuggle a non-id string (whitespace, a dotted
+ * path, a `/`) into a position the editor later interpolates into a form
+ * field-name (`speakers.<id>.name`) — `boundary-discipline`,
+ * `make-impossible-states-unrepresentable`. The brand keeps the guarantee
+ * load-bearing past the decoder: a raw `string` is not a `ListItemId` until it
+ * has crossed the schema.
+ */
+export const ListItemId = Schema.NonEmptyString.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]{21}$/, { title: 'ListItemId' }),
+).pipe(Schema.brand('ListItemId'));
+export type ListItemId = typeof ListItemId.Type;
+
+/** Mint a fresh, schema-valid `ListItemId`. */
+export const newListItemId = (): ListItemId => ListItemId.make(nanoid());
+
+/**
  * An ISO-8601 calendar date (`YYYY-MM-DD`). The conference data is day-granular,
  * so the document stores plain dates; the `Content` boundary (C3) widens each to
  * the existing end-of-day-UTC millisecond used by the route code (`use-the-platform`).
@@ -203,6 +229,7 @@ export type BibleRef = typeof BibleRef.Type;
 
 /** A plenary speaker: a main-session presenter listed under `speakers`. */
 export const Speaker = Schema.Struct({
+  id: ListItemId,
   name: Text,
   activity: Text,
   photo: ImageRef,
@@ -212,6 +239,7 @@ export type Speaker = typeof Speaker.Type;
 
 /** A breakout seminar and the speaker who leads it. */
 export const Seminar = Schema.Struct({
+  id: ListItemId,
   title: Text,
   speaker: Schema.Struct({
     name: Text,
@@ -303,6 +331,7 @@ export type TeamPosition = typeof TeamPosition.Type;
 
 /** A member of the executive team (name + position + photo). */
 export const TeamMember = Schema.Struct({
+  id: ListItemId,
   name: Schema.NonEmptyString,
   position: TeamPosition,
   photo: ImageRef,
