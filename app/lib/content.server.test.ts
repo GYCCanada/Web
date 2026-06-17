@@ -2,8 +2,20 @@ import { describe, expect, it } from 'effect-bun-test';
 import { Effect, Layer, Option, Ref, Schema } from 'effect';
 import { TestClock } from 'effect/testing';
 
-import { Content, SITE_CONTENT_KEY } from './content.server';
+import {
+  Content,
+  SITE_CONTENT_KEY,
+  bustForm,
+  bustPage,
+} from './content.server';
 import { defaultContent } from './content/defaults';
+import {
+  defaultAboutPage,
+  defaultContactForm,
+  defaultFaqPage,
+} from './content/pages/defaults';
+import { formObjectKey, pageObjectKey } from './content/pages/registry';
+import { AboutPage, FaqPage, FormDefinition } from './content/pages/schema';
 import { HexColour, SiteContent } from './content/schema';
 import type { SiteContent as SiteContentType } from './content/schema';
 import { dayjs } from './dayjs';
@@ -528,6 +540,230 @@ describe('Content cache (TTL + single-flight)', () => {
       // not eight independent decodes).
       expect(result.every((doc) => doc === result[0])).toBe(true);
     }).pipe(provideCounting(defaultContent)));
+});
+
+describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3)', () => {
+  /**
+   * The per-object read path (settled #7): each evergreen Page and each Form
+   * definition is its own bucket object with its own decode boundary, fallback,
+   * and cache. These tests pin ADR 0008's contract:
+   *   - a missing object falls back to its bundled default (dev / bucket-less);
+   *   - a real published object is read + decoded at its own boundary;
+   *   - editing one object busts ONLY its cache, never another's (the headline
+   *     per-object blast-radius isolation);
+   *   - one MALFORMED object falls back to its default and cannot break another
+   *     object's decode (ADR 0008's headline blast-radius property).
+   */
+  const encodeFaq = Schema.encodeUnknownEffect(Schema.fromJsonString(FaqPage));
+  const encodeAbout = Schema.encodeUnknownEffect(
+    Schema.fromJsonString(AboutPage),
+  );
+  const encodeForm = Schema.encodeUnknownEffect(
+    Schema.fromJsonString(FormDefinition),
+  );
+
+  /** Encode a page/form default to its on-bucket JSON, dying on a seed-bug. */
+  const seedJson = <A>(
+    encode: (value: A) => Effect.Effect<string, Schema.SchemaError>,
+    value: A,
+  ): Effect.Effect<string> => encode(value).pipe(Effect.orDie);
+
+  it.effect('getPage falls back to the bundled default when the object is absent', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      // No `content/pages/faq.json` in the (empty) bucket → bundled default.
+      const faq = yield* content.getPage('faq');
+      expect(faq).toEqual(defaultFaqPage);
+    }).pipe(Effect.provide(Layer.provideMerge(Content.layer, emptyStorage))));
+
+  it.effect('getForm falls back to the bundled default when the object is absent', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const form = yield* content.getForm('contact');
+      expect(form).toEqual(defaultContactForm);
+    }).pipe(Effect.provide(Layer.provideMerge(Content.layer, emptyStorage))));
+
+  it.effect('getPage reads + decodes a real published page object at its own boundary', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const faq = yield* content.getPage('faq');
+      // The published object — not the default — was read + decoded.
+      expect(faq.title.en).toBe('Questions & Answers');
+      expect(faq.title.fr).toBe('Questions et réponses');
+    }).pipe(
+      Effect.provide(
+        Layer.provideMerge(
+          Content.layer,
+          Layer.unwrap(
+            seedJson(
+              encodeFaq,
+              FaqPage.make({
+                ...defaultFaqPage,
+                title: { en: 'Questions & Answers', fr: 'Questions et réponses' },
+              }),
+            ).pipe(
+              Effect.map((json) =>
+                layerTest({ [pageObjectKey('faq')]: { body: json } }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+
+  it.effect('getForm reads + decodes a real published form object at its own boundary', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const form = yield* content.getForm('contact');
+      expect(form.title.en).toBe(defaultContactForm.title.en);
+    }).pipe(
+      Effect.provide(
+        Layer.provideMerge(
+          Content.layer,
+          Layer.unwrap(
+            seedJson(encodeForm, defaultContactForm).pipe(
+              Effect.map((json) =>
+                layerTest({ [formObjectKey('contact')]: { body: json } }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+
+  it.effect(
+    'busting one page leaves every other page, form, and the conference cache untouched',
+    () =>
+      Effect.gen(function* () {
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
+
+        // Warm every cache from the seeded objects / defaults.
+        const aboutBefore = yield* content.getPage('about');
+        const faqBefore = yield* content.getPage('faq');
+        const formBefore = yield* content.getForm('contact');
+        const conferenceBefore = yield* content.getConference('en', 2024);
+        expect(aboutBefore.title.en).toBe(defaultAboutPage.title.en);
+
+        // Publish a NEW about + faq + contact-form + conference accent to the bucket,
+        // simulating four independent edits landing at once.
+        const editedAbout = yield* seedJson(
+          encodeAbout,
+          AboutPage.make({
+            ...defaultAboutPage,
+            title: { en: 'Who We Are', fr: 'Qui sommes-nous' },
+          }),
+        );
+        const editedFaq = yield* seedJson(
+          encodeFaq,
+          FaqPage.make({
+            ...defaultFaqPage,
+            title: { en: 'Help Centre', fr: "Centre d'aide" },
+          }),
+        );
+        const editedForm = yield* seedJson(
+          encodeForm,
+          FormDefinition.make({
+            ...defaultContactForm,
+            title: { en: 'Reach out', fr: 'Contactez-nous' },
+          }),
+        );
+        const editedSite = yield* encode(
+          SiteContent.make({
+            ...defaultContent,
+            conferences: defaultContent.conferences.map((conference) =>
+              conference.slug === '/2024'
+                ? { ...conference, accentColor: HexColour.make('#abcdef') }
+                : conference,
+            ),
+          }),
+        );
+        yield* storage.put(pageObjectKey('about'), editedAbout, 'application/json');
+        yield* storage.put(pageObjectKey('faq'), editedFaq, 'application/json');
+        yield* storage.put(formObjectKey('contact'), editedForm, 'application/json');
+        yield* storage.put(SITE_CONTENT_KEY, editedSite, 'application/json');
+
+        // Bust ONLY the about cache.
+        yield* content.bust(bustPage('about'));
+
+        // About re-reads (sees the publish); everything else is still cached.
+        const aboutAfter = yield* content.getPage('about');
+        const faqAfter = yield* content.getPage('faq');
+        const formAfter = yield* content.getForm('contact');
+        const conferenceAfter = yield* content.getConference('en', 2024);
+        expect(aboutAfter.title.en).toBe('Who We Are'); // busted → fresh
+        expect(faqAfter.title.en).toBe(faqBefore.title.en); // untouched cache
+        expect(formAfter.title.en).toBe(formBefore.title.en); // untouched cache
+        expect(conferenceAfter.theme).toBe(conferenceBefore.theme); // untouched
+
+        // Busting the form now reveals the form publish — proving each cache is
+        // independently invalidatable.
+        yield* content.bust(bustForm('contact'));
+        const formBusted = yield* content.getForm('contact');
+        expect(formBusted.title.en).toBe('Reach out');
+        // …and faq + conference are STILL cached (only form was busted).
+        const faqStill = yield* content.getPage('faq');
+        expect(faqStill.title.en).toBe(faqBefore.title.en);
+      }).pipe(
+        Effect.provide(
+          Layer.provideMerge(
+            Content.layer,
+            Layer.unwrap(
+              Effect.gen(function* () {
+                const about = yield* seedJson(encodeAbout, defaultAboutPage);
+                const faq = yield* seedJson(encodeFaq, defaultFaqPage);
+                const form = yield* seedJson(encodeForm, defaultContactForm);
+                const site = yield* encode(defaultContent);
+                return layerTest({
+                  [pageObjectKey('about')]: { body: about },
+                  [pageObjectKey('faq')]: { body: faq },
+                  [formObjectKey('contact')]: { body: form },
+                  [SITE_CONTENT_KEY]: { body: site },
+                });
+              }),
+            ),
+          ),
+        ),
+      ),
+  );
+
+  it.effect(
+    'one malformed page object falls back to its default and cannot break another page',
+    () =>
+      Effect.gen(function* () {
+        const content = yield* Content.Service;
+        // `faq.json` is corrupt; `about.json` is a valid published object.
+        const faq = yield* content.getPage('faq');
+        const about = yield* content.getPage('about');
+        // The corrupt faq object decoded → fell back to the bundled default…
+        expect(faq).toEqual(defaultFaqPage);
+        // …while the valid about object decoded cleanly: one bad object does NOT
+        // poison another's read (ADR 0008's headline blast-radius property).
+        expect(about.title.en).toBe('Who We Are');
+      }).pipe(
+        Effect.provide(
+          Layer.provideMerge(
+            Content.layer,
+            Layer.unwrap(
+              seedJson(
+                encodeAbout,
+                AboutPage.make({
+                  ...defaultAboutPage,
+                  title: { en: 'Who We Are', fr: 'Qui sommes-nous' },
+                }),
+              ).pipe(
+                Effect.map((about) =>
+                  layerTest({
+                    [pageObjectKey('faq')]: { body: '{ this is not valid json' },
+                    [pageObjectKey('about')]: { body: about },
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+  );
 });
 
 // The admin draft → published → defaults reconciliation moved from

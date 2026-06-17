@@ -6,64 +6,112 @@ import {
   Content,
   SITE_CONTENT_DRAFT_KEY,
   SITE_CONTENT_KEY,
-  type AdminContent,
+  bustForm,
+  bustPage,
+  bustSite,
+  type BustTarget,
 } from '../content.server';
 import { deepMerge, setAtPath, type Json } from './admin-form';
 import { defaultContent } from './defaults';
 import { backfillListItemIds } from './id-backfill';
 import { applyListEdit, type ListOp } from './list-edit';
+import {
+  FORM_SPECS,
+  PAGE_SPECS,
+  formDraftKey,
+  formObjectKey,
+  pageDraftKey,
+  pageObjectKey,
+  type FormContent,
+  type FormId,
+  type ObjectSpec,
+  type PageContent,
+  type PageId,
+} from './pages/registry';
 import { DraftSiteContent, SiteContent, type AssetKey } from './schema';
 import type { DraftSiteContent as DraftSiteContentType } from './schema';
 import { Storage } from '../storage.server';
 import type { ObjectHead } from '../storage.server';
 
 /**
- * The DRAFT document encoded to its on-bucket object shape, returned to the
- * view. It is the laxer `DraftSiteContent` (a freshly-added list item may carry
- * only its `id`); the route encodes it for the editor form. Publish re-decodes
- * the strict `SiteContent`, so the published object is always the strict shape.
- */
-export type EncodedDoc = typeof DraftSiteContent.Encoded;
-
-/**
  * `DraftEditor` is the deep module the `/admin` editor write path talks to
- * (registration-launch plan, Branch 1). It absorbs the encode→merge→decode→
- * re-encode→store-draft pipeline that used to be inlined and *duplicated*
- * across the upload and save/publish branches of the route action — the route
- * shrinks to "auth → parse intent → call `DraftEditor` → map result to
- * `Response`".
+ * (registration-launch plan, Branches 1 + 5). It absorbs the encode→merge→decode→
+ * re-encode→store-draft pipeline that used to be inlined and *duplicated* across
+ * the upload and save/publish branches of the route action — the route shrinks to
+ * "auth → parse intent → call `DraftEditor` → map result to `Response`".
+ *
+ * Branch 5.2 WIDENS the `ContentScope` union from one inhabitant (`site`) to the
+ * per-Page and per-Form objects (ADR 0008): `editDocument` / `applyImageUpload` /
+ * `applyListOps` / `publish` / `load` now operate on ANY content object addressed
+ * by its scope, each with its OWN draft/published key pair, decode boundary, and
+ * default. The reconciliation algorithm did not fork — it routes through
+ * `resolveScope(scope)`, which is the lone place a scope becomes a concrete
+ * `{ draftKey, publishedKey, codec, default }` bundle (one site case + N
+ * page/form cases). The bucket-key choreography never leaks back to the route.
  *
  * Principles (see `~/.brain/principles`):
  *   - `small-interface-deep-implementation`: `load`, `editDocument`,
- *     `applyImageUpload`, `publish` hide the whole draft/published key-pair
- *     choreography, the double draft-read, and the merge/decode/re-encode dance.
- *   - `make-impossible-states-unrepresentable`: every operation is addressed by
- *     a `ContentScope`, a *closed* union that routes through `scopeKeys` to a
- *     real `{ draftKey, publishedKey }` pair. An editor cannot target a key that
- *     is not a known scope — the bucket-key constants stop leaking to the route.
- *   - `boundary-discipline`: decode happens here, once, before a draft is
- *     stored; a rejected edit fails with an `IssueError` carrying the dotted
- *     field issues the editor surfaces.
- *
- * `ContentScope` is a single-inhabitant union *today* (`{ kind: 'site' }`). The
- * scope dimension is real — it carries the draft/published key PAIR plus the
- * reconciliation — so Branch 5 *widens the union* (page/form scopes) rather than
- * retrofitting a parameter: `scopeKeys` already has one case now and N cases
- * later, and `load`/`editDocument`/`publish` all route through it.
+ *     `applyImageUpload`, `applyListOps`, `publish` hide the whole per-object
+ *     draft/published key-pair choreography, the double draft-read, and the
+ *     merge/decode/re-encode dance — for every scope, the same five calls.
+ *   - `make-impossible-states-unrepresentable`: every operation is addressed by a
+ *     `ContentScope`, a *closed* union whose page/form members carry a closed
+ *     `PageId` / `FormId`. `resolveScope` maps it to a real
+ *     `{ draftKey, publishedKey }` pair — an editor cannot target a key that is
+ *     not a known scope, and a scope cannot name a page/form that does not exist.
+ *   - `derive-dont-sync`: the page/form key pairs, schemas, and defaults are NOT
+ *     re-declared here — they resolve through the one `pages/registry` (the same
+ *     registry Branch 5.3's read path reads), so the object set is enumerated once.
+ *   - `boundary-discipline`: decode happens here, once, before a draft is stored;
+ *     a rejected edit fails with an `IssueError` carrying the dotted field issues
+ *     the editor surfaces.
  */
 
 // ---------------------------------------------------------------------------
 // Scope
 // ---------------------------------------------------------------------------
 
+/** Address a single editable site-content object (conference / team / translations). */
+export type SiteScope = { readonly kind: 'site' };
+
 /**
- * What a `DraftEditor` operation targets. A closed, single-inhabitant union
- * today; Branch 5 widens it (`| { kind: 'page'; … } | { kind: 'form'; … }`).
+ * Address one evergreen Page object (`content/pages/<page>.json`). Generic in the
+ * `PageId` so a caller that names a concrete page (`pageScope('faq')`) gets the
+ * precise page content type back from `load` / the writes, not a widened union.
  */
-export type ContentScope = { readonly kind: 'site' };
+export type PageScope<P extends PageId = PageId> = {
+  readonly kind: 'page';
+  readonly page: P;
+};
+
+/** Address one Form definition object (`forms/<form>.json`). */
+export type FormScope<F extends FormId = FormId> = {
+  readonly kind: 'form';
+  readonly form: F;
+};
+
+/**
+ * What a `DraftEditor` operation targets. A closed union over the three object
+ * families ADR 0008 splits storage into. Widened from a single inhabitant in
+ * Branch 1; the page/form members carry the closed `PageId` / `FormId` so no scope
+ * can name an object that does not exist.
+ */
+export type ContentScope = SiteScope | PageScope | FormScope;
 
 /** The one site scope, named so callers never construct the literal inline. */
-export const siteScope: ContentScope = { kind: 'site' };
+export const siteScope: SiteScope = { kind: 'site' };
+
+/** The scope addressing one evergreen Page (keeps the concrete `PageId`). */
+export const pageScope = <P extends PageId>(page: P): PageScope<P> => ({
+  kind: 'page',
+  page,
+});
+
+/** The scope addressing one Form definition (keeps the concrete `FormId`). */
+export const formScope = <F extends FormId>(form: F): FormScope<F> => ({
+  kind: 'form',
+  form,
+});
 
 /** The draft/published bucket-key PAIR a scope addresses. */
 export interface ScopeKeys {
@@ -72,9 +120,9 @@ export interface ScopeKeys {
 }
 
 /**
- * Resolve a `ContentScope` to its draft/published key pair. One case now, N
- * cases when the union widens — the function the whole module routes through so
- * an editor can only ever target a known scope's keys.
+ * Resolve a `ContentScope` to its draft/published key pair. The page/form keys
+ * are derived from the id through `pages/registry` (`derive-dont-sync`); the site
+ * pair is the historical `content/site(.draft).json`.
  */
 export const scopeKeys = (scope: ContentScope): ScopeKeys => {
   switch (scope.kind) {
@@ -83,8 +131,71 @@ export const scopeKeys = (scope: ContentScope): ScopeKeys => {
         draftKey: SITE_CONTENT_DRAFT_KEY,
         publishedKey: SITE_CONTENT_KEY,
       };
+    case 'page':
+      return {
+        draftKey: pageDraftKey(scope.page),
+        publishedKey: pageObjectKey(scope.page),
+      };
+    case 'form':
+      return {
+        draftKey: formDraftKey(scope.form),
+        publishedKey: formObjectKey(scope.form),
+      };
   }
 };
+
+/**
+ * Map a `ContentScope` (which carries the draft/published key PAIR) to the
+ * `Content` read path's `BustTarget` (which names only the *published* cache to
+ * invalidate). `publish` promotes a scope's draft to its published object, so the
+ * cache it must bust is that scope's published read cache — site / page / form —
+ * so the change is live on the next read with no redeploy, and ONLY that object's
+ * cache is invalidated (ADR 0008's per-object isolation).
+ */
+const bustTargetOf = (scope: ContentScope): BustTarget => {
+  switch (scope.kind) {
+    case 'site':
+      return bustSite;
+    case 'page':
+      return bustPage(scope.page);
+    case 'form':
+      return bustForm(scope.form);
+  }
+};
+
+/**
+ * The decoded DRAFT value a scope's `load` returns. Site is the laxer
+ * `DraftSiteContent` (a freshly-added list item may carry only its `id`, ADR
+ * 0006); a Page/Form is its own typed object. The conditional ties each scope
+ * member to the concrete type its registry entry decodes to, so a caller that
+ * narrows the scope statically gets the narrow content type (no widened union).
+ */
+export type ScopeContent<S extends ContentScope> = S extends SiteScope
+  ? DraftSiteContentType
+  : S extends { readonly kind: 'page'; readonly page: infer P extends PageId }
+    ? PageContent<P>
+    : S extends { readonly kind: 'form'; readonly form: infer F extends FormId }
+      ? FormContent<F>
+      : never;
+
+/**
+ * The encoded form of a scope's content, returned to the view by a write
+ * (`editDocument` / `applyImageUpload` / `applyListOps`) so the route can
+ * revalidate without a re-read. Site is the `DraftSiteContent` encoded shape; a
+ * Page/Form is its schema's `Encoded`.
+ */
+export type ScopeEncoded<S extends ContentScope> = S extends SiteScope
+  ? typeof DraftSiteContent.Encoded
+  : Json;
+
+/** Where the editor's content for a scope originated, for the admin banner. */
+export type LoadedSource = 'draft' | 'published' | 'defaults';
+
+/** What `load` returns: the decoded content for a scope plus its origin. */
+export interface Loaded<S extends ContentScope> {
+  readonly content: ScopeContent<S>;
+  readonly source: LoadedSource;
+}
 
 // ---------------------------------------------------------------------------
 // Error
@@ -117,46 +228,172 @@ const issueMessages = (issue: SchemaIssue.Issue): readonly string[] =>
   });
 
 // ---------------------------------------------------------------------------
-// Codecs (the document's on-bucket JSON ↔ decoded value)
+// Per-scope codec bundle — the one place a scope's decode/encode lives
 // ---------------------------------------------------------------------------
 
-// The DRAFT path is laxer than the PUBLISH path (ADR 0006, registration-launch
-// Branch 2): a freshly-added list item may carry only its `id` until its
-// bilingual content is filled in, so a draft is decoded/encoded with
-// `DraftSiteContent` (content fields tolerated absent) while publish promotes
-// through the strict `SiteContent` (both-locales `Text` invariant enforced).
-//
-// `decodeDraftJson` reads a DRAFT (or published, also a valid draft) document
-// FROM the bucket: parse → id-backfill → decode-lax, so a document published
-// before list-item ids existed still decodes (every id-less item gets a fresh
-// `nanoid` before the required `id` field is checked). `encodeDraft` yields the
-// encoded OBJECT (handed back to the view); `encodeDraftJson` yields the JSON
-// STRING stored in the draft bucket object (Effect Schema's JSON codec, not
-// `JSON.stringify`, per the project lint rule); `decodeDraft` decodes an
-// already-id-complete merged/edited object at the single draft boundary — no
-// backfill, so a genuinely missing id is rejected rather than masked.
-//
-// `decodePublish` is the STRICT decode used only by `publish`: it promotes the
-// draft through `SiteContent`, where an incomplete item (a half-filled or
-// id-only add) is rejected so the live document never carries half-filled
-// content. `encodePublishJson` yields the strict published JSON STRING.
 const parseJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Unknown),
 );
-const decodeDraft = Schema.decodeUnknownEffect(DraftSiteContent);
-const decodePublish = Schema.decodeUnknownEffect(SiteContent);
-const decodeDraftJson = (json: string) =>
-  parseJson(json).pipe(
-    Effect.map(backfillListItemIds),
-    Effect.flatMap(decodeDraft),
-  );
-const encodeDraft = Schema.encodeUnknownEffect(DraftSiteContent);
-const encodeDraftJson = Schema.encodeUnknownEffect(
+
+/**
+ * Everything the reconciliation algorithm needs about ONE scope's object: the
+ * key pair, the codecs that move it between bucket-JSON / decoded-DRAFT /
+ * decoded-PUBLISH, and the bundled default. The reconciliation in `load` /
+ * `editDocument` / `publish` is written ONCE against this bundle; only the bundle
+ * varies per scope (`small-interface-deep-implementation`).
+ *
+ * The DRAFT path is laxer than the PUBLISH path for the SITE scope (ADR 0006,
+ * Branch 2): a freshly-added list item may carry only its `id` until its
+ * bilingual content is filled in, so the site draft decodes/encodes through
+ * `DraftSiteContent` while publish promotes through the strict `SiteContent`. A
+ * Page/Form has no id-only-add flow yet, so its draft and publish codecs are the
+ * SAME strict schema — an honest current state, not a stub: when Branch 5.5 gives
+ * pages the add-item flow it introduces the page draft variants and wires them
+ * here, exactly as the site scope already is.
+ *
+ * `fromBucket` reads a draft (or published — also a valid draft) document FROM
+ * the bucket: parse → (site only) id-backfill → decode-draft, so a site document
+ * published before list-item ids existed still decodes. `decodeDraft` decodes an
+ * already-merged/edited candidate at the single draft boundary — NO backfill, so
+ * a genuinely missing id is rejected rather than masked. `decodePublish` is the
+ * STRICT decode `publish` promotes through. `encodeDraft` yields the encoded
+ * OBJECT (handed to the view); `encodeDraftJson` / `encodePublishJson` yield the
+ * JSON STRING stored in the bucket (Effect Schema's JSON codec, per the lint
+ * rule — not `JSON.stringify`).
+ */
+interface ScopeCodec {
+  readonly keys: ScopeKeys;
+  readonly default: unknown;
+  /**
+   * Read a draft (or published) document FROM the bucket: parse → (site only)
+   * id-backfill → decode-draft. Fallible (the caller, `readDocument`, catches
+   * every failure and logs it → `Option.none`, so a bad object never breaks the
+   * editor open).
+   */
+  readonly fromBucket: (
+    json: string,
+  ) => Effect.Effect<unknown, Schema.SchemaError>;
+  /**
+   * Decode an already-merged/edited candidate at the single DRAFT boundary — NO
+   * backfill, so a genuinely missing id is rejected rather than masked. Fallible:
+   * the caller maps the failure to a 400 `IssueError`.
+   */
+  readonly decodeDraft: (
+    candidate: unknown,
+  ) => Effect.Effect<unknown, Schema.SchemaError>;
+  /** The STRICT publish decode. Fallible: the caller maps the failure to a 400. */
+  readonly decodePublish: (
+    candidate: unknown,
+  ) => Effect.Effect<unknown, Schema.SchemaError>;
+  /** Encode a decoded value to its mergeable/view OBJECT. */
+  readonly encodeObject: (
+    value: unknown,
+  ) => Effect.Effect<Json, Schema.SchemaError>;
+  /** Encode a decoded DRAFT value to its canonical JSON string (bucket body). */
+  readonly encodeDraftJson: (
+    value: unknown,
+  ) => Effect.Effect<string, Schema.SchemaError>;
+  /** Encode a decoded PUBLISH value to its canonical JSON string (bucket body). */
+  readonly encodePublishJson: (
+    value: unknown,
+  ) => Effect.Effect<string, Schema.SchemaError>;
+}
+
+/**
+ * The SITE scope's codec bundle: laxer `DraftSiteContent` draft, strict
+ * `SiteContent` publish, id-backfill on bucket read so a site document published
+ * before list-item ids existed still decodes (ADR 0006).
+ */
+const decodeSiteDraft = Schema.decodeUnknownEffect(DraftSiteContent);
+const decodeSitePublish = Schema.decodeUnknownEffect(SiteContent);
+const encodeSiteObject = Schema.encodeUnknownEffect(DraftSiteContent);
+const encodeSiteDraftJson = Schema.encodeUnknownEffect(
   Schema.fromJsonString(DraftSiteContent),
 );
-const encodePublishJson = Schema.encodeUnknownEffect(
+const encodeSitePublishJson = Schema.encodeUnknownEffect(
   Schema.fromJsonString(SiteContent),
 );
+
+const siteCodec: ScopeCodec = {
+  keys: scopeKeys(siteScope),
+  default: defaultContent,
+  fromBucket: (json) =>
+    parseJson(json).pipe(
+      Effect.map(backfillListItemIds),
+      Effect.flatMap(decodeSiteDraft),
+    ),
+  decodeDraft: decodeSiteDraft,
+  decodePublish: decodeSitePublish,
+  encodeObject: (value) => encodeSiteObject(value) as Effect.Effect<Json, Schema.SchemaError>,
+  encodeDraftJson: encodeSiteDraftJson,
+  encodePublishJson: encodeSitePublishJson,
+};
+
+/**
+ * Build a codec bundle for a Page/Form object from its registry `ObjectSpec`.
+ *
+ * Branch 5.5 gives the list-bearing pages (FAQ, give, about, archive) an add-item
+ * flow, so their draft boundary is the LAXER `spec.draftSchema` (a freshly-added
+ * id-only item is draft-valid) and the publish boundary the STRICT `spec.schema`
+ * (re-enforcing the both-locales `Text` invariant) — exactly the site scope's
+ * `DraftSiteContent`/`SiteContent` split. A page/form with no add-item flow wires
+ * `draftSchema === schema` in the registry, so this same code path keeps draft and
+ * publish identical for it without a special case (`derive-dont-sync`). There is
+ * still no id-backfill: these objects are brand-new storage (ADR 0008), so no
+ * pre-existing id-less document needs repairing.
+ *
+ * The DRAFT codecs (`fromBucket`, `decodeDraft`, `encodeObject`, `encodeDraftJson`)
+ * move the object between bucket-JSON / decoded-draft / view-object through
+ * `draftSchema`; the PUBLISH codecs (`decodePublish`, `encodePublishJson`) gate the
+ * promotion through `schema`.
+ */
+const objectCodec = (
+  spec: ObjectSpec<unknown, unknown>,
+  keys: ScopeKeys,
+): ScopeCodec => {
+  const decodeDraft = Schema.decodeUnknownEffect(spec.draftSchema);
+  const decodePublish = Schema.decodeUnknownEffect(spec.schema);
+  const encodeObject = Schema.encodeUnknownEffect(spec.draftSchema);
+  const encodeDraftJson = Schema.encodeUnknownEffect(
+    Schema.fromJsonString(spec.draftSchema),
+  );
+  const encodePublishJson = Schema.encodeUnknownEffect(
+    Schema.fromJsonString(spec.schema),
+  );
+  return {
+    keys,
+    default: spec.default,
+    fromBucket: (json) => parseJson(json).pipe(Effect.flatMap(decodeDraft)),
+    decodeDraft,
+    decodePublish,
+    encodeObject: (value) =>
+      encodeObject(value) as Effect.Effect<Json, Schema.SchemaError>,
+    encodeDraftJson,
+    encodePublishJson,
+  };
+};
+
+/**
+ * Resolve a scope to its codec bundle. One site case + N page/form cases, each
+ * derived from `pages/registry`. The decoder/encoder value types differ per page,
+ * so the bundle is type-erased (`unknown`) at this seam — each scope's methods are
+ * internally consistent (the same schema decodes and encodes a scope's value) —
+ * and the public methods restore the precise type via `ScopeContent<S>`.
+ */
+const resolveScope = (scope: ContentScope): ScopeCodec => {
+  switch (scope.kind) {
+    case 'site':
+      return siteCodec;
+    case 'page':
+      // `objectCodec` is generic, so the precise per-page `ObjectSpec` (which
+      // keeps `PageContent<P>` exact) builds the bundle directly: its decode /
+      // encode close over the precise schema and widen to the bundle's `unknown`
+      // surface on return — no spec erasure / cast needed at this seam.
+      return objectCodec(PAGE_SPECS[scope.page], scopeKeys(scope));
+    case 'form':
+      return objectCodec(FORM_SPECS[scope.form], scopeKeys(scope));
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Service
@@ -173,7 +410,9 @@ export class Service extends Context.Service<
      * failed-delete draft can never reopen as the edit source. Never fails (a
      * bad draft is logged and ignored), so the editor always opens.
      */
-    readonly load: (scope: ContentScope) => Effect.Effect<AdminContent>;
+    readonly load: <S extends ContentScope>(
+      scope: S,
+    ) => Effect.Effect<Loaded<S>>;
     /**
      * The whole encode→merge→decode→re-encode→store-draft pipeline as ONE call:
      * `override` (the route's parsed form override) is deep-merged onto the
@@ -182,35 +421,34 @@ export class Service extends Context.Service<
      * canonical JSON, and stored at the scope's draft key. Returns the encoded
      * document so the route can revalidate the view without a re-read.
      */
-    readonly editDocument: (
-      scope: ContentScope,
+    readonly editDocument: <S extends ContentScope>(
+      scope: S,
       override: Json,
-    ) => Effect.Effect<EncodedDoc, IssueError>;
+    ) => Effect.Effect<ScopeEncoded<S>, IssueError>;
     /**
      * Point the `targetPath` `…key` field at a freshly-uploaded bucket object
      * `key` on the current draft and persist it, so the new image survives a
      * reload and a later publish. The raw-bytes upload + content-type gate stays
      * in the route; this rewrites the draft only.
      */
-    readonly applyImageUpload: (
-      scope: ContentScope,
+    readonly applyImageUpload: <S extends ContentScope>(
+      scope: S,
       targetPath: string,
       key: AssetKey,
-    ) => Effect.Effect<EncodedDoc, IssueError>;
+    ) => Effect.Effect<ScopeEncoded<S>, IssueError>;
     /**
      * Apply a sequence of id-keyed list ops (add / remove / reorder, ADR 0006)
      * to the current draft and persist it. The current document is encoded,
      * `applyListEdit` performs the structural edit by item id (NOT array index),
-     * the result is decoded at the laxer DRAFT boundary (an *added* item carries
-     * only its `id` — publish-invalid but draft-valid, ADR 0006), re-encoded, and
-     * stored at the scope's draft key. Mirrors `applyImageUpload`: the route owns
-     * FormData → `ListOp[]` parsing; this owns the load → edit → decode → store
-     * pipeline, so the bucket-key choreography never leaks back to the route.
+     * the result is decoded at the scope's DRAFT boundary, re-encoded, and stored
+     * at the scope's draft key. The route owns FormData → `ListOp[]` parsing;
+     * this owns the load → edit → decode → store pipeline, so the bucket-key
+     * choreography never leaks back to the route.
      */
-    readonly applyListOps: (
-      scope: ContentScope,
+    readonly applyListOps: <S extends ContentScope>(
+      scope: S,
       ops: readonly ListOp[],
-    ) => Effect.Effect<EncodedDoc, IssueError>;
+    ) => Effect.Effect<ScopeEncoded<S>, IssueError>;
     /**
      * Promote the scope's pending edit to the published key, delete the draft
      * best-effort, and bust the public read cache so the change is live on the
@@ -232,75 +470,81 @@ export const layer = Layer.effect(
     const content = yield* Content.Service;
 
     /**
-     * Read + decode the document at `key`, or `Option.none()` when it is absent
-     * / unreadable / malformed (logged, never thrown — a bad draft must not
-     * break the editor open).
+     * Read + decode the document at `key` through the scope's `fromBucket` codec,
+     * or `Option.none()` when it is absent / unreadable / malformed (logged,
+     * never thrown — a bad draft must not break the editor open).
      */
-    const readDocument = Effect.fnUntraced(
-      function* (key: string) {
+    const readDocument = (
+      codec: ScopeCodec,
+      key: string,
+    ): Effect.Effect<Option.Option<unknown>> =>
+      Effect.gen(function* () {
         const object = yield* storage.get(key);
         const json = yield* Effect.promise(() =>
           new Response(object.stream).text(),
         );
-        return Option.some(yield* decodeDraftJson(json));
-      },
-      (effect, key) =>
-        effect.pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning(
-              `DraftEditor: could not read ${key}`,
-              cause,
-            ).pipe(Effect.as(Option.none<DraftSiteContentType>())),
+        return Option.some(yield* codec.fromBucket(json));
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning(`DraftEditor: could not read ${key}`, cause).pipe(
+            Effect.as(Option.none<unknown>()),
           ),
         ),
-    );
+      );
 
-    const load = Effect.fn('DraftEditor.load')(function* (
+    const loadInternal = (
       scope: ContentScope,
-    ) {
-      const { draftKey, publishedKey } = scopeKeys(scope);
-      const draft = yield* readDocument(draftKey);
-      const published = yield* readDocument(publishedKey);
+    ): Effect.Effect<{ content: unknown; source: LoadedSource }> =>
+      Effect.gen(function* () {
+        const codec = resolveScope(scope);
+        const { draftKey, publishedKey } = codec.keys;
+        const draft = yield* readDocument(codec, draftKey);
+        const published = yield* readDocument(codec, publishedKey);
 
-      if (Option.isSome(draft)) {
-        if (Option.isNone(published)) {
-          return { content: draft.value, source: 'draft' as const };
+        if (Option.isSome(draft)) {
+          if (Option.isNone(published)) {
+            return { content: draft.value, source: 'draft' as const };
+          }
+          const draftHead = yield* storage
+            .head(draftKey)
+            .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
+          const publishedHead = yield* storage
+            .head(publishedKey)
+            .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
+          const draftIsNewer =
+            Option.isSome(draftHead) &&
+            Option.isSome(publishedHead) &&
+            draftHead.value.lastModified.getTime() >
+              publishedHead.value.lastModified.getTime();
+          if (draftIsNewer) {
+            return { content: draft.value, source: 'draft' as const };
+          }
+          return { content: published.value, source: 'published' as const };
         }
-        const draftHead = yield* storage
-          .head(draftKey)
-          .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
-        const publishedHead = yield* storage
-          .head(publishedKey)
-          .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
-        const draftIsNewer =
-          Option.isSome(draftHead) &&
-          Option.isSome(publishedHead) &&
-          draftHead.value.lastModified.getTime() >
-            publishedHead.value.lastModified.getTime();
-        if (draftIsNewer) {
-          return { content: draft.value, source: 'draft' as const };
-        }
-        return { content: published.value, source: 'published' as const };
-      }
 
-      if (Option.isSome(published)) {
-        return { content: published.value, source: 'published' as const };
-      }
-      return { content: defaultContent, source: 'defaults' as const };
+        if (Option.isSome(published)) {
+          return { content: published.value, source: 'published' as const };
+        }
+        return { content: codec.default, source: 'defaults' as const };
+      });
+
+    const load = Effect.fn('DraftEditor.load')(function* <
+      S extends ContentScope,
+    >(scope: S) {
+      return (yield* loadInternal(scope)) as Loaded<S>;
     });
 
     /**
-     * Decode a merged/edited candidate document at the laxer DRAFT boundary,
+     * Decode a merged/edited candidate document at the scope's DRAFT boundary,
      * rejecting with a 400 `IssueError` carrying its dotted field issues. Shared
      * by `editDocument` (form merge), `applyImageUpload` (key rewrite), and
-     * `applyListOps` (structural edit) — the single draft decode boundary. A
-     * *present* field still decodes strictly (a malformed value is rejected); an
-     * *absent* list-item content field is tolerated until publish (ADR 0006).
+     * `applyListOps` (structural edit) — the single draft decode boundary.
      */
     const decodeOrReject = (
+      codec: ScopeCodec,
       candidate: Json,
-    ): Effect.Effect<DraftSiteContentType, IssueError> =>
-      decodeDraft(candidate).pipe(
+    ): Effect.Effect<unknown, IssueError> =>
+      codec.decodeDraft(candidate).pipe(
         Effect.mapError(
           (error) =>
             new IssueError({
@@ -317,15 +561,14 @@ export const layer = Layer.effect(
      * Returns the encoded object so callers can hand it back to the view.
      */
     const storeDraft = (
-      draftKey: string,
-      decoded: DraftSiteContentType,
-    ): Effect.Effect<EncodedDoc, IssueError> =>
+      codec: ScopeCodec,
+      decoded: unknown,
+    ): Effect.Effect<Json, IssueError> =>
       Effect.gen(function* () {
-        // A decoded `DraftSiteContent` always re-encodes — a failure here is a
-        // bug, not a user error, so it dies rather than masquerading as an
-        // `IssueError`.
-        const json = yield* encodeDraftJson(decoded).pipe(Effect.orDie);
-        yield* storage.put(draftKey, json, 'application/json').pipe(
+        // A decoded value always re-encodes — a failure here is a bug, not a
+        // user error, so it dies rather than masquerading as an `IssueError`.
+        const json = yield* codec.encodeDraftJson(decoded).pipe(Effect.orDie);
+        yield* storage.put(codec.keys.draftKey, json, 'application/json').pipe(
           Effect.mapError(
             (cause) =>
               new IssueError({
@@ -335,51 +578,61 @@ export const layer = Layer.effect(
               }),
           ),
         );
-        return (yield* encodeDraft(decoded).pipe(Effect.orDie)) as EncodedDoc;
+        return yield* codec.encodeObject(decoded).pipe(Effect.orDie);
       });
 
-    const editDocument = Effect.fn('DraftEditor.editDocument')(function* (
+    /** Encode the scope's current document to its canonical mergeable JSON. */
+    const encodedCurrent = (
+      codec: ScopeCodec,
       scope: ContentScope,
-      override: Json,
-    ) {
-      const { draftKey } = scopeKeys(scope);
-      const { content: current } = yield* load(scope);
-      const base = (yield* encodeDraft(current).pipe(Effect.orDie)) as Json;
+    ): Effect.Effect<Json> =>
+      Effect.gen(function* () {
+        const { content: current } = yield* loadInternal(scope);
+        return yield* codec.encodeObject(current).pipe(Effect.orDie);
+      });
+
+    const editDocument = Effect.fn('DraftEditor.editDocument')(function* <
+      S extends ContentScope,
+    >(scope: S, override: Json) {
+      const codec = resolveScope(scope);
+      const base = yield* encodedCurrent(codec, scope);
       const merged = deepMerge(base, override);
-      const decoded = yield* decodeOrReject(merged);
-      return yield* storeDraft(draftKey, decoded);
+      const decoded = yield* decodeOrReject(codec, merged);
+      return (yield* storeDraft(codec, decoded)) as ScopeEncoded<S>;
     });
 
     const applyImageUpload = Effect.fn('DraftEditor.applyImageUpload')(
-      function* (scope: ContentScope, targetPath: string, key: AssetKey) {
-        const { draftKey } = scopeKeys(scope);
-        const { content: current } = yield* load(scope);
-        const encoded = (yield* encodeDraft(current).pipe(Effect.orDie)) as Json;
+      function* <S extends ContentScope>(
+        scope: S,
+        targetPath: string,
+        key: AssetKey,
+      ) {
+        const codec = resolveScope(scope);
+        const encoded = yield* encodedCurrent(codec, scope);
         const next = setAtPath(encoded, targetPath, key);
-        const decoded = yield* decodeOrReject(next);
-        return yield* storeDraft(draftKey, decoded);
+        const decoded = yield* decodeOrReject(codec, next);
+        return (yield* storeDraft(codec, decoded)) as ScopeEncoded<S>;
       },
     );
 
-    const applyListOps = Effect.fn('DraftEditor.applyListOps')(function* (
-      scope: ContentScope,
-      ops: readonly ListOp[],
-    ) {
-      const { draftKey } = scopeKeys(scope);
-      const { content: current } = yield* load(scope);
-      const encoded = (yield* encodeDraft(current).pipe(Effect.orDie)) as Json;
+    const applyListOps = Effect.fn('DraftEditor.applyListOps')(function* <
+      S extends ContentScope,
+    >(scope: S, ops: readonly ListOp[]) {
+      const codec = resolveScope(scope);
+      const encoded = yield* encodedCurrent(codec, scope);
       // Structural edit by item id, NOT array index: an added item carries only
       // its `id` (draft-valid, publish-invalid per ADR 0006), a removed id drops,
-      // a reorder permutes. The result decodes at the laxer draft boundary.
+      // a reorder permutes. The result decodes at the scope's draft boundary.
       const edited = applyListEdit(encoded, ops);
-      const decoded = yield* decodeOrReject(edited);
-      return yield* storeDraft(draftKey, decoded);
+      const decoded = yield* decodeOrReject(codec, edited);
+      return (yield* storeDraft(codec, decoded)) as ScopeEncoded<S>;
     });
 
     const publish = Effect.fn('DraftEditor.publish')(function* (
       scope: ContentScope,
     ) {
-      const { draftKey, publishedKey } = scopeKeys(scope);
+      const codec = resolveScope(scope);
+      const { draftKey, publishedKey } = codec.keys;
       // Promote the just-saved edit. A pending draft is ALWAYS the publish
       // source — it is what the admin just edited and saved, so it is published
       // directly and never re-reconciled against the published document by
@@ -391,24 +644,24 @@ export const layer = Layer.effect(
       // within the same second compares EQUAL — routing publish through `load`
       // would silently re-publish the stale document and then delete the edit.
       // With no draft, the already-live document is re-published.
-      const draft = yield* readDocument(draftKey);
-      const published = yield* readDocument(publishedKey);
+      const draft = yield* readDocument(codec, draftKey);
+      const published = yield* readDocument(codec, publishedKey);
       const source = Option.isSome(draft)
         ? draft.value
         : Option.isSome(published)
           ? published.value
-          : defaultContent;
-      // Enforce the STRICT `SiteContent` invariant before the document goes
-      // live: re-encode the draft to its JSON shape, then strict-decode it. A
-      // freshly-added (or half-filled) list item that is draft-valid but
-      // publish-INVALID (an empty required `Text`) is rejected here with a 400
-      // `IssueError` carrying the offending field paths — section-skip is for
+          : codec.default;
+      // Enforce the STRICT publish invariant before the document goes live:
+      // re-encode the draft to its JSON shape, then strict-decode it. For the
+      // site scope a freshly-added (or half-filled) list item that is draft-valid
+      // but publish-INVALID (an empty required `Text`) is rejected here with a
+      // 400 `IssueError` carrying the offending field paths — section-skip is for
       // *absence* (an empty list), never a tolerance for half-filled content
       // (ADR 0006, CONTEXT §Section skip). Only after this gate passes does the
       // published object get written.
-      const draftJson = yield* encodeDraftJson(source).pipe(Effect.orDie);
+      const draftJson = yield* codec.encodeDraftJson(source).pipe(Effect.orDie);
       const strict = yield* parseJson(draftJson).pipe(
-        Effect.flatMap(decodePublish),
+        Effect.flatMap(codec.decodePublish),
         Effect.mapError(
           (error) =>
             new IssueError({
@@ -419,7 +672,7 @@ export const layer = Layer.effect(
             }),
         ),
       );
-      const json = yield* encodePublishJson(strict).pipe(Effect.orDie);
+      const json = yield* codec.encodePublishJson(strict).pipe(Effect.orDie);
       yield* storage.put(publishedKey, json, 'application/json').pipe(
         Effect.mapError(
           (cause) =>
@@ -437,7 +690,10 @@ export const layer = Layer.effect(
       // from reopening as stale content. Hence it must not fail the publish —
       // the live document is already written.
       yield* storage.delete(draftKey).pipe(Effect.ignore);
-      yield* content.bust();
+      // Bust ONLY this scope's published read cache (ADR 0008): publishing a page
+      // makes that page live on the next read without busting any other page,
+      // form, or the conference (`site`) cache.
+      yield* content.bust(bustTargetOf(scope));
     });
 
     return Service.of({

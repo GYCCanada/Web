@@ -7,12 +7,14 @@ import {
   extensionForType,
   imageUploadTarget,
   isAcceptedImageType,
+  normalizeFaqAnswers,
   setAtPath,
   uploadedImageKey,
   type Json,
 } from './admin-form';
 import { defaultContent } from './defaults';
-import { SiteContent } from './schema';
+import { SiteContent, newListItemId } from './schema';
+import { DraftFaqPage, FaqPage } from './pages/schema';
 
 /**
  * The `/admin` editor edits the one `SiteContent` document via a
@@ -59,6 +61,130 @@ describe('assembleOverrides', () => {
     expect(result.conferences['/2024']?.bible.chapter).toBe(12);
     expect(result.conferences['/2024']?.bible.verse).toBe(3);
   });
+});
+
+describe('normalizeFaqAnswers', () => {
+  test('rewrites a both-locales answer leaf to a single text-token RichText', () => {
+    // The FAQ answer input posts `items.<id>.answer.en/.fr` — a plain bilingual
+    // object. The normalizer converts it to the encoded one-`text`-token RichText
+    // ARRAY the `FaqPage` schema decodes, so `deepMerge` replaces the base array
+    // wholesale (array base + array override) and the filled answer lands.
+    const result = normalizeFaqAnswers(
+      assembleOverrides(
+        entries({
+          'items.faq-item-id-000001.question.en': 'Q?',
+          'items.faq-item-id-000001.question.fr': 'Q ?',
+          'items.faq-item-id-000001.answer.en': 'An answer.',
+          'items.faq-item-id-000001.answer.fr': 'Une réponse.',
+        }),
+      ),
+    );
+    expect(result).toEqual({
+      items: {
+        'faq-item-id-000001': {
+          question: { en: 'Q?', fr: 'Q ?' },
+          answer: [
+            { _tag: 'text', value: { en: 'An answer.', fr: 'Une réponse.' } },
+          ],
+        },
+      },
+    });
+  });
+
+  test('drops a half-filled (one-locale) answer so the draft saves but publish stays blocked', () => {
+    // A single `text` token's `value` is the strict both-locales `Text`; emitting it
+    // from `{ en: 'x', fr: '' }` would be rejected at DRAFT save, inconsistent with
+    // every other half-typed field. The normalizer drops the answer entirely instead
+    // — it stays ABSENT (draft-valid, publish-invalid per ADR 0006).
+    const enOnly = normalizeFaqAnswers(
+      assembleOverrides(
+        entries({
+          'items.faq-item-id-000001.answer.en': 'Only EN',
+          'items.faq-item-id-000001.answer.fr': '',
+        }),
+      ),
+    ) as { items: { 'faq-item-id-000001': Record<string, unknown> } };
+    expect('answer' in enOnly.items['faq-item-id-000001']).toBe(false);
+
+    const empty = normalizeFaqAnswers(
+      assembleOverrides(
+        entries({
+          'items.faq-item-id-000001.answer.en': '   ',
+          'items.faq-item-id-000001.answer.fr': '',
+        }),
+      ),
+    ) as { items: { 'faq-item-id-000001': Record<string, unknown> } };
+    expect('answer' in empty.items['faq-item-id-000001']).toBe(false);
+  });
+
+  test('leaves a non-FAQ override (no items) and array answers untouched', () => {
+    const give = normalizeFaqAnswers({
+      directions: { 'list-id': { text: { en: 'x', fr: 'y' } } },
+    });
+    expect(give).toEqual({
+      directions: { 'list-id': { text: { en: 'x', fr: 'y' } } },
+    });
+  });
+
+  it.effect(
+    'completes add → fill → publish: the merged+normalized FAQ override decodes draft AND strict',
+    () =>
+      Effect.gen(function* () {
+        // Prove the ROUTE/UI path (not the service path): a freshly-added item is an
+        // id-only stub; the form fills a plain bilingual answer; the normalized
+        // override merges onto the encoded base and decodes through BOTH the laxer
+        // draft schema and the strict publish schema (publish-valid).
+        const id = newListItemId();
+        const base: Json = { title: { en: 'FAQ', fr: 'FAQ' }, items: [{ id }] };
+        const override = normalizeFaqAnswers(
+          assembleOverrides(
+            entries({
+              [`items.${id}.question.en`]: 'New question?',
+              [`items.${id}.question.fr`]: 'Nouvelle question ?',
+              [`items.${id}.answer.en`]: 'An answer.',
+              [`items.${id}.answer.fr`]: 'Une réponse.',
+            }),
+          ),
+        );
+        const merged = deepMerge(base, override);
+
+        const draft = yield* Schema.decodeUnknownEffect(DraftFaqPage)(merged);
+        const strict = yield* Schema.decodeUnknownEffect(FaqPage)(merged);
+        expect(draft.items[0]?.question?.en).toBe('New question?');
+        expect(strict.items[0]?.answer[0]).toEqual({
+          _tag: 'text',
+          value: { en: 'An answer.', fr: 'Une réponse.' },
+        });
+      }),
+  );
+
+  it.effect(
+    'a stub with an absent/half-filled answer is draft-valid but publish-invalid',
+    () =>
+      Effect.gen(function* () {
+        const id = newListItemId();
+        const base: Json = { title: { en: 'FAQ', fr: 'FAQ' }, items: [{ id }] };
+        // Question filled, answer left EN-only → normalizer drops the answer.
+        const override = normalizeFaqAnswers(
+          assembleOverrides(
+            entries({
+              [`items.${id}.question.en`]: 'Q?',
+              [`items.${id}.question.fr`]: 'Q ?',
+              [`items.${id}.answer.en`]: 'Only EN',
+              [`items.${id}.answer.fr`]: '',
+            }),
+          ),
+        );
+        const merged = deepMerge(base, override);
+        // Draft tolerates the absent answer …
+        yield* Schema.decodeUnknownEffect(DraftFaqPage)(merged);
+        // … publish rejects it (answer required by `FaqPage`).
+        const publishExit = yield* Effect.exit(
+          Schema.decodeUnknownEffect(FaqPage)(merged),
+        );
+        expect(publishExit._tag).toBe('Failure');
+      }),
+  );
 });
 
 describe('deepMerge', () => {

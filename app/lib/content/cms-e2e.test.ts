@@ -11,9 +11,12 @@ import {
   uploadedImageKey,
   type Json,
 } from './admin-form';
-import { DraftEditor, siteScope } from './draft-editor.server';
+import { DraftEditor, pageScope, siteScope } from './draft-editor.server';
 import { defaultContent } from './defaults';
 import { addOp, fieldName, removeOp, reorderOp } from './list-edit';
+import { defaultAboutPage } from './pages/defaults';
+import { pageObjectKey } from './pages/registry';
+import { AboutPage } from './pages/schema';
 import { newListItemId, SiteContent } from './schema';
 
 /**
@@ -486,5 +489,130 @@ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', ()
         .map((s) => String(s.id))
         .reverse(),
     );
+  });
+});
+
+/**
+ * The per-Page `/admin` editor (registration-launch Branch 5.5, ADR 0008) drives
+ * the SAME `DraftEditor` the site editor does, just scoped to a page via
+ * `pageScope(id)`. These prove the per-page write path end-to-end against the
+ * in-memory bucket:
+ *   - "Add item" on a page list appends an id-only stub the page's laxer DRAFT
+ *     schema reopens (settled #10), yet publish REJECTS it until filled (ADR 0006);
+ *   - filling every required field then publishing makes the page live on the next
+ *     `getPage` read with NO redeploy;
+ *   - publishing a page busts ONLY that page's read cache — another page (and the
+ *     conference `site` doc) is untouched (ADR 0008's per-object isolation).
+ */
+const faqScope = pageScope('faq');
+const faqItems = 'items';
+
+describe('per-page /admin editor via DraftEditor (page scope, ADR 0008/0006)', () => {
+  it('add → fill question+answer → publish makes the FAQ page live (no redeploy)', async () => {
+    const newId = newListItemId();
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+
+        // The FAQ page has no bucket object yet — the editor opens on the bundled
+        // default (the same `getPage` fallback the public read uses).
+        const opened = yield* editor.load(faqScope);
+
+        // "Add a question" appends an id-only stub; the DRAFT (laxer `DraftFaqPage`)
+        // reopens it, but publishing the incomplete page is rejected (the new item
+        // has no bilingual question/answer — publish-invalid, ADR 0006).
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyListOps(faqScope, [addOp(faqItems, newId)]);
+        const stub = yield* editor.load(faqScope);
+        const stubItem = stub.content.items.find((i) => String(i.id) === String(newId));
+        const publishStubExit = yield* Effect.exit(editor.publish(faqScope));
+
+        // Fill the new item's required bilingual question + a one-token answer (the
+        // override a fill-form submits), then publish — now it goes live.
+        yield* TestClock.adjust('1 second');
+        const fillExit = yield* Effect.exit(
+          editor.editDocument(faqScope, {
+            items: {
+              [String(newId)]: {
+                question: { en: 'New question?', fr: 'Nouvelle question ?' },
+                answer: [
+                  { _tag: 'text', value: { en: 'An answer.', fr: 'Une réponse.' } },
+                ],
+              },
+            },
+          } as Json),
+        );
+        const publishExit = yield* Effect.exit(editor.publish(faqScope));
+
+        // The public read reflects the new item with no TTL advance / redeploy.
+        const live = yield* content.getPage('faq');
+
+        return {
+          openedSource: opened.source,
+          stubKeys: Object.keys(stubItem ?? {}),
+          publishStubTag: publishStubExit._tag,
+          fillTag: fillExit._tag,
+          publishTag: publishExit._tag,
+          liveQuestions: live.items.map((i) => i.question.en),
+        };
+      }),
+    );
+
+    expect(result.openedSource).toBe('defaults');
+    // The appended stub carries ONLY its id (draft-valid, publish-invalid).
+    expect(result.stubKeys).toEqual(['id']);
+    expect(result.publishStubTag).toBe('Failure');
+    expect(result.fillTag).toBe('Success');
+    expect(result.publishTag).toBe('Success');
+    expect(result.liveQuestions).toContain('New question?');
+  });
+
+  it('editing a FAQ item is visible on the next read but does NOT bust About', async () => {
+    // Seed a published About page so its cache can be primed and then asserted
+    // untouched after a FAQ publish (ADR 0008 per-object isolation).
+    const aboutBody = await Effect.runPromise(
+      Schema.encodeUnknownEffect(Schema.fromJsonString(AboutPage))(defaultAboutPage),
+    );
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+
+        // Prime both caches with a read.
+        const aboutBefore = yield* content.getPage('about');
+        yield* content.getPage('faq');
+
+        // Edit the FIRST seeded FAQ question by its id and publish.
+        const faq = yield* editor.load(faqScope);
+        const firstId = faq.content.items[0]?.id;
+        yield* TestClock.adjust('1 second');
+        yield* editor.editDocument(faqScope, {
+          items: {
+            [String(firstId)]: {
+              question: { en: 'Edited?', fr: 'Modifié ?' },
+            },
+          },
+        } as Json);
+        yield* editor.publish(faqScope);
+
+        // FAQ reflects the edit on the next read; About is the SAME cached
+        // reference (its cache was never busted by the FAQ publish).
+        const faqAfter = yield* content.getPage('faq');
+        const aboutAfter = yield* content.getPage('about');
+
+        return {
+          faqEdited: faqAfter.items[0]?.question.en,
+          aboutSameRef: aboutBefore === aboutAfter,
+        };
+      }),
+      { [pageObjectKey('about')]: { body: aboutBody } },
+    );
+
+    expect(result.faqEdited).toBe('Edited?');
+    // About's cache survived the FAQ publish — per-object isolation holds.
+    expect(result.aboutSameRef).toBe(true);
   });
 });

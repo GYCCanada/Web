@@ -48,5 +48,6 @@ export default [
   layout('routes/admin/_layout.tsx', [
     route('admin', 'routes/admin/_index.tsx'),
     route('admin/content', 'routes/admin/content.tsx'),
+    route('admin/pages/:page', 'routes/admin/pages.$page.tsx'),
   ]),
 ] satisfies RouteConfig;

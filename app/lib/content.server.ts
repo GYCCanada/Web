@@ -12,11 +12,23 @@ import {
 
 import { defaultContent } from './content/defaults';
 import { backfillListItemIds } from './content/id-backfill';
+import {
+  FORM_IDS,
+  FORM_SPECS,
+  PAGE_IDS,
+  PAGE_SPECS,
+  formObjectKey,
+  pageObjectKey,
+  type FormContent,
+  type FormId,
+  type ObjectSpec,
+  type PageContent,
+  type PageId,
+} from './content/pages/registry';
 import { SiteContent } from './content/schema';
 import type {
   AssetKey,
   Conference as DocConference,
-  DraftSiteContent as DraftSiteContentType,
   IsoDate,
   Seminar as DocSeminar,
   Speaker as DocSpeaker,
@@ -341,22 +353,6 @@ export const SITE_CONTENT_KEY = 'content/site.json';
  */
 export const SITE_CONTENT_DRAFT_KEY = 'content/site.draft.json';
 
-/** Where the editor's content originated, for the admin banner. */
-export type AdminContentSource = 'draft' | 'published' | 'defaults';
-
-export interface AdminContent {
-  /**
-   * The document the `/admin` editor opens. It is the **draft** shape
-   * (`DraftSiteContent`): a published / defaults source is also a valid draft (a
-   * complete document trivially satisfies the laxer draft schema), while a
-   * reopened draft may carry freshly-added list items that hold only their `id`
-   * (ADR 0006, settled #10). Publish re-decodes the strict `SiteContent`, the
-   * single boundary that enforces the both-locales `Text` invariant.
-   */
-  readonly content: DraftSiteContentType;
-  readonly source: AdminContentSource;
-}
-
 /**
  * Cache TTL. Short by design (D3 — runtime read with cache, no redeploy): a
  * publish becomes visible on the next read after the TTL elapses (or the
@@ -383,6 +379,37 @@ const decodeDocument = (json: string) =>
     Effect.flatMap(decodeSiteContent),
   );
 
+/**
+ * Which read cache a `bust` invalidates (ADR 0008, registration-launch Branch 5.3).
+ * A closed union over the object families `Content` reads: the one `site.json`
+ * document, one evergreen `page` object, or one `form` definition object. Editing
+ * About busts ONLY About's cache, not the conference (`site`) cache — that
+ * per-object isolation is ADR 0008's headline blast-radius property, and it is
+ * expressible here precisely because the target is this closed union, not a free
+ * string (`make-impossible-states-unrepresentable`).
+ *
+ * This type is intentionally defined here, over the registry's closed `PageId` /
+ * `FormId`, rather than reusing `DraftEditor`'s `ContentScope`: the read path
+ * never touches the draft/published key PAIR a scope carries — it only ever reads
+ * the *published* object — so the bust target is the lighter "which published
+ * cache" discriminator. `DraftEditor.publish` maps its `ContentScope` onto this
+ * (the write path knows both halves; the read path needs only the published half),
+ * which also keeps `content.server` free of an import cycle through `DraftEditor`.
+ */
+export type BustTarget =
+  | { readonly kind: 'site' }
+  | { readonly kind: 'page'; readonly page: PageId }
+  | { readonly kind: 'form'; readonly form: FormId };
+
+/** The site bust target, named so callers never construct the literal inline. */
+export const bustSite: BustTarget = { kind: 'site' };
+
+/** The bust target for one evergreen Page object's read cache. */
+export const bustPage = (page: PageId): BustTarget => ({ kind: 'page', page });
+
+/** The bust target for one Form definition object's read cache. */
+export const bustForm = (form: FormId): BustTarget => ({ kind: 'form', form });
+
 export class Service extends Context.Service<
   Service,
   {
@@ -400,16 +427,45 @@ export class Service extends Context.Service<
       readonly board: readonly string[];
     }>;
     /**
-     * Invalidate the public read cache so a subsequent `getSiteContent`
-     * re-reads the bucket. Called by the editor's publish action so a publish
-     * is visible with no redeploy and without waiting out the TTL (D3,
-     * `make-operations-idempotent` — busting an already-empty cache is a no-op).
-     * When no refresh is already in flight a publish is visible on the very
-     * next read; otherwise it is visible within the documented staleness window
-     * — `invalidate` only expires the entry, it does not pre-empt an in-flight
-     * refresh (see the `Content` doc above for the full mechanism).
+     * Read one evergreen Page object (`content/pages/<page>.json`), decoded at its
+     * OWN boundary through the registry schema (ADR 0008, settled #7). Each page is
+     * an independent object with its own decode + fallback + cache: a missing /
+     * unreadable / malformed `faq.json` falls back to the bundled `defaultFaqPage`
+     * and never breaks `about`'s or the conference (`site`) read — one corrupt page
+     * object cannot poison another's decode (the headline blast-radius property).
+     * Returns the page's precise typed content (`PageContent<P>`), not a widened
+     * union, because `page` is the closed `PageId`.
      */
-    readonly bust: () => Effect.Effect<void>;
+    readonly getPage: <P extends PageId>(
+      page: P,
+    ) => Effect.Effect<PageContent<P>>;
+    /**
+     * Read one Form definition object (`forms/<form>.json`), decoded at its own
+     * boundary through the registry schema, with the same per-object fallback +
+     * cache as `getPage`. This is the read path Branch 6's form engine reads its
+     * CMS-editable form copy through (ADR 0007 / ADR 0008), so the form objects are
+     * first-class storage now, not a hypothetical. Returns the form's precise typed
+     * content (`FormContent<F>`).
+     */
+    readonly getForm: <F extends FormId>(
+      form: F,
+    ) => Effect.Effect<FormContent<F>>;
+    /**
+     * Invalidate ONE read cache so a subsequent read re-reads the bucket. Called by
+     * the editor's publish action so a publish is visible with no redeploy and
+     * without waiting out the TTL (D3, `make-operations-idempotent` — busting an
+     * already-empty cache is a no-op). The `target` selects WHICH cache: `bustSite`
+     * (the `content/site.json` document), `bustPage(id)`, or `bustForm(id)`. Busting
+     * one page leaves every other page, every form, and the conference (`site`)
+     * cache untouched — the per-object isolation ADR 0008 promises. Defaults to the
+     * site target so existing site-publish callers are unchanged.
+     *
+     * When no refresh is already in flight a publish is visible on the very next
+     * read; otherwise it is visible within the documented staleness window —
+     * `invalidate` only expires the entry, it does not pre-empt an in-flight refresh
+     * (see the `Content` doc above for the full mechanism).
+     */
+    readonly bust: (target?: BustTarget) => Effect.Effect<void>;
   }
 >()('gycc/lib/content.server/Service') {}
 
@@ -488,6 +544,89 @@ export const layer = Layer.effect(
       return yield* cachedContent;
     });
 
+    // -----------------------------------------------------------------------
+    // Per-object read path — one independent decode + fallback + cache per
+    // Page / Form object (ADR 0008, settled #7; registration-launch Branch 5.3)
+    // -----------------------------------------------------------------------
+
+    /**
+     * The cached read + its invalidator for ONE object. `read` yields the decoded
+     * typed content (or the bundled default on any failure); `invalidate` arms the
+     * next read to re-fetch the bucket (the per-object `bust`).
+     */
+    interface ObjectCache {
+      readonly read: Effect.Effect<unknown>;
+      readonly invalidate: Effect.Effect<void>;
+    }
+
+    /**
+     * Build the cached read + invalidator for one registry object. Reads `key`,
+     * decodes the JSON at the spec's OWN boundary (no id-backfill — these objects
+     * are brand-new storage, ADR 0008), and falls back to the bundled default on
+     * EVERY failure mode (absent / unreachable / malformed). The fallback is
+     * scoped to this one object, so a corrupt `faq.json` cannot break `about` or
+     * the conference read — the blast-radius isolation is structural, one cache
+     * per object. The TTL + single-flight + manual-invalidate semantics are the
+     * site cache's, applied per object (`use-the-platform`).
+     */
+    const makeObjectCache = (
+      key: string,
+      spec: ObjectSpec<unknown, unknown>,
+    ): Effect.Effect<ObjectCache> =>
+      Effect.gen(function* () {
+        const decode = Schema.decodeUnknownEffect(spec.schema);
+        const fetch: Effect.Effect<unknown> = Effect.gen(function* () {
+          const object = yield* storage.get(key);
+          const json = yield* Effect.promise(() =>
+            new Response(object.stream).text(),
+          );
+          const parsed = yield* parseJson(json);
+          return yield* decode(parsed);
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning(`Content: could not read ${key}`, cause).pipe(
+              Effect.as(spec.default),
+            ),
+          ),
+        );
+        const [read, invalidate] = yield* Effect.cachedInvalidateWithTTL(
+          fetch,
+          Duration.millis(CACHE_TTL_MS),
+        );
+        return { read, invalidate };
+      });
+
+    // Build one independent cache per Page and per Form object up front (the id
+    // sets are closed and small — 7 pages + 3 forms). Eager construction keeps
+    // each `getPage` / `getForm` a pure cache read with no first-call lock, and
+    // the bust dispatch a direct record lookup over the closed id.
+    const pageCaches = {} as Record<PageId, ObjectCache>;
+    for (const page of PAGE_IDS) {
+      pageCaches[page] = yield* makeObjectCache(
+        pageObjectKey(page),
+        PAGE_SPECS[page],
+      );
+    }
+    const formCaches = {} as Record<FormId, ObjectCache>;
+    for (const form of FORM_IDS) {
+      formCaches[form] = yield* makeObjectCache(
+        formObjectKey(form),
+        FORM_SPECS[form],
+      );
+    }
+
+    const getPage = Effect.fn('Content.getPage')(function* <P extends PageId>(
+      page: P,
+    ) {
+      return (yield* pageCaches[page].read) as PageContent<P>;
+    });
+
+    const getForm = Effect.fn('Content.getForm')(function* <F extends FormId>(
+      form: F,
+    ) {
+      return (yield* formCaches[form].read) as FormContent<F>;
+    });
+
     const getConference = Effect.fn('Content.getConference')(function* (
       locale: Locale,
       year?: number,
@@ -534,8 +673,20 @@ export const layer = Layer.effect(
     // bucket-read duration) + one TTL`, not ≤ one TTL. That documented window
     // is within D3's "visible on the next read after the window" contract
     // (see the `Content` doc above for the full mechanism).
-    const bust = Effect.fn('Content.bust')(function* () {
-      yield* invalidate;
+    const bust = Effect.fn('Content.bust')(function* (
+      target: BustTarget = bustSite,
+    ) {
+      switch (target.kind) {
+        case 'site':
+          yield* invalidate;
+          return;
+        case 'page':
+          yield* pageCaches[target.page].invalidate;
+          return;
+        case 'form':
+          yield* formCaches[target.form].invalidate;
+          return;
+      }
     });
 
     return Service.of({
@@ -544,6 +695,8 @@ export const layer = Layer.effect(
       getCurrentConference,
       getTranslations,
       getTeam,
+      getPage,
+      getForm,
       bust,
     });
   }),

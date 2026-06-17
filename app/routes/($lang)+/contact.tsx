@@ -1,24 +1,32 @@
 import { Effect, Result, Schema } from "effect";
-import { Form, type MetaFunction, useActionData } from "react-router";
+import {
+  Form,
+  type MetaFunction,
+  useActionData,
+  useLoaderData,
+} from "react-router";
 import { match } from "ts-pattern";
 
+import { Content } from "~/lib/content.server";
 import { FormProvider, useForm, useFormData } from "~/lib/conform";
 import { formValidationError } from "~/lib/effect/errors";
 import { routeFormAction, SubmissionContext } from "~/lib/effect/form";
 import { formatSchemaResult, parseSchema } from "~/lib/effect/form-schema";
+import { routeHandler } from "~/lib/effect/route";
 import { ReactRouterContext } from "~/lib/effect/router-context";
 import { useTranslate } from "~/lib/localization/context";
 import { getLocale } from "~/lib/localization/localization";
+import { toContactView } from "~/lib/content/pages/project";
 import type { TranslationKey } from "~/lib/localization/translations";
 import { Mailer } from "~/lib/mailer.server";
 import { Toast } from "~/lib/toast.server";
 import { Button } from "~/ui/button";
 import { HoneypotField } from "~/ui/honeypot-field";
-import { ExternalLink } from "~/ui/external-link";
 import { FieldErrors, fieldErrorStyle } from "~/ui/field-error";
 import { Label } from "~/ui/label";
 import { Main } from "~/ui/main";
 import { Radio, RadioGroup, Radios } from "~/ui/radio";
+import { RichText } from "~/ui/rich-text";
 import { TextField } from "~/ui/text-field";
 
 // Match the previous zod `.email()` validation: a basic, permissive email shape.
@@ -121,6 +129,13 @@ export const meta: MetaFunction = ({ params }) => {
   ];
 };
 
+export const loader = routeHandler(function* () {
+  const { params } = yield* ReactRouterContext;
+  const locale = getLocale(params);
+  const content = yield* Content.Service;
+  return { page: toContactView(yield* content.getPage("contact"), locale) };
+});
+
 export const action = routeFormAction(function* () {
   const { url } = yield* ReactRouterContext;
   const submission = yield* SubmissionContext;
@@ -165,6 +180,7 @@ export const action = routeFormAction(function* () {
 
 export default function Index() {
   const translate = useTranslate();
+  const { page } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const { form: f, fields } = useForm(clientSchema, {
     id: "contact",
@@ -189,15 +205,9 @@ export default function Index() {
   return (
     <Main className="gap-10 px-3 py-4 text-2xl md:py-16 md:px-16">
       <div className="flex flex-col gap-4 md:gap-16">
-        <h1 className="text-5xl">{translate("contact.title")}</h1>
+        <h1 className="text-5xl">{page.title}</h1>
         <p>
-          {translate("contact.directions", {
-            email: (
-              <ExternalLink href="mailto:hello@gyccanada.org">
-                hello@gyccanada.org
-              </ExternalLink>
-            ),
-          })}
+          <RichText runs={page.directions} />
         </p>
       </div>
 

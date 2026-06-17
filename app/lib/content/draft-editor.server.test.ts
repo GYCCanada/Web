@@ -17,8 +17,25 @@ import {
   uploadedImageKey,
   type Json,
 } from './admin-form';
-import { DraftEditor, scopeKeys, siteScope } from './draft-editor.server';
+import {
+  DraftEditor,
+  formScope,
+  pageScope,
+  scopeKeys,
+  siteScope,
+} from './draft-editor.server';
 import { defaultContent } from './defaults';
+import {
+  defaultContactForm,
+  defaultFaqPage,
+} from './pages/defaults';
+import {
+  formDraftKey,
+  formObjectKey,
+  pageDraftKey,
+  pageObjectKey,
+} from './pages/registry';
+import { FaqPage, FormDefinition } from './pages/schema';
 import { SiteContent } from './schema';
 import type {
   DraftSiteContent as DraftSiteContentType,
@@ -87,6 +104,49 @@ describe('scopeKeys', () => {
         draftKey: SITE_CONTENT_DRAFT_KEY,
         publishedKey: SITE_CONTENT_KEY,
       });
+    }),
+  );
+
+  // Branch 5.2: the widened scope union resolves each page/form to its OWN
+  // draft/published key pair (ADR 0008 — one object per page/form), derived from
+  // the id through `pages/registry` (`derive-dont-sync`), never the site keys.
+  it.effect('a page scope addresses content/pages/<page>(.draft).json', () =>
+    Effect.sync(() => {
+      expect(scopeKeys(pageScope('faq'))).toEqual({
+        draftKey: pageDraftKey('faq'),
+        publishedKey: pageObjectKey('faq'),
+      });
+      expect(scopeKeys(pageScope('faq'))).toEqual({
+        draftKey: 'content/pages/faq.draft.json',
+        publishedKey: 'content/pages/faq.json',
+      });
+    }),
+  );
+
+  it.effect('a form scope addresses forms/<form>(.draft).json', () =>
+    Effect.sync(() => {
+      expect(scopeKeys(formScope('contact'))).toEqual({
+        draftKey: formDraftKey('contact'),
+        publishedKey: formObjectKey('contact'),
+      });
+      expect(scopeKeys(formScope('contact'))).toEqual({
+        draftKey: 'forms/contact.draft.json',
+        publishedKey: 'forms/contact.json',
+      });
+    }),
+  );
+
+  it.effect('every scope resolves to a distinct key pair (no collisions)', () =>
+    Effect.sync(() => {
+      const keys = [
+        scopeKeys(siteScope),
+        scopeKeys(pageScope('faq')),
+        scopeKeys(pageScope('about')),
+        scopeKeys(formScope('contact')),
+        scopeKeys(formScope('registration')),
+      ];
+      const published = keys.map((k) => k.publishedKey);
+      expect(new Set(published).size).toBe(published.length);
     }),
   );
 });
@@ -553,5 +613,231 @@ describe('DraftEditor.publish (promote draft → published, drop draft, bust)', 
         const after = yield* content.getConference('en', 2026);
         expect(after.title).toBe('Same Second Edit');
       }).pipe(seededPublished(defaultContent)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Branch 5.2 — per-OBJECT draft/publish reconciliation (ADR 0008)
+//
+// The widened `ContentScope` routes every page/form object through the SAME five
+// `DraftEditor` calls as the site scope, each with its own draft/published key
+// pair, decode boundary, and default. These tests prove the reconciliation
+// generalizes per-object BEFORE any route migrates (plan, Branch 5.2): a page
+// edit reads/writes ONLY that page's object, never the site object, and the
+// decoded content is the page's typed shape (`FaqPage`), not a widened union.
+// ---------------------------------------------------------------------------
+
+const encodeFaq = Schema.encodeUnknownEffect(Schema.fromJsonString(FaqPage));
+const decodeFaq = Schema.decodeUnknownEffect(Schema.fromJsonString(FaqPage));
+const decodeFaqObject = Schema.decodeUnknownEffect(FaqPage);
+const decodeFormObject = Schema.decodeUnknownEffect(FormDefinition);
+
+const FAQ_KEY = pageObjectKey('faq');
+const FAQ_DRAFT_KEY = pageDraftKey('faq');
+
+/** The FAQ page's EN title on a decoded `FaqPage`. */
+const faqTitleEn = (page: FaqPage): string => page.title.en;
+
+describe('DraftEditor.load (per-object: page scope reconciliation)', () => {
+  it.effect('falls back to the FAQ page default when nothing is stored', () =>
+    Effect.gen(function* () {
+      const editor = yield* DraftEditor.Service;
+      const result = yield* editor.load(pageScope('faq'));
+      expect(result.source).toBe('defaults');
+      // The decoded content is the FAQ page's typed shape — its title round-trips.
+      expect(faqTitleEn(result.content)).toBe(defaultFaqPage.title.en);
+    }).pipe(provideEditor(adminStorage({}))),
+  );
+
+  it.effect('prefers the published FAQ object over the default', () =>
+    Effect.gen(function* () {
+      const editor = yield* DraftEditor.Service;
+      const storage = yield* Storage.Service;
+      const published = yield* encodeFaq(defaultFaqPage);
+      yield* storage.put(FAQ_KEY, published, 'application/json');
+      const result = yield* editor.load(pageScope('faq'));
+      expect(result.source).toBe('published');
+    }).pipe(provideEditor(adminStorage({}))),
+  );
+
+  it.effect('uses a FAQ draft with no published object as a valid source', () =>
+    Effect.gen(function* () {
+      const draftPage = FaqPage.make({
+        ...defaultFaqPage,
+        title: { en: 'Draft FAQ', fr: 'FAQ brouillon' },
+      });
+      const draft = yield* encodeFaq(draftPage);
+      const editor = yield* DraftEditor.Service;
+      const storage = yield* Storage.Service;
+      yield* storage.put(FAQ_DRAFT_KEY, draft, 'application/json');
+      const result = yield* editor.load(pageScope('faq'));
+      expect(result.source).toBe('draft');
+      expect(faqTitleEn(result.content)).toBe('Draft FAQ');
+    }).pipe(provideEditor(adminStorage({}))),
+  );
+
+  it.effect(
+    'prefers a FAQ draft saved after the last publish; ignores a stale one',
+    () =>
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const storage = yield* Storage.Service;
+
+        // Stale draft written first, then a later publish (failed-delete sim).
+        const stale = yield* encodeFaq(
+          FaqPage.make({
+            ...defaultFaqPage,
+            title: { en: 'Stale FAQ', fr: 'FAQ périmé' },
+          }),
+        );
+        const fresh = yield* encodeFaq(
+          FaqPage.make({
+            ...defaultFaqPage,
+            title: { en: 'Published FAQ', fr: 'FAQ publié' },
+          }),
+        );
+        yield* storage.put(FAQ_DRAFT_KEY, stale, 'application/json');
+        yield* TestClock.adjust('1 second');
+        yield* storage.put(FAQ_KEY, fresh, 'application/json');
+
+        const stalePick = yield* editor.load(pageScope('faq'));
+        expect(stalePick.source).toBe('published');
+        expect(faqTitleEn(stalePick.content)).toBe('Published FAQ');
+
+        // Now a draft written AFTER the publish wins.
+        const newer = yield* encodeFaq(
+          FaqPage.make({
+            ...defaultFaqPage,
+            title: { en: 'Newer FAQ', fr: 'FAQ plus récent' },
+          }),
+        );
+        yield* TestClock.adjust('1 second');
+        yield* storage.put(FAQ_DRAFT_KEY, newer, 'application/json');
+        const newerPick = yield* editor.load(pageScope('faq'));
+        expect(newerPick.source).toBe('draft');
+        expect(faqTitleEn(newerPick.content)).toBe('Newer FAQ');
+      }).pipe(provideEditor(adminStorage({}))),
+  );
+});
+
+describe('DraftEditor.editDocument / publish (per-object: page scope)', () => {
+  it.effect(
+    'edits a page draft, reopens it, publishes it to the page object — and busts nothing else',
+    () =>
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const storage = yield* Storage.Service;
+
+        // Edit the FAQ page title via the same dotted-override the route emits.
+        const override = assembleOverrides([
+          ['title.en', 'Frequently Asked Questions'],
+        ]) as Json;
+        yield* TestClock.adjust('1 second');
+        const encoded = yield* editor.editDocument(pageScope('faq'), override);
+
+        // The returned encoded object carries the edit and decodes as a FaqPage.
+        const returned = yield* decodeFaqObject(encoded);
+        expect(faqTitleEn(returned)).toBe('Frequently Asked Questions');
+
+        // The draft was stored at the PAGE's draft key (not the site key).
+        const draftBody = yield* readStoredText(FAQ_DRAFT_KEY);
+        const storedDraft = yield* decodeFaq(draftBody);
+        expect(faqTitleEn(storedDraft)).toBe('Frequently Asked Questions');
+
+        // Reopen reconciles to the draft.
+        const reopened = yield* editor.load(pageScope('faq'));
+        expect(reopened.source).toBe('draft');
+        expect(faqTitleEn(reopened.content)).toBe('Frequently Asked Questions');
+
+        // Publish promotes the draft to the page object and drops the draft.
+        yield* editor.publish(pageScope('faq'));
+        const publishedBody = yield* readStoredText(FAQ_KEY);
+        const publishedPage = yield* decodeFaq(publishedBody);
+        expect(faqTitleEn(publishedPage)).toBe('Frequently Asked Questions');
+        const draftHead = yield* storage.head(FAQ_DRAFT_KEY);
+        expect(draftHead._tag).toBe('None');
+      }).pipe(provideEditor(adminStorage({}))),
+  );
+
+  it.effect(
+    'a page edit never touches the site object (per-object blast-radius isolation)',
+    () =>
+      // ADR 0008 headline property: editing one object can never break or rewrite
+      // another's. Editing + publishing the FAQ page must leave the seeded
+      // `content/site.json` byte-identical.
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const storage = yield* Storage.Service;
+
+        const siteBefore = yield* readStoredText(SITE_CONTENT_KEY);
+
+        const override = assembleOverrides([
+          ['title.en', 'Edited FAQ Title'],
+        ]) as Json;
+        yield* TestClock.adjust('1 second');
+        yield* editor.editDocument(pageScope('faq'), override);
+        yield* editor.publish(pageScope('faq'));
+
+        // The site object is untouched: no site draft was written, and the
+        // published site body is byte-identical to the seed.
+        const siteDraftHead = yield* storage.head(SITE_CONTENT_DRAFT_KEY);
+        expect(siteDraftHead._tag).toBe('None');
+        const siteAfter = yield* readStoredText(SITE_CONTENT_KEY);
+        expect(siteAfter).toBe(siteBefore);
+      }).pipe(seededPublished(defaultContent)),
+  );
+
+  it.effect(
+    'rejects a page edit that empties a required bilingual field with a 400',
+    () =>
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const override = assembleOverrides([['title.en', '']]) as Json;
+        const result = yield* Effect.exit(
+          editor.editDocument(pageScope('faq'), override),
+        );
+        expect(result._tag).toBe('Failure');
+        if (result._tag === 'Failure') {
+          const fail = result.cause.reasons.find((r) => r._tag === 'Fail');
+          const issueError = (fail as { readonly error: DraftEditor.IssueError })
+            .error;
+          expect(issueError.status).toBe(400);
+          expect(issueError.issues.length).toBeGreaterThan(0);
+        }
+      }).pipe(provideEditor(adminStorage({}))),
+  );
+});
+
+describe('DraftEditor (per-object: form scope)', () => {
+  it.effect(
+    'edits + publishes a form definition through its own forms/<form> object',
+    () =>
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+
+        // Load falls back to the bundled form default (typed FormDefinition).
+        const loaded = yield* editor.load(formScope('contact'));
+        expect(loaded.source).toBe('defaults');
+        expect(loaded.content.title.en).toBe(defaultContactForm.title.en);
+
+        // Edit the form copy and publish it to forms/contact.json.
+        const override = assembleOverrides([
+          ['title.en', 'Get in touch'],
+        ]) as Json;
+        yield* TestClock.adjust('1 second');
+        const encoded = yield* editor.editDocument(
+          formScope('contact'),
+          override,
+        );
+        const returned = yield* decodeFormObject(encoded);
+        expect(returned.title.en).toBe('Get in touch');
+
+        yield* editor.publish(formScope('contact'));
+        const publishedBody = yield* readStoredText(formObjectKey('contact'));
+        const publishedForm = yield* Schema.decodeUnknownEffect(
+          Schema.fromJsonString(FormDefinition),
+        )(publishedBody);
+        expect(publishedForm.title.en).toBe('Get in touch');
+      }).pipe(provideEditor(adminStorage({}))),
   );
 });

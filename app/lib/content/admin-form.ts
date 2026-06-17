@@ -234,6 +234,69 @@ export const assembleOverrides = (
 };
 
 /**
+ * Rewrite a FAQ-answer override leaf from the editor's plain-text bilingual input
+ * shape (`{ en, fr }`) into the encoded single-`text`-token `RichText` shape
+ * (`[{ _tag: 'text', value: { en, fr } }]`) the `FaqPage` schema decodes.
+ *
+ * Why this seam (registration-launch Branch 5.5, FAQ add→fill→publish loop): a
+ * freshly-added FAQ item carries no `answer` (it is `optionalKey` in `DraftFaqPage`,
+ * absent in `FaqPage` ⇒ publish-invalid). The admin route renders a plain bilingual
+ * **answer** input for such an item so it CAN be filled, but the form posts it as a
+ * dotted `items.<id>.answer.en/.fr` pair — a plain `{ en, fr }` object. The encoded
+ * base `answer` is a `RichText` ARRAY, and `deepMerge`'s identity-keyed array merge
+ * cannot address an array with an object override (it would silently drop the edit).
+ * Converting the override leaf to a one-token `RichText` ARRAY makes `deepMerge` fall
+ * to wholesale array-replacement, so the filled answer lands. The closed token model
+ * is preserved — the route only edits answers as a single plain `text` run; rich
+ * (link/bold/italic) answers stay read-only (`boundary-discipline`).
+ *
+ * An answer override is emitted ONLY when BOTH locales are non-empty: a single
+ * `text` token's `value` is the strict both-locales `Text`, so a half-filled
+ * `{ en: 'x', fr: '' }` would be rejected at DRAFT save — inconsistent with every
+ * other field, whose empty half is draft-tolerated (ADR 0006). Dropping the
+ * half-filled answer leaves it ABSENT instead: the draft saves, and publish stays
+ * blocked until both halves are filled (ADR 0006: incomplete blocks publish, not
+ * save). This is a pure rewrite of FAQ-answer leaves only; every other override
+ * passes through untouched.
+ */
+export const normalizeFaqAnswers = (override: Json): Json => {
+  if (!isPlainObject(override)) return override;
+  const items = override['items'];
+  if (items === undefined || !isPlainObject(items)) return override;
+  const rewrittenItems: MutableJsonObject = {};
+  for (const id of Object.keys(items)) {
+    const item = items[id];
+    if (item === undefined || !isPlainObject(item) || !('answer' in item)) {
+      if (item !== undefined) rewrittenItems[id] = item;
+      continue;
+    }
+    const answer = item['answer'];
+    const { answer: _drop, ...rest } = item;
+    if (isPlainObject(answer)) {
+      const en = answer['en'];
+      const fr = answer['fr'];
+      // Emit the token only when both locales are present and non-empty; a
+      // half-filled answer is dropped so the draft saves and publish stays
+      // blocked (ADR 0006), never rejected at save by the strict `Text` token.
+      if (
+        typeof en === 'string' &&
+        typeof fr === 'string' &&
+        en.trim() !== '' &&
+        fr.trim() !== ''
+      ) {
+        rewrittenItems[id] = {
+          ...rest,
+          answer: [{ _tag: 'text', value: { en, fr } }],
+        };
+        continue;
+      }
+    }
+    rewrittenItems[id] = rest;
+  }
+  return { ...override, items: rewrittenItems };
+};
+
+/**
  * Deep-merge `overrides` onto `base`, returning a new value. `base` and
  * `overrides` are never mutated.
  *
