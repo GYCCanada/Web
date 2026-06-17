@@ -1,0 +1,2390 @@
+commit 546df51cb114ba7387c480a766a7d1c05c5a2f7a
+Author: cevr <seeve.c@gmail.com>
+Date:   Wed Jun 17 17:03:20 2026 -0400
+
+    feat(forms)(form-engine): delete the three old schemas + oracle once the harness is green
+    
+    The equivalence harnesses (contact/volunteer/registration) and the kept
+    registration oracle (`registration-schema.oracle.ts`) were transient migration
+    scaffolding: they proved engine-vs-oracle behaviour parity over a full failure
+    matrix while the structural Form engine was built (Branch 6.3-6.5). With every
+    form migration green, ADR 0007's removal condition is met ("the oracle is removed
+    once registration is fully migrated"), so this sub-commit subtracts them.
+    
+    migrate-callers-then-delete-legacy-apis: registration-form.tsx no longer borrows
+    the oracle's precise registrant `.Type` for conform's field-accessor metadata.
+    The form now owns its field-name contract as a local `RegistrantInput` Schema
+    (the encoded/form-input shape it renders `name=`s for) and casts the engine
+    StandardSchema to it at the seam. Runtime validation still flows entirely from
+    the engine (`definitionToSchema(defaultRegistrationForm)`); derive-dont-sync.
+    
+    The registration render-parity tests OUTLIVE the oracle (they never depended on
+    it): they assert the live <RegistrationForm> emits submit-names matching the
+    definition graph and that makeDefaultRegistrant seeds every rendered field — the
+    `cameraOperator`/`photographer`-class regression guard. Moved to
+    `forms/registration-form.test.tsx`. Engine decode behaviour is covered standalone
+    by decode.test.ts / definition.test.ts / render.test.tsx.
+    
+    Stale oracle-path doc references in decode.ts and defaults.ts updated to past
+    tense. -1533 net lines; the deletion test passes.
+
+diff --git a/app/lib/content/pages/defaults.ts b/app/lib/content/pages/defaults.ts
+index 2636fb8..777d396 100644
+--- a/app/lib/content/pages/defaults.ts
++++ b/app/lib/content/pages/defaults.ts
+@@ -640,10 +640,12 @@ export const defaultVolunteerForm: FormDefinition = Schema.decodeUnknownSync(
+ });
+ 
+ /**
+- * The registration form's PER-REGISTRANT field graph (Branch 6.5) — the
+- * data-driven equivalent of the hand-tuned `registration-schema.ts` `Registrant`
+- * struct, proven byte-equivalent by `forms/equivalence.registration.test.tsx`
+- * against the oracle (kept as `registration-schema.oracle.ts` until 6.6). See
++ * The registration form's PER-REGISTRANT field graph (Branch 6) — the data-driven
++ * equivalent of the former hand-tuned `Registrant` struct, proven byte-equivalent
++ * by the registration equivalence harness against the hand-tuned oracle before both
++ * were retired in Branch 6.6 (ADR 0007: "the oracle is removed once registration is
++ * fully migrated"). The live form's field-name contract is now pinned by the
++ * render-parity tests in `forms/registration-form.test.tsx`. See
+  * `docs/forms/registration-spec.md` for the field-for-field transcription.
+  *
+  * SCOPE: this `FormDefinition` describes ONE registrant. The registration form is
+@@ -846,12 +848,13 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
+                 _tag: 'optionalText',
+                 name: 'other',
+                 label: { en: 'Other', fr: 'Autre' },
+-                // Mirrors the oracle's `OptionalText` (`registration-schema.oracle
+-                // .ts` `other`): key-must-be-present, empty-string-allowed — the
+-                // always-rendered `extra` block POSTs an empty `other`, so an absent
+-                // `other` inside a present `extra` is an out-of-form payload the
+-                // oracle rejects. `church`/`instrument`/`dietaryRestrictions` are
+-                // genuinely-optional (oracle `OptionalString`) and omit this flag.
++                // Realizes the former hand-tuned `OptionalText` (the registration
++                // oracle's `other`, retired in 6.6): key-must-be-present,
++                // empty-string-allowed — the always-rendered `extra` block POSTs an
++                // empty `other`, so an absent `other` inside a present `extra` is an
++                // out-of-form payload that schema rejects.
++                // `church`/`instrument`/`dietaryRestrictions` are genuinely-optional
++                // (the former `OptionalString`) and omit this flag.
+                 requirePresent: true,
+                 invalidMessage: 'registration.form.other.required',
+               },
+diff --git a/app/lib/forms/decode.ts b/app/lib/forms/decode.ts
+index bd640f5..311c385 100644
+--- a/app/lib/forms/decode.ts
++++ b/app/lib/forms/decode.ts
+@@ -76,21 +76,22 @@ const requiredString = (message: MessageKey) =>
+ 
+ /**
+  * Genuinely-optional free-text: an empty string, an ABSENT key, and an explicit
+- * `undefined` are all valid; a present non-string emits `message`. Mirrors
+- * `registration-schema.oracle.ts` `OptionalString` (`Schema.optional(Schema
+- * .String…)`) — registration's `church` / `instrument` / `dietaryRestrictions`.
++ * `undefined` are all valid; a present non-string emits `message`. Realizes the
++ * former hand-tuned `OptionalString` (`Schema.optional(Schema.String…)`, the
++ * registration oracle retired in Branch 6.6) — registration's `church` /
++ * `instrument` / `dietaryRestrictions`.
+  *
+  * `Schema.optional` (not `optionalKey`) so an explicit `undefined` is accepted too,
+- * matching the oracle's `OptionalString` exactly on the values the form actually
+- * submits (absent / valid string). The wrapper is `.annotate({ message })` so a
+- * present non-string (a duplicate-name ARRAY — an out-of-form payload) maps to the
+- * field's real `MessageKey` instead of `Schema.optional`'s default
++ * matching that `OptionalString` exactly on the values the form actually submits
++ * (absent / valid string). The wrapper is `.annotate({ message })` so a present
++ * non-string (a duplicate-name ARRAY — an out-of-form payload) maps to the field's
++ * real `MessageKey` instead of `Schema.optional`'s default
+  * `"Expected string | undefined, got …"` union-mismatch text (which would render
+- * BLANK in `FieldErrors`). The oracle leaves this edge un-annotated; relabeling it
+- * is strictly safer and never observed in the equivalence corpus (the form submits
+- * absent or a string for a single text field). The same wrapper-annotation idiom as
+- * the `optional: true` text/email/url path below. This is the `requirePresent`
+- * absent/false branch.
++ * BLANK in `FieldErrors`). The former oracle left this edge un-annotated; relabeling
++ * it is strictly safer and was never observed in the equivalence corpus (the form
++ * submits absent or a string for a single text field). The same wrapper-annotation
++ * idiom as the `optional: true` text/email/url path below. This is the
++ * `requirePresent` absent/false branch.
+  */
+ const optionalText = (message: MessageKey) =>
+   Schema.optional(Schema.String.annotate({ message })).annotate({ message });
+@@ -98,12 +99,13 @@ const optionalText = (message: MessageKey) =>
+ /**
+  * Key-must-be-present, empty-string-allowed free-text: a present non-string emits
+  * `message`; an empty string is valid; an ABSENT key emits `message` (via
+- * `messageMissingKey`). Mirrors `registration-schema.oracle.ts` `OptionalText`
+- * (`Schema.String…annotateKey({ messageMissingKey })`, NOT optional) —
+- * registration's `extra.other`. The two oracle behaviours must NOT collapse onto
+- * one engine kind (the always-rendered `extra` block POSTs an empty `other`, so an
+- * absent `other` inside a present `extra` is the out-of-form payload the oracle
+- * rejects). Selected by the `optionalText` kind's `requirePresent: true` flag.
++ * `messageMissingKey`). Realizes the former hand-tuned `OptionalText`
++ * (`Schema.String…annotateKey({ messageMissingKey })`, NOT optional; the
++ * registration oracle retired in Branch 6.6) — registration's `extra.other`. The
++ * two former behaviours must NOT collapse onto one engine kind (the always-rendered
++ * `extra` block POSTs an empty `other`, so an absent `other` inside a present
++ * `extra` is the out-of-form payload that schema rejects). Selected by the
++ * `optionalText` kind's `requirePresent: true` flag.
+  */
+ const presentEmptyAllowedText = (message: MessageKey) =>
+   Schema.String.annotate({ message }).annotateKey({ messageMissingKey: message });
+diff --git a/app/lib/forms/equivalence.contact.test.ts b/app/lib/forms/equivalence.contact.test.ts
+deleted file mode 100644
+index c891467..0000000
+--- a/app/lib/forms/equivalence.contact.test.ts
++++ /dev/null
+@@ -1,314 +0,0 @@
+-import { describe, expect, test } from 'bun:test';
+-import { Result, Schema } from 'effect';
+-
+-import { defaultContactForm } from '~/lib/content/pages/defaults';
+-import { parseSchema } from '~/lib/effect/form-schema';
+-import { isTranslationKey } from '~/lib/effect/form-schema.test-helper';
+-import { root } from '~/lib/localization/translations';
+-
+-import { decodeForm, definitionToSchema } from './decode';
+-
+-/**
+- * Branch 6.3 — the contact equivalence harness (ADR 0007, settled #6).
+- *
+- * Contact is the FIRST form to migrate onto the structural engine, so it carries
+- * the de-risking harness the riskiest migration (registration, 6.5) reuses: the
+- * hand-tuned contact schema is kept here as an ORACLE while the engine's
+- * data-driven `defaultContactForm` definition runs the same corpus, and the two
+- * are asserted equivalent over a FULL failure matrix (valid + every invalid
+- * variant) — `(a)` identical decoded output, `(b)` identical emitted
+- * `TranslationKey` sets per field path.
+- *
+- * The oracle is the verbatim transcription of the pre-migration `contact.tsx`
+- * schema (the `method` discriminator as a `Literals` field + the per-method
+- * struct-level requirement filter). It lives ONLY in this harness now — the route
+- * carries no hand-written schema (`subtract-before-you-add`); the oracle is the
+- * behavioural spec the engine is proven against, and is deleted once every form
+- * migration is green (6.6).
+- *
+- * ONE intentional key-level delta is pinned, not hidden: the oracle's `name`
+- * INVALID-TYPE case (a duplicate-name array) emits `contact.form.name.error`,
+- * while the engine's `requiredText` emits its single `requiredMessage`
+- * (`contact.form.name.required`) for the empty / absent / invalid-type cases
+- * alike (the closed `FieldKind` set carries one required key per text field, by
+- * design — `make-impossible-states-unrepresentable`). Both keys resolve to the
+- * SAME rendered string in both locales ("Please enter your name" / "Veuillez
+- * entrer votre nom"), so the user sees no difference; the harness asserts
+- * rendered-string parity across the whole matrix and pins this one key alias
+- * explicitly so it can never widen silently.
+- */
+-
+-// ---------------------------------------------------------------------------
+-// The oracle — verbatim from the pre-migration contact.tsx schema
+-// ---------------------------------------------------------------------------
+-
+-const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+-
+-const Name = Schema.String.annotate({ message: 'contact.form.name.error' })
+-  .check(Schema.isMinLength(1, { message: 'contact.form.name.required' }))
+-  .annotateKey({ messageMissingKey: 'contact.form.name.required' });
+-const Message = Schema.String.annotate({
+-  message: 'contact.form.message.required',
+-})
+-  .check(Schema.isMinLength(1, { message: 'contact.form.message.required' }))
+-  .annotateKey({ messageMissingKey: 'contact.form.message.required' });
+-const Email = Schema.String.check(
+-  Schema.isMinLength(1, { message: 'contact.form.email.required' }),
+-  Schema.isPattern(EMAIL_REGEXP, { message: 'contact.form.email.error' }),
+-);
+-const Phone = Schema.String.check(
+-  Schema.isMinLength(1, { message: 'contact.form.phone.required' }),
+-);
+-const Method = Schema.Literals(['email', 'phone', 'both'])
+-  .annotate({ message: 'contact.form.contact-method.required' })
+-  .annotateKey({ messageMissingKey: 'contact.form.contact-method.required' });
+-
+-const oracle = Schema.Struct({
+-  method: Method,
+-  name: Name,
+-  message: Message,
+-  email: Schema.optional(Email).annotate({
+-    message: 'contact.form.email.error',
+-  }),
+-  phone: Schema.optional(Phone).annotate({
+-    message: 'contact.form.phone.required',
+-  }),
+-}).check(
+-  Schema.makeFilter((value) => {
+-    const issues: Array<{ path: ReadonlyArray<PropertyKey>; issue: string }> =
+-      [];
+-    if (
+-      (value.method === 'email' || value.method === 'both') &&
+-      value.email === undefined
+-    ) {
+-      issues.push({ path: ['email'], issue: 'contact.form.email.required' });
+-    }
+-    if (
+-      (value.method === 'phone' || value.method === 'both') &&
+-      value.phone === undefined
+-    ) {
+-      issues.push({ path: ['phone'], issue: 'contact.form.phone.required' });
+-    }
+-    return issues.length === 0 ? undefined : issues;
+-  }),
+-);
+-
+-// ---------------------------------------------------------------------------
+-// Harness helpers
+-// ---------------------------------------------------------------------------
+-
+-/** One validation issue: the conform field name it attaches to + its message key. */
+-type Issue = { name: string; key: string };
+-
+-// The COMPLETE, order-independent error set a form surfaces — collected via the
+-// client Standard-Schema path (`toStandardSchemaV1`), which gathers EVERY issue
+-// (unlike Effect's default server decode, which aborts on the first failing struct
+-// field). This is the meaningful behavioural equivalence: it is exactly what
+-// `useForm`'s onSubmit validation renders to the user, and it is independent of the
+-// field DECLARATION ORDER that would otherwise make the single server-side
+-// abort-first error differ between the oracle (`method` first) and the engine
+-// (`name` first) on an all-fields-missing payload — a difference the user never
+-// sees, since the client blocks submission showing the identical full set. The
+-// server path is still asserted for decoded success output below.
+-const issuesOf =
+-  <A, I>(schema: Schema.Codec<A, I, never, never>) =>
+-  (payload: unknown): Issue[] => {
+-    const result = Schema.toStandardSchemaV1(schema)['~standard'].validate(
+-      payload,
+-    ) as {
+-      issues?: ReadonlyArray<{
+-        message: string;
+-        path?: ReadonlyArray<PropertyKey | { key: PropertyKey }>;
+-      }>;
+-    };
+-    return (result.issues ?? [])
+-      .map((issue) => {
+-        const segments: Array<string | number> = [];
+-        for (const segment of issue.path ?? []) {
+-          const value =
+-            typeof segment === 'object' && segment !== null && 'key' in segment
+-              ? segment.key
+-              : segment;
+-          if (typeof value === 'string' || typeof value === 'number') {
+-            segments.push(value);
+-          }
+-        }
+-        return { name: segments.join('.'), key: issue.message };
+-      })
+-      .sort((a, b) =>
+-        `${a.name}|${a.key}`.localeCompare(`${b.name}|${b.key}`),
+-      );
+-  };
+-
+-const engineCodec = definitionToSchema(defaultContactForm);
+-
+-const oracleIssues = issuesOf(oracle);
+-const engineIssues = issuesOf(
+-  engineCodec as Schema.Codec<unknown, unknown, never, never>,
+-);
+-
+-/** Render each issue's key to its locale string (the alias-tolerant comparison). */
+-const renderIssues = (issues: Issue[], locale: 'en' | 'fr'): Issue[] =>
+-  issues.map((issue) => ({
+-    name: issue.name,
+-    key: issue.key in root[locale] ? root[locale][issue.key as never] : issue.key,
+-  }));
+-
+-/** The decoded SUCCESS value, or a `Failure` marker, for cross-engine compare. */
+-const decodedOf = (
+-  result: Result.Result<unknown, unknown>,
+-): { ok: true; value: unknown } | { ok: false } =>
+-  Result.isSuccess(result)
+-    ? { ok: true, value: result.success }
+-    : { ok: false };
+-
+-// ---------------------------------------------------------------------------
+-// The corpus — valid + every invalid variant
+-// ---------------------------------------------------------------------------
+-
+-const valid = (overrides: Record<string, unknown> = {}) => ({
+-  method: 'email',
+-  name: 'Ada',
+-  email: 'ada@example.com',
+-  message: 'hello',
+-  ...overrides,
+-});
+-
+-const corpus: Array<{ label: string; payload: unknown }> = [
+-  // Valid submissions, one per method.
+-  { label: 'valid email-method', payload: valid() },
+-  {
+-    label: 'valid phone-method',
+-    payload: { method: 'phone', name: 'Ada', phone: '5', message: 'hi' },
+-  },
+-  {
+-    label: 'valid both-method',
+-    payload: valid({ method: 'both', phone: '5' }),
+-  },
+-  // Everything missing.
+-  { label: 'empty payload', payload: {} },
+-  // Each required field absent independently (the key omitted — the form-data
+-  // shape a never-touched field POSTs; a present `undefined` is the invalid-type
+-  // alias case, exercised separately by `nameArrayCase`).
+-  {
+-    label: 'name missing',
+-    payload: { method: 'email', email: 'ada@example.com', message: 'hello' },
+-  },
+-  {
+-    label: 'message missing',
+-    payload: { method: 'email', name: 'Ada', email: 'ada@example.com' },
+-  },
+-  {
+-    label: 'method missing',
+-    payload: { name: 'Ada', email: 'ada@example.com', message: 'hello' },
+-  },
+-  // Off-list method.
+-  { label: 'method off-list', payload: valid({ method: 'bogus' }) },
+-  // Each required field empty.
+-  { label: 'name empty', payload: valid({ name: '' }) },
+-  { label: 'message empty', payload: valid({ message: '' }) },
+-  // Bad email.
+-  { label: 'email malformed', payload: valid({ email: 'not-an-email' }) },
+-  { label: 'email empty (present)', payload: valid({ email: '' }) },
+-  // Cross-field: gated targets absent.
+-  {
+-    label: 'method=email, email absent',
+-    payload: { method: 'email', name: 'Ada', message: 'hi' },
+-  },
+-  {
+-    label: 'method=phone, phone absent',
+-    payload: { method: 'phone', name: 'Ada', message: 'hi' },
+-  },
+-  {
+-    label: 'method=both, email+phone absent',
+-    payload: { method: 'both', name: 'Ada', message: 'hi' },
+-  },
+-  // Each `both`-gated requirement violated INDEPENDENTLY: only the absent side's
+-  // `requiredWhenEquals` rule fires (the other gated field is present), pinning the
+-  // two cross-field rules in isolation under the `both` discriminator.
+-  {
+-    label: 'method=both, only email absent (phone present)',
+-    payload: { method: 'both', name: 'Ada', phone: '5', message: 'hi' },
+-  },
+-  {
+-    label: 'method=both, only phone absent (email present)',
+-    payload: {
+-      method: 'both',
+-      name: 'Ada',
+-      email: 'ada@example.com',
+-      message: 'hi',
+-    },
+-  },
+-  // Discriminator INVALID-TYPE: `method` as an array (distinct from `method
+-  // off-list`, a valid-string-wrong-value path) — the `literal` field's invalid
+-  // -type boundary, mirroring the per-field invalid-type arrays below.
+-  { label: 'method array', payload: valid({ method: ['email', 'phone'] }) },
+-  // Invalid-type (duplicate-name array) per field.
+-  { label: 'email array', payload: valid({ method: 'both', email: ['a', 'b'], phone: '5' }) },
+-  { label: 'message array', payload: valid({ message: ['a', 'b'] }) },
+-  { label: 'phone array', payload: valid({ method: 'both', phone: ['a', 'b'] }) },
+-];
+-
+-// The one field+case where the oracle and engine emit DIFFERENT keys that render
+-// IDENTICALLY (documented above): `name` invalid-type → oracle `.error`, engine
+-// `.required`.
+-const nameArrayCase = {
+-  label: 'name array',
+-  payload: valid({ name: ['a', 'b'] }),
+-};
+-
+-describe('contact equivalence harness (oracle vs engine)', () => {
+-  test.each(corpus)(
+-    '$label — identical decoded output',
+-    ({ payload }) => {
+-      const o = decodedOf(parseSchema(oracle, payload));
+-      const e = decodedOf(decodeForm(defaultContactForm, payload));
+-      expect(e).toEqual(o);
+-    },
+-  );
+-
+-  test.each(corpus)(
+-    '$label — identical emitted TranslationKey sets (name + key, order-independent)',
+-    ({ payload }) => {
+-      expect(engineIssues(payload)).toEqual(oracleIssues(payload));
+-    },
+-  );
+-
+-  test.each(corpus)(
+-    '$label — identical RENDERED error strings (EN + FR)',
+-    ({ payload }) => {
+-      expect(renderIssues(engineIssues(payload), 'en')).toEqual(
+-        renderIssues(oracleIssues(payload), 'en'),
+-      );
+-      expect(renderIssues(engineIssues(payload), 'fr')).toEqual(
+-        renderIssues(oracleIssues(payload), 'fr'),
+-      );
+-    },
+-  );
+-
+-  test('every emitted key (both engines) is a real translation key', () => {
+-    for (const { payload } of [...corpus, nameArrayCase]) {
+-      for (const issues of [oracleIssues(payload), engineIssues(payload)]) {
+-        for (const { key } of issues) {
+-          expect({ key, isKey: isTranslationKey(key) }).toEqual({
+-            key,
+-            isKey: true,
+-          });
+-        }
+-      }
+-    }
+-  });
+-
+-  // The single intentional delta: `name` invalid-type emits a DIFFERENT key that
+-  // renders IDENTICALLY. Pinned so it cannot widen to any other field/case.
+-  test('the one documented key alias: name invalid-type renders identically', () => {
+-    const o = oracleIssues(nameArrayCase.payload);
+-    const e = engineIssues(nameArrayCase.payload);
+-    // The oracle emits `name.error`, the engine `name.required` — on `name` only.
+-    expect(o).toEqual([{ name: 'name', key: 'contact.form.name.error' }]);
+-    expect(e).toEqual([{ name: 'name', key: 'contact.form.name.required' }]);
+-    // … yet render identically in both locales (the user sees no difference).
+-    expect(renderIssues(e, 'en')).toEqual(renderIssues(o, 'en'));
+-    expect(renderIssues(e, 'fr')).toEqual(renderIssues(o, 'fr'));
+-  });
+-});
+diff --git a/app/lib/forms/equivalence.registration.test.tsx b/app/lib/forms/equivalence.registration.test.tsx
+deleted file mode 100644
+index 41d2a3a..0000000
+--- a/app/lib/forms/equivalence.registration.test.tsx
++++ /dev/null
+@@ -1,744 +0,0 @@
+-import { describe, expect, test } from 'bun:test';
+-import { Result, Schema } from 'effect';
+-import { renderToString } from 'react-dom/server';
+-import { createRoutesStub } from 'react-router';
+-
+-import { defaultRegistrationForm } from '~/lib/content/pages/defaults';
+-import { parseSchema } from '~/lib/effect/form-schema';
+-import { isTranslationKey } from '~/lib/effect/form-schema.test-helper';
+-import { LocalizationProvider } from '~/lib/localization/provider';
+-import { root } from '~/lib/localization/translations';
+-import {
+-  makeDefaultRegistrant,
+-  RegistrationForm,
+-} from '~/routes/($lang)+/registration-form';
+-import { RegistrationSchema as OracleRegistrationSchema } from '~/routes/($lang)+/registration-schema.oracle';
+-
+-import { definitionToSchema } from './decode';
+-
+-/**
+- * Branch 6.5 — the registration equivalence harness (ADR 0007, settled #6, plan
+- * §"Riskiest commit"). Registration is the RISKIEST migration: a 2-way
+- * discriminated union (attendee / exhibitor) with ~10 per-type presence
+- * requirements, a `true`/`false`/`on` three-token boolean codec, nested groups,
+- * and an error set where every failure path must emit a real `TranslationKey` (a
+- * wrong/absent key renders blank). It is CLIENT-ONLY today (the route action is a
+- * verified no-op), so this harness pins it three ways — (a) identical decoded
+- * output, (b) identical emitted `TranslationKey` sets (same paths, same keys) on
+- * the order-independent client collect-all path + EN+FR rendered-string parity,
+- * (c) render-level field-name + default-value parity (below): the LIVE
+- * `<RegistrationForm>` is `renderToString`-rendered and its emitted submit-names
+- * are asserted against the definition graph (the real render path, not an inlined
+- * copy), and the form's REAL `makeDefaultRegistrant` is imported (not a
+- * hand-maintained duplicate — `derive-dont-sync`) and proven to seed every
+- * definition field name.
+- *
+- * Unlike contact (6.3) / volunteer (6.4), whose oracles were inlined in the test,
+- * the registration oracle is KEPT as a FILE (`registration-schema.oracle.ts`, the
+- * verbatim pre-migration schema) and imported here — the plan's clean subtract
+- * signal; the oracle is deleted once every migration is green (6.6).
+- *
+- * SCOPE: the engine's `defaultRegistrationForm` validates ONE registrant; the form
+- * is `{ registrants: Registrant[] }` (a repeating array, NOT in the closed
+- * `FieldKind` set). So the engine equivalent wraps the per-registrant codec in
+- * `{ registrants: Array(...) }`, mirroring the oracle's shape and the live form's
+- * derived schema (`registration-form.tsx`). Every assertion is a single registrant
+- * in `registrants[0]`, with paths like `registrants[0].type`.
+- *
+- * ONE intentional, contained delta is pinned (not hidden): the WHOLLY-ABSENT
+- * `extra` group anchor. The oracle hardcodes the absent-`extra` key at
+- * `extra.tos` (`registration-schema.oracle.ts:274-279`); the engine's GENERIC
+- * group-presence rule anchors at the group's FIRST presence-requirable inner field
+- * (`extra.howDidYouHear`). Both emit the SAME real `TranslationKey` *kind* (a
+- * required `extra.*` key) on an OUT-OF-FORM edge — an attendee never submits with
+- * no `extra` object, because the form always renders the `extra` block (with
+- * defaults) for an attendee, so the field whose key anchors the absent group is
+- * never observed. The two cases carrying this edge (`bare attendee`, `extra
+- * absent`) are routed to `absentExtraAnchorDelta` below and excluded from the
+- * blanket key-set equivalence; every OTHER case has identical keys
+- * (`noKeyDivergence`). See `docs/forms/registration-spec.md`.
+- *
+- * Otherwise no key divergence (unlike contact's `name.error` alias): the oracle's
+- * `RequiredString` already emits its single key for the empty / absent /
+- * invalid-type cases, exactly as the engine's `requiredText` does.
+- */
+-
+-// ---------------------------------------------------------------------------
+-// The engine equivalent — the per-registrant codec wrapped in { registrants }
+-// ---------------------------------------------------------------------------
+-
+-// The `{ registrants }` wrapper is the FORM SHELL the registration route owns (the
+-// engine validates ONE registrant). The shell annotates a missing `registrants`
+-// key with the discriminator's required key, exactly as the oracle's
+-// `RegistrationSchema` does (`registration-schema.oracle.ts`) and the live
+-// `registration-form.tsx` derived schema does — so the empty-form case attributes
+-// to `type`, never the raw `Missing key`.
+-const engineRegistrant = definitionToSchema(defaultRegistrationForm);
+-const engineSchema = Schema.Struct({
+-  registrants: Schema.mutable(Schema.Array(engineRegistrant)).annotateKey({
+-    messageMissingKey: 'registration.form.type.required',
+-  }),
+-});
+-
+-// ---------------------------------------------------------------------------
+-// Harness helpers
+-// ---------------------------------------------------------------------------
+-
+-/** One validation issue: the conform field name it attaches to + its message key. */
+-type Issue = { name: string; key: string };
+-
+-// The COMPLETE, order-independent error set a form surfaces — collected via the
+-// client Standard-Schema path (`toStandardSchemaV1`), which gathers EVERY issue
+-// (unlike Effect's default server decode, which aborts on the first failing struct
+-// field). This is exactly what `useForm`'s onSubmit validation renders, and is
+-// independent of the field DECLARATION ORDER that would otherwise make the single
+-// server-side abort-first error differ between the oracle and the engine — a
+-// difference the user never sees. The server decoded SUCCESS output is asserted
+-// separately below.
+-const issuesOf =
+-  <A, I>(schema: Schema.Codec<A, I, never, never>) =>
+-  (payload: unknown): Issue[] => {
+-    const result = Schema.toStandardSchemaV1(schema)['~standard'].validate(
+-      payload,
+-    ) as {
+-      issues?: ReadonlyArray<{
+-        message: string;
+-        path?: ReadonlyArray<PropertyKey | { key: PropertyKey }>;
+-      }>;
+-    };
+-    return (result.issues ?? [])
+-      .map((issue) => {
+-        const segments: Array<string | number> = [];
+-        for (const segment of issue.path ?? []) {
+-          const value =
+-            typeof segment === 'object' && segment !== null && 'key' in segment
+-              ? segment.key
+-              : segment;
+-          if (typeof value === 'string') {
+-            segments.push(value);
+-          } else if (typeof value === 'number') {
+-            // Conform names array elements with bracket notation
+-            // (`registrants[0]`), not a dotted `registrants.0`.
+-            segments[segments.length - 1] =
+-              `${segments[segments.length - 1]}[${value}]`;
+-          }
+-        }
+-        return { name: segments.join('.'), key: issue.message };
+-      })
+-      .sort((a, b) =>
+-        `${a.name}|${a.key}`.localeCompare(`${b.name}|${b.key}`),
+-      );
+-  };
+-
+-const oracleIssues = issuesOf(
+-  OracleRegistrationSchema as Schema.Codec<unknown, unknown, never, never>,
+-);
+-const engineIssues = issuesOf(
+-  engineSchema as Schema.Codec<unknown, unknown, never, never>,
+-);
+-
+-/** Render each issue's key to its locale string (the alias-tolerant comparison). */
+-const renderIssues = (issues: Issue[], locale: 'en' | 'fr'): Issue[] =>
+-  issues.map((issue) => ({
+-    name: issue.name,
+-    key: issue.key in root[locale] ? root[locale][issue.key as never] : issue.key,
+-  }));
+-
+-/** The decoded SUCCESS value, or a `Failure` marker, for cross-engine compare. */
+-const decodedOf = (
+-  result: Result.Result<unknown, unknown>,
+-): { ok: true; value: unknown } | { ok: false } =>
+-  Result.isSuccess(result)
+-    ? { ok: true, value: result.success }
+-    : { ok: false };
+-
+-const decodeEngine = (payload: unknown) =>
+-  Schema.decodeUnknownResult(engineSchema)(payload);
+-
+-// ---------------------------------------------------------------------------
+-// The corpus — valid + every invalid variant (one registrant at registrants[0])
+-// ---------------------------------------------------------------------------
+-
+-/** A minimal valid attendee payload as the form submits it (all strings). */
+-const attendee = (overrides: Record<string, unknown> = {}) => ({
+-  type: 'attendee',
+-  name: 'Ada',
+-  email: 'ada@example.com',
+-  phone: '555-0100',
+-  dateOfBirth: '2000-01-01',
+-  gender: 'female',
+-  meals: 'true',
+-  outreach: ['laws-of-health'],
+-  extra: {
+-    howDidYouHear: 'friend',
+-    whyAreYouAttending: 'growth',
+-    whatAreYouExcitedAbout: 'seminars',
+-    firstTimeAttending: 'false',
+-    merch: ['t-shirt'],
+-    other: '',
+-    tos: 'true',
+-  },
+-  volunteer: {
+-    songLeader: 'on',
+-  },
+-  ...overrides,
+-});
+-
+-const exhibitor = (overrides: Record<string, unknown> = {}) => ({
+-  type: 'exhibitor',
+-  name: 'Acme',
+-  email: 'sales@acme.com',
+-  phone: '555-0101',
+-  synopsis: 'We sell things',
+-  website: 'https://acme.com',
+-  company: 'Acme Inc',
+-  ...overrides,
+-});
+-
+-/** Wrap a single registrant payload in the `{ registrants: [...] }` form shape. */
+-const reg = (registrant: unknown) => ({ registrants: [registrant] });
+-
+-/**
+- * A copy of `record` with `key` ABSENT (deleted), modelling how a browser form
+- * OMITS an unsubmitted field — distinct from an explicit `undefined` value. The
+- * distinction is load-bearing for a field whose schema carries only an
+- * `annotateKey({ messageMissingKey })` and no node-level relabel (the `merch`
+- * array): an absent key emits the real `messageMissingKey`, whereas a
+- * present-`undefined` hits a raw `InvalidType` ("Expected array, got undefined")
+- * that no translation key labels — an out-of-form payload the live form can never
+- * produce. "Missing" in the corpus therefore means key-absent.
+- */
+-const without = (record: Record<string, unknown>, key: string) => {
+-  const { [key]: _omitted, ...rest } = record;
+-  return rest;
+-};
+-
+-const corpus: Array<{ label: string; payload: unknown }> = [
+-  // Valid submissions.
+-  { label: 'valid attendee', payload: reg(attendee()) },
+-  { label: 'valid exhibitor', payload: reg(exhibitor()) },
+-  {
+-    label: 'valid attendee with parent (minor) + volunteer flags',
+-    payload: reg(
+-      attendee({
+-        parent: { name: 'Mum', email: 'mum@x.co', phone: '5' },
+-        volunteer: { songLeader: 'on', musician: 'on', instrument: 'piano' },
+-        dietaryRestrictions: 'none',
+-        extra: {
+-          howDidYouHear: 'friend',
+-          whyAreYouAttending: 'growth',
+-          whatAreYouExcitedAbout: 'seminars',
+-          firstTimeAttending: 'true',
+-          church: 'First',
+-          merch: ['t-shirt', 'hoodie'],
+-          other: 'note',
+-          tos: 'on',
+-        },
+-      }),
+-    ),
+-  },
+-  // Whole registrants array / field missing.
+-  { label: 'registrants missing', payload: {} },
+-  { label: 'empty registrant', payload: reg({}) },
+-  // Discriminator: missing + off-list + invalid-type.
+-  {
+-    label: 'type missing',
+-    payload: reg({ name: 'Ada', email: 'a@b.co', phone: '5' }),
+-  },
+-  {
+-    label: 'type off-list',
+-    payload: reg({ type: 'bogus', name: 'Ada', email: 'a@b.co', phone: '5' }),
+-  },
+-  {
+-    label: 'type array (invalid-type)',
+-    payload: reg(attendee({ type: ['attendee', 'exhibitor'] })),
+-  },
+-  // Bare exhibitor — every per-type requirement fires. (Bare attendee carries the
+-  // wholly-absent `extra` group, whose anchor field is the one pinned delta, so it
+-  // lives in `absentExtraCorpus` below, not the blanket key-set corpus.)
+-  {
+-    label: 'bare exhibitor',
+-    payload: reg({ type: 'exhibitor', name: 'Acme', email: 'a@b.co', phone: '5' }),
+-  },
+-  // Shared fields: empty / absent / invalid-type.
+-  { label: 'name empty', payload: reg(attendee({ name: '' })) },
+-  { label: 'name missing', payload: reg(attendee({ name: undefined })) },
+-  { label: 'name array', payload: reg(attendee({ name: ['a', 'b'] })) },
+-  { label: 'phone empty', payload: reg(attendee({ phone: '' })) },
+-  { label: 'phone missing', payload: reg(without(attendee(), 'phone')) },
+-  { label: 'phone array', payload: reg(attendee({ phone: ['a', 'b'] })) },
+-  { label: 'email empty', payload: reg(attendee({ email: '' })) },
+-  { label: 'email missing', payload: reg(without(attendee(), 'email')) },
+-  { label: 'email malformed', payload: reg(attendee({ email: 'not-an-email' })) },
+-  { label: 'email array', payload: reg(attendee({ email: ['a', 'b'] })) },
+-  // Attendee literal / boolean / array fields.
+-  { label: 'gender off-list', payload: reg(attendee({ gender: 'other' })) },
+-  { label: 'gender missing', payload: reg(attendee({ gender: undefined })) },
+-  { label: 'meals off-token', payload: reg(attendee({ meals: 'maybe' })) },
+-  { label: 'meals missing', payload: reg(attendee({ meals: undefined })) },
+-  { label: 'meals on', payload: reg(attendee({ meals: 'on' })) },
+-  { label: 'meals false', payload: reg(attendee({ meals: 'false' })) },
+-  { label: 'outreach off-list', payload: reg(attendee({ outreach: ['bogus'] })) },
+-  { label: 'outreach missing', payload: reg(attendee({ outreach: undefined })) },
+-  { label: 'dateOfBirth missing', payload: reg(attendee({ dateOfBirth: undefined })) },
+-  { label: 'dateOfBirth empty', payload: reg(attendee({ dateOfBirth: '' })) },
+-  // Nested extra group: present-but-invalid sub-fields. (Wholly-absent `extra` is
+-  // the pinned anchor delta — see `absentExtraCorpus`.)
+-  {
+-    label: 'extra.tos absent',
+-    payload: reg(
+-      attendee({ extra: { ...attendee().extra, tos: undefined } }),
+-    ),
+-  },
+-  {
+-    label: 'extra.tos off-token',
+-    payload: reg(attendee({ extra: { ...attendee().extra, tos: 'maybe' } })),
+-  },
+-  {
+-    label: 'extra.howDidYouHear empty',
+-    payload: reg(
+-      attendee({ extra: { ...attendee().extra, howDidYouHear: '' } }),
+-    ),
+-  },
+-  {
+-    label: 'extra.whyAreYouAttending missing',
+-    payload: reg(
+-      attendee({ extra: without(attendee().extra, 'whyAreYouAttending') }),
+-    ),
+-  },
+-  {
+-    label: 'extra.whatAreYouExcitedAbout missing',
+-    payload: reg(
+-      attendee({ extra: without(attendee().extra, 'whatAreYouExcitedAbout') }),
+-    ),
+-  },
+-  {
+-    label: 'extra.firstTimeAttending missing',
+-    payload: reg(
+-      attendee({ extra: without(attendee().extra, 'firstTimeAttending') }),
+-    ),
+-  },
+-  {
+-    label: 'extra.firstTimeAttending on',
+-    payload: reg(
+-      attendee({ extra: { ...attendee().extra, firstTimeAttending: 'on' } }),
+-    ),
+-  },
+-  {
+-    label: 'extra.firstTimeAttending off-token',
+-    payload: reg(
+-      attendee({
+-        extra: { ...attendee().extra, firstTimeAttending: 'maybe' },
+-      }),
+-    ),
+-  },
+-  {
+-    label: 'extra.merch missing',
+-    payload: reg(attendee({ extra: without(attendee().extra, 'merch') })),
+-  },
+-  {
+-    label: 'extra.merch off-list',
+-    payload: reg(attendee({ extra: { ...attendee().extra, merch: ['bogus'] } })),
+-  },
+-  // extra.other carries the key-must-be-present, empty-allowed contract (oracle
+-  // `OptionalText`, engine `optionalText` `requirePresent: true`): an absent
+-  // `other` inside a PRESENT `extra` emits `registration.form.other.required`
+-  // (this is the case BLOCKING #1's regression masked — the engine wrongly
+-  // accepted it before `requirePresent`); a present non-string is invalid; an
+-  // empty string is valid (covered by `valid attendee`, whose `other: ''`).
+-  {
+-    label: 'extra.other absent (present extra)',
+-    payload: reg(attendee({ extra: without(attendee().extra, 'other') })),
+-  },
+-  {
+-    label: 'extra.other array (invalid-type)',
+-    payload: reg(
+-      attendee({ extra: { ...attendee().extra, other: ['a', 'b'] } }),
+-    ),
+-  },
+-  // Optional groups present-but-invalid.
+-  {
+-    label: 'parent present, inner required empty',
+-    payload: reg(
+-      attendee({ parent: { name: '', email: '', phone: '' } }),
+-    ),
+-  },
+-  {
+-    label: 'volunteer present, flag off-token',
+-    payload: reg(attendee({ volunteer: { songLeader: 'maybe' } })),
+-  },
+-  // Volunteer optional flags across the absent / on / true / false boolean-token
+-  // matrix (the plan's "volunteer optional-flag absent/on/true/false"). Each token
+-  // is a VALID submission (absent = unchecked, `on`/`true` = checked-true,
+-  // `false` = checked-false) — the oracle's `OptionalFlag` (`optionalKey` +
+-  // `StringToBoolean`) and the engine's `optional: true checkboxBoolean` must
+-  // decode all four identically.
+-  {
+-    label: 'volunteer flag absent (whole group present, flag omitted)',
+-    payload: reg(attendee({ volunteer: { musician: 'on' } })),
+-  },
+-  {
+-    label: 'volunteer flag on',
+-    payload: reg(attendee({ volunteer: { songLeader: 'on' } })),
+-  },
+-  {
+-    label: 'volunteer flag true',
+-    payload: reg(attendee({ volunteer: { songLeader: 'true' } })),
+-  },
+-  {
+-    label: 'volunteer flag false',
+-    payload: reg(attendee({ volunteer: { songLeader: 'false' } })),
+-  },
+-  {
+-    label: 'volunteer group absent entirely',
+-    payload: reg(attendee({ volunteer: undefined })),
+-  },
+-  // Genuinely-optional text fields (oracle `OptionalString` =
+-  // `Schema.optional(String)`, engine `optionalText` WITHOUT `requirePresent`):
+-  // both an ABSENT key AND an explicit `undefined` are VALID (emit nothing) — the
+-  // counterpart to `extra.other`'s key-must-be-present contract, proving the two
+-  // `optionalText` behaviours do NOT collapse (BLOCKING #1). The explicit-`undefined`
+-  // case additionally pins that the engine uses `Schema.optional` (accepts
+-  // `undefined`), not `Schema.optionalKey` (rejects it) — the divergence the
+-  // genuinely-optional fields exposed.
+-  {
+-    label: 'dietaryRestrictions explicit undefined (valid)',
+-    payload: reg(attendee({ dietaryRestrictions: undefined })),
+-  },
+-  {
+-    label: 'dietaryRestrictions absent (valid)',
+-    payload: reg(without(attendee(), 'dietaryRestrictions')),
+-  },
+-  {
+-    label: 'extra.church absent (valid)',
+-    payload: reg(attendee({ extra: without(attendee().extra, 'church') })),
+-  },
+-  {
+-    label: 'volunteer.instrument absent (valid)',
+-    payload: reg(attendee({ volunteer: { songLeader: 'on' } })),
+-  },
+-  // Exhibitor fields.
+-  { label: 'exhibitor synopsis missing', payload: reg(exhibitor({ synopsis: undefined })) },
+-  { label: 'exhibitor website missing', payload: reg(exhibitor({ website: undefined })) },
+-  { label: 'exhibitor website unparseable', payload: reg(exhibitor({ website: 'not a url' })) },
+-  { label: 'exhibitor company missing', payload: reg(exhibitor({ company: undefined })) },
+-];
+-
+-// The two cases carrying a WHOLLY-ABSENT `extra` group — the one pinned anchor
+-// delta (oracle anchors at `extra.tos`, engine at `extra.howDidYouHear`). Decoded
+-// output is still identical (both fail); only the absent-group anchor field
+-// differs, and both anchor a real required `extra.*` key on an out-of-form edge.
+-const absentExtraCorpus: Array<{ label: string; payload: unknown }> = [
+-  {
+-    label: 'bare attendee',
+-    payload: reg({ type: 'attendee', name: 'Ada', email: 'a@b.co', phone: '5' }),
+-  },
+-  { label: 'extra absent', payload: reg(attendee({ extra: undefined })) },
+-];
+-
+-describe('registration equivalence harness (oracle vs engine)', () => {
+-  // Decoded output is identical across BOTH corpora (the absent-extra cases decode
+-  // to a failure in both engines — the anchor delta is an error-PATH detail, not a
+-  // decoded-value one).
+-  test.each([...corpus, ...absentExtraCorpus])(
+-    '$label — identical decoded output',
+-    ({ payload }) => {
+-      const o = decodedOf(parseSchema(OracleRegistrationSchema, payload));
+-      const e = decodedOf(decodeEngine(payload));
+-      expect(e).toEqual(o);
+-    },
+-  );
+-
+-  test.each(corpus)(
+-    '$label — identical emitted TranslationKey sets (name + key, order-independent)',
+-    ({ payload }) => {
+-      expect(engineIssues(payload)).toEqual(oracleIssues(payload));
+-    },
+-  );
+-
+-  test.each(corpus)(
+-    '$label — identical RENDERED error strings (EN + FR)',
+-    ({ payload }) => {
+-      expect(renderIssues(engineIssues(payload), 'en')).toEqual(
+-        renderIssues(oracleIssues(payload), 'en'),
+-      );
+-      expect(renderIssues(engineIssues(payload), 'fr')).toEqual(
+-        renderIssues(oracleIssues(payload), 'fr'),
+-      );
+-    },
+-  );
+-
+-  test('every emitted key (both engines) is a real translation key', () => {
+-    for (const { payload } of [...corpus, ...absentExtraCorpus]) {
+-      for (const issues of [oracleIssues(payload), engineIssues(payload)]) {
+-        for (const { key } of issues) {
+-          expect({ key, isKey: isTranslationKey(key) }).toEqual({
+-            key,
+-            isKey: true,
+-          });
+-        }
+-      }
+-    }
+-  });
+-
+-  // No intentional key divergence on the main corpus: oracle and engine emit the
+-  // SAME keys (not merely the same rendered strings). Pinned so a future engine
+-  // change cannot silently introduce an alias the way contact's `name` did.
+-  test('noKeyDivergence: oracle and engine emit identical keys across the main corpus', () => {
+-    for (const { payload } of corpus) {
+-      expect(engineIssues(payload)).toEqual(oracleIssues(payload));
+-    }
+-  });
+-
+-  // The ONE pinned anchor delta, contained to the wholly-absent `extra` group on
+-  // an attendee (an out-of-form edge — the form always renders `extra` with
+-  // defaults for an attendee). The oracle anchors the absent group at `extra.tos`;
+-  // the engine's generic rule anchors at the group's first presence-requirable
+-  // field, `extra.howDidYouHear`. Both anchor a real required `extra.*` key in the
+-  // SAME LOCALE STRING family; the delta can never widen beyond this group.
+-  test('absentExtraAnchorDelta: oracle anchors extra.tos, engine extra.howDidYouHear', () => {
+-    for (const { payload } of absentExtraCorpus) {
+-      const o = oracleIssues(payload);
+-      const e = engineIssues(payload);
+-      // The oracle's absent-extra issue is exactly `extra.tos`.
+-      const oracleExtra = o.filter((i) => i.name.includes('.extra.'));
+-      const engineExtra = e.filter((i) => i.name.includes('.extra.'));
+-      expect(oracleExtra).toEqual([
+-        {
+-          name: 'registrants[0].extra.tos',
+-          key: 'registration.form.tos.required',
+-        },
+-      ]);
+-      expect(engineExtra).toEqual([
+-        {
+-          name: 'registrants[0].extra.howDidYouHear',
+-          key: 'registration.form.how-did-you-hear.required',
+-        },
+-      ]);
+-      // The delta is contained to the `extra` anchor: every NON-extra issue is
+-      // identical between oracle and engine.
+-      const stripExtra = (issues: Issue[]) =>
+-        issues.filter((i) => !i.name.includes('.extra.'));
+-      expect(stripExtra(e)).toEqual(stripExtra(o));
+-    }
+-  });
+-});
+-
+-// ---------------------------------------------------------------------------
+-// Render-level field-name + default-value parity (plan 6.5 point (c))
+-// ---------------------------------------------------------------------------
+-
+-type GroupishField = {
+-  readonly _tag: string;
+-  readonly name: string;
+-  readonly optional?: boolean;
+-  readonly fields?: ReadonlyArray<unknown>;
+-};
+-
+-/**
+- * Collect every field name a list declares, by group path.
+- *
+- * `descendOptional` chooses how `optional: true` groups (the minors-only
+- * `parent`, the opt-in `volunteer`) are treated:
+- *   - `false` (RENDER view): an optional group is NOT descended into — the live
+- *     form renders its inner controls only when the group is shown, so at the
+- *     top-level render only the group NAME could appear. A non-optional group
+- *     (`extra`, always rendered for an attendee) IS descended so each inner
+- *     control's submit-name is pinned.
+- *   - `true` (DEFAULT-VALUE view): every group is descended, including the optional
+- *     ones — the form's `makeDefaultRegistrant` seeds a key for EVERY field name
+- *     (including `volunteer.cameraOperator`, `volunteer.photographer`), so the
+- *     default object must carry each. This is the `derive-dont-sync` check: the
+- *     conform `name={volunteer.cameraOperator.name}` accessors the form renders are
+- *     keyed off this default, so a default that omits a name (or a name the default
+- *     omits) is the drift this test forbids.
+- */
+-const collectNames = (
+-  fields: ReadonlyArray<GroupishField>,
+-  descendOptional: boolean,
+-  prefix = '',
+-): string[] =>
+-  fields.flatMap((field) =>
+-    field._tag === 'nestedGroup' &&
+-    field.fields &&
+-    (descendOptional || field.optional !== true)
+-      ? collectNames(
+-          field.fields as ReadonlyArray<GroupishField>,
+-          descendOptional,
+-          `${prefix}${field.name}.`,
+-        )
+-      : [`${prefix}${field.name}`],
+-  );
+-
+-/**
+- * Render the live `<RegistrationForm>` to an HTML string (the real render path —
+- * `react-router`'s `Form` + conform `useForm` + the bespoke shell), and return the
+- * de-duplicated set of `name="…"` submit-attributes it emits.
+- *
+- * SSR renders the discriminator + common fields + the EXHIBITOR branch (the
+- * server snapshot of `useFormData`'s live `type` read is empty, so the
+- * `type === 'attendee' ? … : …` shell takes the exhibitor branch). This is the
+- * slice of the render path a one-shot SSR can exercise; it pins that the rendered
+- * exhibitor submit-names match the definition graph with NO missing and NO extra
+- * name — exactly the class of bug a hand-copied default could not catch (a control
+- * with the wrong `name`, or a control with no `name` at all).
+- */
+-const renderedNames = (): Set<string> => {
+-  const Stub = createRoutesStub([
+-    {
+-      id: 'root',
+-      path: ':lang?',
+-      Component: () => (
+-        <LocalizationProvider translation={root.en}>
+-          <RegistrationForm year={2026} />
+-        </LocalizationProvider>
+-      ),
+-    },
+-  ]);
+-  const html = renderToString(
+-    <Stub initialEntries={['/']} hydrationData={{ loaderData: { root: {} } }} />,
+-  );
+-  return new Set(
+-    [...html.matchAll(/name="([^"]+)"/g)].map((match) => match[1] ?? ''),
+-  );
+-};
+-
+-describe('registration render-level field-name + default-value parity', () => {
+-  // (c) RENDER parity (plan 6.5 point (c)): the LIVE form is rendered and its
+-  // emitted submit-names are asserted against the definition's graph — not an
+-  // inlined hand-copied object. This is the only path registration exercises in
+-  // prod (settled #9), so the rendered names ARE the validated graph or the form
+-  // silently drops/mis-keys a field (as the pre-existing `photographer`/
+-  // `cameraOperator` mix-up did — a control with the wrong name + a control with no
+-  // name, invisible to a default-keys-only check).
+-  test('the rendered exhibitor branch submit-names match the definition exactly', () => {
+-    const names = renderedNames();
+-    const exhibitorBranch = defaultRegistrationForm.variant?.variants.find(
+-      (v) => v.value === 'exhibitor',
+-    );
+-    // The names SSR emits for one registrant: the array field itself, the
+-    // discriminator, the common fields, and the exhibitor branch fields — each
+-    // prefixed `registrants[0].` by conform.
+-    const expected = new Set([
+-      'registrants[0]',
+-      `registrants[0].${defaultRegistrationForm.variant?.discriminator}`,
+-      ...collectNames(defaultRegistrationForm.fields, false).map(
+-        (name) => `registrants[0].${name}`,
+-      ),
+-      ...collectNames(exhibitorBranch?.fields ?? [], false).map(
+-        (name) => `registrants[0].${name}`,
+-      ),
+-    ]);
+-    expect([...names].sort()).toEqual([...expected].sort());
+-  });
+-
+-  // (c) DEFAULT-VALUE parity, derived (`derive-dont-sync`): the form's REAL
+-  // `makeDefaultRegistrant` (imported, not a copy) must carry a key for every
+-  // definition field name the form renders a `name=` for. The form keys its
+-  // `name={volunteer.X.name}` / `name={fields.X.name}` accessors off this default,
+-  // so a missing key here is a missing/orphaned rendered name there.
+-  //
+-  // An `optional: true` group the default leaves ABSENT (`parent: undefined` — the
+-  // minors-only group, materialized only once a minor is shown) is legitimately not
+-  // descended: its inner controls don't render until the group is present. A
+-  // `volunteer` group the default DOES materialize MUST carry every inner name —
+-  // asserted by `volunteerNamesSeeded` below; here we require presence for every
+-  // name down to the first absent optional-group boundary.
+-  test('every rendered attendee field name resolves to a default-value key', () => {
+-    const defaultRegistrant = makeDefaultRegistrant() as Record<string, unknown>;
+-    const attendeeBranch = defaultRegistrationForm.variant?.variants.find(
+-      (v) => v.value === 'attendee',
+-    );
+-    expect(attendeeBranch).toBeDefined();
+-    const names = collectNames(
+-      [...defaultRegistrationForm.fields, ...(attendeeBranch?.fields ?? [])],
+-      true,
+-    );
+-    for (const name of names) {
+-      const segments = name.split('.');
+-      let cursor: unknown = defaultRegistrant;
+-      for (const segment of segments) {
+-        // An absent optional group (default `undefined`) stops the descent — its
+-        // inner names need no default key until the group materializes.
+-        if (cursor === undefined) break;
+-        expect({
+-          name,
+-          present:
+-            cursor !== null &&
+-            typeof cursor === 'object' &&
+-            segment in (cursor as Record<string, unknown>),
+-        }).toEqual({ name, present: true });
+-        cursor = (cursor as Record<string, unknown>)[segment];
+-      }
+-    }
+-  });
+-
+-  // The `volunteer` group the default materializes MUST seed every inner name the
+-  // definition declares — the specific regression the pre-existing
+-  // `cameraOperator`/`photographer` render bug exposed (a definition name with no
+-  // matching rendered `name=`). Derived from the definition, no hand-copied list.
+-  test('volunteerNamesSeeded: every volunteer definition name is a default key', () => {
+-    const defaultRegistrant = makeDefaultRegistrant() as Record<string, unknown>;
+-    const volunteerGroup = defaultRegistrationForm.variant?.variants
+-      .find((v) => v.value === 'attendee')
+-      ?.fields.find(
+-        (f) => f._tag === 'nestedGroup' && f.name === ('volunteer' as never),
+-      );
+-    expect(volunteerGroup?._tag).toBe('nestedGroup');
+-    const innerFields =
+-      volunteerGroup?._tag === 'nestedGroup' ? volunteerGroup.fields : [];
+-    const seeded = defaultRegistrant['volunteer'] as Record<string, unknown>;
+-    for (const inner of innerFields) {
+-      expect({ name: inner.name, seeded: inner.name in seeded }).toEqual({
+-        name: inner.name,
+-        seeded: true,
+-      });
+-    }
+-  });
+-
+-  // The default carries NO key the definition doesn't declare — a stale key in the
+-  // default (a removed field) would render an orphan name. Pin the symmetry.
+-  test('the default registrant declares no key absent from the definition graph', () => {
+-    const defaultRegistrant = makeDefaultRegistrant() as Record<string, unknown>;
+-    const attendeeBranch = defaultRegistrationForm.variant?.variants.find(
+-      (v) => v.value === 'attendee',
+-    );
+-    const graphNames = new Set(
+-      collectNames(
+-        [...defaultRegistrationForm.fields, ...(attendeeBranch?.fields ?? [])],
+-        true,
+-      ),
+-    );
+-    const collectDefaultLeaves = (
+-      object: Record<string, unknown>,
+-      prefix = '',
+-    ): string[] =>
+-      Object.entries(object).flatMap(([key, value]) =>
+-        value !== null &&
+-        typeof value === 'object' &&
+-        !Array.isArray(value)
+-          ? collectDefaultLeaves(value as Record<string, unknown>, `${prefix}${key}.`)
+-          : [`${prefix}${key}`],
+-      );
+-    // `parent` defaults to `undefined` (a leaf in the default), but the definition
+-    // descends it into `parent.name`/`…email`/`…phone`; so a default leaf is "known"
+-    // if it is a definition name OR a PREFIX of one (an un-materialized optional
+-    // group). Any default leaf that is neither is an orphan the form would render
+-    // with no validated counterpart.
+-    const isKnown = (leaf: string) =>
+-      graphNames.has(leaf) ||
+-      [...graphNames].some((name) => name.startsWith(`${leaf}.`));
+-    for (const leaf of collectDefaultLeaves(defaultRegistrant)) {
+-      expect({ leaf, known: isKnown(leaf) }).toEqual({ leaf, known: true });
+-    }
+-  });
+-
+-  test('the exhibitor branch names are exactly synopsis/website/company', () => {
+-    const exhibitorBranch = defaultRegistrationForm.variant?.variants.find(
+-      (v) => v.value === 'exhibitor',
+-    );
+-    expect(collectNames(exhibitorBranch?.fields ?? [], false).sort()).toEqual(
+-      ['company', 'synopsis', 'website'].sort(),
+-    );
+-  });
+-});
+diff --git a/app/lib/forms/equivalence.volunteer.test.ts b/app/lib/forms/equivalence.volunteer.test.ts
+deleted file mode 100644
+index 9a4cf2f..0000000
+--- a/app/lib/forms/equivalence.volunteer.test.ts
++++ /dev/null
+@@ -1,416 +0,0 @@
+-import { describe, expect, test } from 'bun:test';
+-import { Effect, Result, Schema } from 'effect';
+-
+-import { defaultVolunteerForm } from '~/lib/content/pages/defaults';
+-import { parseSchema } from '~/lib/effect/form-schema';
+-import { isTranslationKey } from '~/lib/effect/form-schema.test-helper';
+-import { root } from '~/lib/localization/translations';
+-
+-import { decodeForm, definitionToSchema } from './decode';
+-
+-/**
+- * Branch 6.4 — the volunteer equivalence harness (ADR 0007, settled #6).
+- *
+- * Volunteer is the SECOND form to migrate onto the structural engine, on the same
+- * de-risking harness contact (6.3) introduced and registration (6.5) will reuse:
+- * the hand-tuned volunteer schema is kept here as an ORACLE while the engine's
+- * data-driven `defaultVolunteerForm` definition runs the same corpus, and the two
+- * are asserted equivalent over a FULL failure matrix (valid + every invalid
+- * variant) — `(a)` identical decoded output, `(b)` identical emitted
+- * `TranslationKey` sets per field path, `(c)` identical EN+FR rendered strings.
+- *
+- * The oracle is the verbatim transcription of the pre-migration `volunteer.tsx`
+- * schema (the `method` discriminator as a `Literals` field, the per-method
+- * struct-level requirement filter, the always-required `age`/`location`/
+- * `background`/`why` text fields, and the vestigial `positions` array). It lives
+- * ONLY in this harness now — the route carries no hand-written schema
+- * (`subtract-before-you-add`); the oracle is the behavioural spec the engine is
+- * proven against, and is deleted once every form migration is green (6.6).
+- *
+- * TWO intentional, pinned deltas:
+- *
+- *   1. `email` FORMAT validation (a deliberate correctness tightening, NOT a
+- *      render-identical alias): the pre-migration `volunteer.tsx` `Email` checked
+- *      only `isMinLength(1)` — it accepted a malformed address like
+- *      `"not-an-email"` as valid, a pre-existing drift from `contact.tsx`, whose
+- *      `Email` DID validate the `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` shape. The
+- *      structural engine's `email` kind validates format uniformly (one decoder,
+- *      `derive-dont-sync`), so volunteer now REJECTS a malformed email with
+- *      `volunteer.form.email.error` — exactly contact's behaviour. The engine is
+- *      a strict SUPERSET of the oracle on the email field: every payload the
+- *      oracle accepts with a well-formed email the engine also accepts
+- *      identically, and the only payloads where they differ are ones with a
+- *      visibly-malformed email value, which the engine correctly rejects
+- *      (`make-impossible-states-unrepresentable`: a malformed value in an email
+- *      field is not representable as valid). This is the kind of consolidation
+- *      ADR 0007's structural engine exists to make — it is pinned EXPLICITLY by
+- *      `emailFormatTightening` below so it can never widen to any other field or
+- *      path, and the malformed/empty-email corpus cases are routed to that pin
+- *      rather than asserted blanket-equivalent.
+- *   2. `positions`: the oracle decodes an ABSENT `positions` to `[]` (a
+- *      `withDecodingDefault`); the engine has NO `positions` field (its options
+- *      are dynamic loader data, never a closed `OptionList`, so the never-
+- *      rendered, never-submitted multi-checkbox does not fit the closed
+- *      `FieldKind` set — `subtract-before-you-add`). The only observable
+- *      consequence is the decoded default key, normalized away below and pinned
+- *      by `decodedDeltaIsPositionsOnly`; the migrated route's `notify` keeps the
+- *      always-empty `Positions:` notification line byte-identical.
+- *
+- * The always-required text fields (`name`/`age`/`location`/`background`/`why`)
+- * emit their single `.required` key for the empty / absent / invalid-type cases
+- * alike in BOTH oracle and engine — no divergence there (unlike contact's `name`,
+- * whose oracle carried a separate `.error` key).
+- */
+-
+-// ---------------------------------------------------------------------------
+-// The oracle — verbatim from the pre-migration volunteer.tsx schema
+-// ---------------------------------------------------------------------------
+-
+-const Name = Schema.String.annotate({ message: 'volunteer.form.name.required' })
+-  .check(Schema.isMinLength(1, { message: 'volunteer.form.name.required' }))
+-  .annotateKey({ messageMissingKey: 'volunteer.form.name.required' });
+-const Email = Schema.String.annotate({
+-  message: 'volunteer.form.email.error',
+-}).check(Schema.isMinLength(1, { message: 'volunteer.form.email.required' }));
+-const Phone = Schema.String.check(
+-  Schema.isMinLength(1, { message: 'volunteer.form.phone.required' }),
+-);
+-const Age = Schema.String.annotate({ message: 'volunteer.form.age.required' })
+-  .check(Schema.isMinLength(1, { message: 'volunteer.form.age.required' }))
+-  .annotateKey({ messageMissingKey: 'volunteer.form.age.required' });
+-const Location = Schema.String.annotate({
+-  message: 'volunteer.form.location.required',
+-})
+-  .check(Schema.isMinLength(1, { message: 'volunteer.form.location.required' }))
+-  .annotateKey({ messageMissingKey: 'volunteer.form.location.required' });
+-const Background = Schema.String.annotate({
+-  message: 'volunteer.form.background.required',
+-})
+-  .check(
+-    Schema.isMinLength(1, { message: 'volunteer.form.background.required' }),
+-  )
+-  .annotateKey({ messageMissingKey: 'volunteer.form.background.required' });
+-const Why = Schema.String.annotate({ message: 'volunteer.form.why.required' })
+-  .check(Schema.isMinLength(1, { message: 'volunteer.form.why.required' }))
+-  .annotateKey({ messageMissingKey: 'volunteer.form.why.required' });
+-const Positions = Schema.optionalKey(Schema.Array(Schema.String)).pipe(
+-  Schema.withDecodingDefault(Effect.succeed([] as string[])),
+-);
+-const Method = Schema.Literals(['email', 'phone', 'both'])
+-  .annotate({ message: 'volunteer.form.method.required' })
+-  .annotateKey({ messageMissingKey: 'volunteer.form.method.required' });
+-
+-const oracle = Schema.Struct({
+-  name: Name,
+-  method: Method,
+-  age: Age,
+-  location: Location,
+-  background: Background,
+-  why: Why,
+-  positions: Positions,
+-  email: Schema.optional(Email).annotate({
+-    message: 'volunteer.form.email.error',
+-  }),
+-  phone: Schema.optional(Phone).annotate({
+-    message: 'volunteer.form.phone.required',
+-  }),
+-}).check(
+-  Schema.makeFilter((value) => {
+-    const issues: Array<{ path: ReadonlyArray<PropertyKey>; issue: string }> =
+-      [];
+-    if (
+-      (value.method === 'email' || value.method === 'both') &&
+-      value.email === undefined
+-    ) {
+-      issues.push({ path: ['email'], issue: 'volunteer.form.email.required' });
+-    }
+-    if (
+-      (value.method === 'phone' || value.method === 'both') &&
+-      value.phone === undefined
+-    ) {
+-      issues.push({ path: ['phone'], issue: 'volunteer.form.phone.required' });
+-    }
+-    return issues.length === 0 ? undefined : issues;
+-  }),
+-);
+-
+-// ---------------------------------------------------------------------------
+-// Harness helpers
+-// ---------------------------------------------------------------------------
+-
+-/** One validation issue: the conform field name it attaches to + its message key. */
+-type Issue = { name: string; key: string };
+-
+-// The COMPLETE, order-independent error set a form surfaces — collected via the
+-// client Standard-Schema path (`toStandardSchemaV1`), which gathers EVERY issue
+-// (unlike Effect's default server decode, which aborts on the first failing struct
+-// field). This is the meaningful behavioural equivalence: it is exactly what
+-// `useForm`'s onSubmit validation renders to the user, and it is independent of the
+-// field DECLARATION ORDER that would otherwise make the single server-side
+-// abort-first error differ between the oracle and the engine on an all-fields-
+-// missing payload — a difference the user never sees, since the client blocks
+-// submission showing the identical full set. The server path is still asserted for
+-// decoded success output below.
+-const issuesOf =
+-  <A, I>(schema: Schema.Codec<A, I, never, never>) =>
+-  (payload: unknown): Issue[] => {
+-    const result = Schema.toStandardSchemaV1(schema)['~standard'].validate(
+-      payload,
+-    ) as {
+-      issues?: ReadonlyArray<{
+-        message: string;
+-        path?: ReadonlyArray<PropertyKey | { key: PropertyKey }>;
+-      }>;
+-    };
+-    return (result.issues ?? [])
+-      .map((issue) => {
+-        const segments: Array<string | number> = [];
+-        for (const segment of issue.path ?? []) {
+-          const value =
+-            typeof segment === 'object' && segment !== null && 'key' in segment
+-              ? segment.key
+-              : segment;
+-          if (typeof value === 'string' || typeof value === 'number') {
+-            segments.push(value);
+-          }
+-        }
+-        return { name: segments.join('.'), key: issue.message };
+-      })
+-      .sort((a, b) =>
+-        `${a.name}|${a.key}`.localeCompare(`${b.name}|${b.key}`),
+-      );
+-  };
+-
+-const engineCodec = definitionToSchema(defaultVolunteerForm);
+-
+-const oracleIssues = issuesOf(oracle);
+-const engineIssues = issuesOf(
+-  engineCodec as Schema.Codec<unknown, unknown, never, never>,
+-);
+-
+-/** Render each issue's key to its locale string (the alias-tolerant comparison). */
+-const renderIssues = (issues: Issue[], locale: 'en' | 'fr'): Issue[] =>
+-  issues.map((issue) => ({
+-    name: issue.name,
+-    key: issue.key in root[locale] ? root[locale][issue.key as never] : issue.key,
+-  }));
+-
+-/**
+- * The decoded SUCCESS value, or a `Failure` marker, for cross-engine compare —
+- * with the vestigial `positions` key normalized away (the one pinned decoded
+- * delta: the oracle emits `positions: []`, the engine omits it). The normalized
+- * comparison proves every OTHER decoded field is byte-identical;
+- * `decodedDeltaIsPositionsOnly` pins that the delta is exactly `positions`.
+- */
+-const decodedOf = (
+-  result: Result.Result<unknown, unknown>,
+-): { ok: true; value: unknown } | { ok: false } => {
+-  if (!Result.isSuccess(result)) return { ok: false };
+-  const value = result.success;
+-  if (value && typeof value === 'object') {
+-    const { positions: _positions, ...rest } = value as Record<string, unknown>;
+-    return { ok: true, value: rest };
+-  }
+-  return { ok: true, value };
+-};
+-
+-// ---------------------------------------------------------------------------
+-// The corpus — valid + every invalid variant
+-// ---------------------------------------------------------------------------
+-
+-const valid = (overrides: Record<string, unknown> = {}) => ({
+-  method: 'email',
+-  name: 'Ada',
+-  email: 'ada@example.com',
+-  age: '30',
+-  location: 'Toronto',
+-  background: 'engineer',
+-  why: 'to help',
+-  ...overrides,
+-});
+-
+-const corpus: Array<{ label: string; payload: unknown }> = [
+-  // Valid submissions, one per method.
+-  { label: 'valid email-method', payload: valid() },
+-  {
+-    label: 'valid phone-method',
+-    payload: {
+-      method: 'phone',
+-      name: 'Ada',
+-      phone: '5',
+-      age: '30',
+-      location: 'Toronto',
+-      background: 'engineer',
+-      why: 'to help',
+-    },
+-  },
+-  {
+-    label: 'valid both-method',
+-    payload: valid({ method: 'both', phone: '5' }),
+-  },
+-  // Everything missing.
+-  { label: 'empty payload', payload: {} },
+-  // Each required field absent independently (the key omitted — the form-data
+-  // shape a never-touched field POSTs).
+-  {
+-    label: 'name missing',
+-    payload: valid({ name: undefined }),
+-  },
+-  { label: 'age missing', payload: valid({ age: undefined }) },
+-  { label: 'location missing', payload: valid({ location: undefined }) },
+-  { label: 'background missing', payload: valid({ background: undefined }) },
+-  { label: 'why missing', payload: valid({ why: undefined }) },
+-  {
+-    label: 'method missing',
+-    payload: valid({ method: undefined }),
+-  },
+-  // Off-list method.
+-  { label: 'method off-list', payload: valid({ method: 'bogus' }) },
+-  // Each required field empty.
+-  { label: 'name empty', payload: valid({ name: '' }) },
+-  { label: 'age empty', payload: valid({ age: '' }) },
+-  { label: 'location empty', payload: valid({ location: '' }) },
+-  { label: 'background empty', payload: valid({ background: '' }) },
+-  { label: 'why empty', payload: valid({ why: '' }) },
+-  // Bad email (well-formed-but-wrong is the format pin below; here the empty
+-  // case is shared — both engines emit `.required`, plus the engine's pattern
+-  // check, asserted in `emailFormatTightening`). Phone has no format check in
+-  // either engine, so its empty case stays in the blanket corpus.
+-  { label: 'phone empty (present)', payload: valid({ method: 'phone', phone: '' }) },
+-  // Cross-field: gated targets absent.
+-  {
+-    label: 'method=email, email absent',
+-    payload: valid({ method: 'email', email: undefined }),
+-  },
+-  {
+-    label: 'method=phone, phone absent',
+-    payload: valid({ method: 'phone', email: undefined }),
+-  },
+-  {
+-    label: 'method=both, email+phone absent',
+-    payload: valid({ method: 'both', email: undefined }),
+-  },
+-  // Each `both`-gated requirement violated INDEPENDENTLY.
+-  {
+-    label: 'method=both, only email absent (phone present)',
+-    payload: valid({ method: 'both', email: undefined, phone: '5' }),
+-  },
+-  {
+-    label: 'method=both, only phone absent (email present)',
+-    payload: valid({ method: 'both' }),
+-  },
+-  // Discriminator INVALID-TYPE: `method` as an array (distinct from off-list).
+-  { label: 'method array', payload: valid({ method: ['email', 'phone'] }) },
+-  // Invalid-type (duplicate-name array) per field.
+-  { label: 'name array', payload: valid({ name: ['a', 'b'] }) },
+-  { label: 'age array', payload: valid({ age: ['a', 'b'] }) },
+-  { label: 'location array', payload: valid({ location: ['a', 'b'] }) },
+-  { label: 'background array', payload: valid({ background: ['a', 'b'] }) },
+-  { label: 'why array', payload: valid({ why: ['a', 'b'] }) },
+-  {
+-    label: 'email array',
+-    payload: valid({ method: 'both', email: ['a', 'b'], phone: '5' }),
+-  },
+-  {
+-    label: 'phone array',
+-    payload: valid({ method: 'both', phone: ['a', 'b'] }),
+-  },
+-];
+-
+-describe('volunteer equivalence harness (oracle vs engine)', () => {
+-  test.each(corpus)(
+-    '$label — identical decoded output (positions delta normalized)',
+-    ({ payload }) => {
+-      const o = decodedOf(parseSchema(oracle, payload));
+-      const e = decodedOf(decodeForm(defaultVolunteerForm, payload));
+-      expect(e).toEqual(o);
+-    },
+-  );
+-
+-  test.each(corpus)(
+-    '$label — identical emitted TranslationKey sets (name + key, order-independent)',
+-    ({ payload }) => {
+-      expect(engineIssues(payload)).toEqual(oracleIssues(payload));
+-    },
+-  );
+-
+-  test.each(corpus)(
+-    '$label — identical RENDERED error strings (EN + FR)',
+-    ({ payload }) => {
+-      expect(renderIssues(engineIssues(payload), 'en')).toEqual(
+-        renderIssues(oracleIssues(payload), 'en'),
+-      );
+-      expect(renderIssues(engineIssues(payload), 'fr')).toEqual(
+-        renderIssues(oracleIssues(payload), 'fr'),
+-      );
+-    },
+-  );
+-
+-  test('every emitted key (both engines) is a real translation key', () => {
+-    for (const { payload } of corpus) {
+-      for (const issues of [oracleIssues(payload), engineIssues(payload)]) {
+-        for (const { key } of issues) {
+-          expect({ key, isKey: isTranslationKey(key) }).toEqual({
+-            key,
+-            isKey: true,
+-          });
+-        }
+-      }
+-    }
+-  });
+-
+-  // The single pinned decoded delta: the oracle's valid decode carries a
+-  // vestigial `positions: []`; the engine omits it entirely. Pinned so the delta
+-  // can never widen beyond `positions` on any field.
+-  test('decodedDeltaIsPositionsOnly: the only decoded difference is positions', () => {
+-    const o = parseSchema(oracle, valid());
+-    const e = decodeForm(defaultVolunteerForm, valid());
+-    expect(Result.isSuccess(o)).toBe(true);
+-    expect(Result.isSuccess(e)).toBe(true);
+-    if (!Result.isSuccess(o) || !Result.isSuccess(e)) return;
+-    // The oracle has `positions`, the engine does not.
+-    expect('positions' in (o.success as Record<string, unknown>)).toBe(true);
+-    expect((o.success as Record<string, unknown>)['positions']).toEqual([]);
+-    expect('positions' in (e.success as Record<string, unknown>)).toBe(false);
+-    // Strip `positions` from the oracle → byte-identical to the engine's decode.
+-    const { positions: _positions, ...oracleWithoutPositions } =
+-      o.success as Record<string, unknown>;
+-    expect(e.success).toEqual(oracleWithoutPositions);
+-  });
+-
+-  // The deliberate `email` format tightening (delta #1): the engine validates the
+-  // email shape the pre-migration oracle did not. Pinned so it can never widen to
+-  // another field/path — the engine is a strict superset on `email` only.
+-  test('emailFormatTightening: engine rejects a malformed email the oracle accepted', () => {
+-    const malformed = valid({ email: 'not-an-email' });
+-    // Oracle accepts it (only `isMinLength(1)`) — the pre-existing volunteer drift.
+-    expect(Result.isSuccess(parseSchema(oracle, malformed))).toBe(true);
+-    // Engine rejects it on the email field with the real `.error` key — exactly
+-    // contact's behaviour now applies to volunteer (one decoder).
+-    expect(Result.isSuccess(decodeForm(defaultVolunteerForm, malformed))).toBe(
+-      false,
+-    );
+-    expect(engineIssues(malformed)).toEqual([
+-      { name: 'email', key: 'volunteer.form.email.error' },
+-    ]);
+-    // The tightening fires ONLY on the email field; every other field is valid,
+-    // so no other key appears.
+-    for (const { name } of engineIssues(malformed)) {
+-      expect(name).toBe('email');
+-    }
+-  });
+-
+-  // The shared empty-present-email case: the oracle emits only `.required`; the
+-  // engine emits `.required` (minLength) AND `.error` (the pattern check on the
+-  // empty string) — the same format-tightening, contained to `email`.
+-  test('emailFormatTightening: empty present email — engine adds the format key', () => {
+-    const emptyEmail = valid({ email: '' });
+-    expect(oracleIssues(emptyEmail)).toEqual([
+-      { name: 'email', key: 'volunteer.form.email.required' },
+-    ]);
+-    expect(engineIssues(emptyEmail)).toEqual([
+-      { name: 'email', key: 'volunteer.form.email.error' },
+-      { name: 'email', key: 'volunteer.form.email.required' },
+-    ]);
+-  });
+-});
+diff --git a/app/lib/forms/registration-form.test.tsx b/app/lib/forms/registration-form.test.tsx
+new file mode 100644
+index 0000000..01e37bc
+--- /dev/null
++++ b/app/lib/forms/registration-form.test.tsx
+@@ -0,0 +1,249 @@
++import { describe, expect, test } from 'bun:test';
++import { renderToString } from 'react-dom/server';
++import { createRoutesStub } from 'react-router';
++
++import { defaultRegistrationForm } from '~/lib/content/pages/defaults';
++import { LocalizationProvider } from '~/lib/localization/provider';
++import { root } from '~/lib/localization/translations';
++import {
++  makeDefaultRegistrant,
++  RegistrationForm,
++} from '~/routes/($lang)+/registration-form';
++
++/**
++ * Registration render-level field-name + default-value parity (registration-launch
++ * Branch 6, plan §"Riskiest commit" point (c)).
++ *
++ * What pinned the riskiest migration behaviour-preserving was the old-vs-new
++ * EQUIVALENCE HARNESS (decoded-output + emitted-`TranslationKey` parity vs the
++ * hand-tuned `registration-schema.oracle.ts`). That harness served its purpose once
++ * green and was RETIRED with the oracle in 6.6 (ADR 0007: "the oracle is removed
++ * once registration is fully migrated") — the engine's decode behaviour is now
++ * covered directly by `decode.test.ts` / `definition.test.ts`.
++ *
++ * These render-parity tests OUTLIVE the oracle: they assert the LIVE
++ * `<RegistrationForm>` (the bespoke `{ registrants: [...] }` shell, NOT the generic
++ * `FormFields` renderer that `render.test.tsx` covers) emits submit-`name=`s that
++ * match `defaultRegistrationForm`'s field graph exactly, and that the form's REAL
++ * `makeDefaultRegistrant` seeds a key for every rendered field name
++ * (`derive-dont-sync`). This is the only path registration exercises in prod
++ * (settled #9: RegFox is the live channel; the on-site form's client validate +
++ * render is what runs), so a control with the wrong `name` or no `name` — the class
++ * of bug the pre-existing `cameraOperator`/`photographer` mix-up was — is what these
++ * guard. See `docs/forms/registration-spec.md`.
++ */
++
++type GroupishField = {
++  readonly _tag: string;
++  readonly name: string;
++  readonly optional?: boolean;
++  readonly fields?: ReadonlyArray<unknown>;
++};
++
++/**
++ * Collect every field name a list declares, by group path.
++ *
++ * `descendOptional` chooses how `optional: true` groups (the minors-only
++ * `parent`, the opt-in `volunteer`) are treated:
++ *   - `false` (RENDER view): an optional group is NOT descended into — the live
++ *     form renders its inner controls only when the group is shown, so at the
++ *     top-level render only the group NAME could appear. A non-optional group
++ *     (`extra`, always rendered for an attendee) IS descended so each inner
++ *     control's submit-name is pinned.
++ *   - `true` (DEFAULT-VALUE view): every group is descended, including the optional
++ *     ones — the form's `makeDefaultRegistrant` seeds a key for EVERY field name
++ *     (including `volunteer.cameraOperator`, `volunteer.photographer`), so the
++ *     default object must carry each. This is the `derive-dont-sync` check: the
++ *     conform `name={volunteer.cameraOperator.name}` accessors the form renders are
++ *     keyed off this default, so a default that omits a name (or a name the default
++ *     omits) is the drift this test forbids.
++ */
++const collectNames = (
++  fields: ReadonlyArray<GroupishField>,
++  descendOptional: boolean,
++  prefix = '',
++): string[] =>
++  fields.flatMap((field) =>
++    field._tag === 'nestedGroup' &&
++    field.fields &&
++    (descendOptional || field.optional !== true)
++      ? collectNames(
++          field.fields as ReadonlyArray<GroupishField>,
++          descendOptional,
++          `${prefix}${field.name}.`,
++        )
++      : [`${prefix}${field.name}`],
++  );
++
++/**
++ * Render the live `<RegistrationForm>` to an HTML string (the real render path —
++ * `react-router`'s `Form` + conform `useForm` + the bespoke shell), and return the
++ * de-duplicated set of `name="…"` submit-attributes it emits.
++ *
++ * SSR renders the discriminator + common fields + the EXHIBITOR branch (the
++ * server snapshot of `useFormData`'s live `type` read is empty, so the
++ * `type === 'attendee' ? … : …` shell takes the exhibitor branch). This is the
++ * slice of the render path a one-shot SSR can exercise; it pins that the rendered
++ * exhibitor submit-names match the definition graph with NO missing and NO extra
++ * name — exactly the class of bug a hand-copied default could not catch (a control
++ * with the wrong `name`, or a control with no `name` at all).
++ */
++const renderedNames = (): Set<string> => {
++  const Stub = createRoutesStub([
++    {
++      id: 'root',
++      path: ':lang?',
++      Component: () => (
++        <LocalizationProvider translation={root.en}>
++          <RegistrationForm year={2026} />
++        </LocalizationProvider>
++      ),
++    },
++  ]);
++  const html = renderToString(
++    <Stub initialEntries={['/']} hydrationData={{ loaderData: { root: {} } }} />,
++  );
++  return new Set(
++    [...html.matchAll(/name="([^"]+)"/g)].map((match) => match[1] ?? ''),
++  );
++};
++
++describe('registration render-level field-name + default-value parity', () => {
++  // RENDER parity: the LIVE form is rendered and its emitted submit-names are
++  // asserted against the definition's graph — not an inlined hand-copied object.
++  // This is the only path registration exercises in prod (settled #9), so the
++  // rendered names ARE the validated graph or the form silently drops/mis-keys a
++  // field (as the pre-existing `photographer`/`cameraOperator` mix-up did — a
++  // control with the wrong name + a control with no name, invisible to a
++  // default-keys-only check).
++  test('the rendered exhibitor branch submit-names match the definition exactly', () => {
++    const names = renderedNames();
++    const exhibitorBranch = defaultRegistrationForm.variant?.variants.find(
++      (v) => v.value === 'exhibitor',
++    );
++    // The names SSR emits for one registrant: the array field itself, the
++    // discriminator, the common fields, and the exhibitor branch fields — each
++    // prefixed `registrants[0].` by conform.
++    const expected = new Set([
++      'registrants[0]',
++      `registrants[0].${defaultRegistrationForm.variant?.discriminator}`,
++      ...collectNames(defaultRegistrationForm.fields, false).map(
++        (name) => `registrants[0].${name}`,
++      ),
++      ...collectNames(exhibitorBranch?.fields ?? [], false).map(
++        (name) => `registrants[0].${name}`,
++      ),
++    ]);
++    expect([...names].sort()).toEqual([...expected].sort());
++  });
++
++  // DEFAULT-VALUE parity, derived (`derive-dont-sync`): the form's REAL
++  // `makeDefaultRegistrant` (imported, not a copy) must carry a key for every
++  // definition field name the form renders a `name=` for. The form keys its
++  // `name={volunteer.X.name}` / `name={fields.X.name}` accessors off this default,
++  // so a missing key here is a missing/orphaned rendered name there.
++  //
++  // An `optional: true` group the default leaves ABSENT (`parent: undefined` — the
++  // minors-only group, materialized only once a minor is shown) is legitimately not
++  // descended: its inner controls don't render until the group is present. A
++  // `volunteer` group the default DOES materialize MUST carry every inner name —
++  // asserted by `volunteerNamesSeeded` below; here we require presence for every
++  // name down to the first absent optional-group boundary.
++  test('every rendered attendee field name resolves to a default-value key', () => {
++    const defaultRegistrant = makeDefaultRegistrant() as Record<string, unknown>;
++    const attendeeBranch = defaultRegistrationForm.variant?.variants.find(
++      (v) => v.value === 'attendee',
++    );
++    expect(attendeeBranch).toBeDefined();
++    const names = collectNames(
++      [...defaultRegistrationForm.fields, ...(attendeeBranch?.fields ?? [])],
++      true,
++    );
++    for (const name of names) {
++      const segments = name.split('.');
++      let cursor: unknown = defaultRegistrant;
++      for (const segment of segments) {
++        // An absent optional group (default `undefined`) stops the descent — its
++        // inner names need no default key until the group materializes.
++        if (cursor === undefined) break;
++        expect({
++          name,
++          present:
++            cursor !== null &&
++            typeof cursor === 'object' &&
++            segment in (cursor as Record<string, unknown>),
++        }).toEqual({ name, present: true });
++        cursor = (cursor as Record<string, unknown>)[segment];
++      }
++    }
++  });
++
++  // The `volunteer` group the default materializes MUST seed every inner name the
++  // definition declares — the specific regression the pre-existing
++  // `cameraOperator`/`photographer` render bug exposed (a definition name with no
++  // matching rendered `name=`). Derived from the definition, no hand-copied list.
++  test('volunteerNamesSeeded: every volunteer definition name is a default key', () => {
++    const defaultRegistrant = makeDefaultRegistrant() as Record<string, unknown>;
++    const volunteerGroup = defaultRegistrationForm.variant?.variants
++      .find((v) => v.value === 'attendee')
++      ?.fields.find(
++        (f) => f._tag === 'nestedGroup' && f.name === ('volunteer' as never),
++      );
++    expect(volunteerGroup?._tag).toBe('nestedGroup');
++    const innerFields =
++      volunteerGroup?._tag === 'nestedGroup' ? volunteerGroup.fields : [];
++    const seeded = defaultRegistrant['volunteer'] as Record<string, unknown>;
++    for (const inner of innerFields) {
++      expect({ name: inner.name, seeded: inner.name in seeded }).toEqual({
++        name: inner.name,
++        seeded: true,
++      });
++    }
++  });
++
++  // The default carries NO key the definition doesn't declare — a stale key in the
++  // default (a removed field) would render an orphan name. Pin the symmetry.
++  test('the default registrant declares no key absent from the definition graph', () => {
++    const defaultRegistrant = makeDefaultRegistrant() as Record<string, unknown>;
++    const attendeeBranch = defaultRegistrationForm.variant?.variants.find(
++      (v) => v.value === 'attendee',
++    );
++    const graphNames = new Set(
++      collectNames(
++        [...defaultRegistrationForm.fields, ...(attendeeBranch?.fields ?? [])],
++        true,
++      ),
++    );
++    const collectDefaultLeaves = (
++      object: Record<string, unknown>,
++      prefix = '',
++    ): string[] =>
++      Object.entries(object).flatMap(([key, value]) =>
++        value !== null &&
++        typeof value === 'object' &&
++        !Array.isArray(value)
++          ? collectDefaultLeaves(value as Record<string, unknown>, `${prefix}${key}.`)
++          : [`${prefix}${key}`],
++      );
++    // `parent` defaults to `undefined` (a leaf in the default), but the definition
++    // descends it into `parent.name`/`…email`/`…phone`; so a default leaf is "known"
++    // if it is a definition name OR a PREFIX of one (an un-materialized optional
++    // group). Any default leaf that is neither is an orphan the form would render
++    // with no validated counterpart.
++    const isKnown = (leaf: string) =>
++      graphNames.has(leaf) ||
++      [...graphNames].some((name) => name.startsWith(`${leaf}.`));
++    for (const leaf of collectDefaultLeaves(defaultRegistrant)) {
++      expect({ leaf, known: isKnown(leaf) }).toEqual({ leaf, known: true });
++    }
++  });
++
++  test('the exhibitor branch names are exactly synopsis/website/company', () => {
++    const exhibitorBranch = defaultRegistrationForm.variant?.variants.find(
++      (v) => v.value === 'exhibitor',
++    );
++    expect(collectNames(exhibitorBranch?.fields ?? [], false).sort()).toEqual(
++      ['company', 'synopsis', 'website'].sort(),
++    );
++  });
++});
+diff --git a/app/routes/($lang)+/registration-form.tsx b/app/routes/($lang)+/registration-form.tsx
+index fc547a3..d411e55 100644
+--- a/app/routes/($lang)+/registration-form.tsx
++++ b/app/routes/($lang)+/registration-form.tsx
+@@ -15,28 +15,91 @@ import { Main } from '~/ui/main';
+ import { Radio, RadioGroup, Radios } from '~/ui/radio';
+ import { TextField } from '~/ui/text-field';
+ 
+-import type { RegistrationStandardSchema as OracleStandardSchema } from './registration-schema.oracle';
++/**
++ * The registrant's FORM-INPUT (encoded) field-name contract — the static shape
++ * conform's `getFieldset()` accessors are keyed off. This is the FORM's own
++ * concern (the field names it renders `name=` for), NOT the validation: every
++ * leaf is the raw `string`/absent value the browser submits (booleans are
++ * `'true'`/`'false'`/`'on'` strings here, not decoded booleans), and there are no
++ * checks or message keys — the runtime validation is supplied entirely by the
++ * engine codec below (`definitionToSchema`). Mirrors the definition graph the
++ * render-parity half of `registration-form.test.tsx` pins (it asserts the live
++ * form's emitted submit-names equal `defaultRegistrationForm`'s field names), so a
++ * field added/renamed in the definition without a matching accessor here is caught.
++ *
++ * `make-impossible-states-unrepresentable`: the accessor shape is a real Schema,
++ * not a hand-written interface, so its field set is the typed contract the form's
++ * `getFieldset()` reads route through.
++ */
++const RegistrantInput = Schema.Struct({
++  type: Schema.optional(Schema.Literals(['attendee', 'exhibitor'])),
++  name: Schema.optional(Schema.String),
++  email: Schema.optional(Schema.String),
++  phone: Schema.optional(Schema.String),
++  dateOfBirth: Schema.optional(Schema.String),
++  gender: Schema.optional(Schema.Literals(['male', 'female'])),
++  meals: Schema.optional(Schema.String),
++  dietaryRestrictions: Schema.optional(Schema.String),
++  outreach: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
++  parent: Schema.optional(
++    Schema.Struct({
++      name: Schema.optional(Schema.String),
++      email: Schema.optional(Schema.String),
++      phone: Schema.optional(Schema.String),
++    }),
++  ),
++  extra: Schema.optional(
++    Schema.Struct({
++      howDidYouHear: Schema.optional(Schema.String),
++      whyAreYouAttending: Schema.optional(Schema.String),
++      whatAreYouExcitedAbout: Schema.optional(Schema.String),
++      firstTimeAttending: Schema.optional(Schema.String),
++      church: Schema.optional(Schema.String),
++      merch: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
++      other: Schema.optional(Schema.String),
++      tos: Schema.optional(Schema.String),
++    }),
++  ),
++  volunteer: Schema.optional(
++    Schema.Struct({
++      songLeader: Schema.optional(Schema.String),
++      musician: Schema.optional(Schema.String),
++      instrument: Schema.optional(Schema.String),
++      specialMusic: Schema.optional(Schema.String),
++      hospitality: Schema.optional(Schema.String),
++      registrationStation: Schema.optional(Schema.String),
++      usher: Schema.optional(Schema.String),
++      outreachLeader: Schema.optional(Schema.String),
++      smallGroupLeader: Schema.optional(Schema.String),
++      seminarRoomHost: Schema.optional(Schema.String),
++      cameraOperator: Schema.optional(Schema.String),
++      photographer: Schema.optional(Schema.String),
++      roamingMic: Schema.optional(Schema.String),
++    }),
++  ),
++  synopsis: Schema.optional(Schema.String),
++  website: Schema.optional(Schema.String),
++  company: Schema.optional(Schema.String),
++});
+ 
+ /**
+  * Registration's client validation schema, DERIVED from the structural Form
+  * engine's `defaultRegistrationForm` definition (`derive-dont-sync`,
+- * registration-launch Branch 6.5). The engine definition validates ONE registrant
++ * registration-launch Branch 6). The engine definition validates ONE registrant
+  * (the attendee/exhibitor discriminator + nested groups + boolean codecs — the
+- * riskiest graph, proven byte-equivalent to the hand-tuned oracle by
+- * `app/lib/forms/equivalence.registration.test.tsx`); this form keeps the
+- * repeating-`registrants` SHELL (a repeating-array-of-variant-items is not in the
+- * closed `FieldKind` set), so it wraps the per-registrant codec in
++ * riskiest graph, proven byte-equivalent to the former hand-tuned schema by the
++ * registration equivalence harness before that oracle was retired in 6.6); this
++ * form keeps the repeating-`registrants` SHELL (a repeating-array-of-variant-items
++ * is not in the closed `FieldKind` set), so it wraps the per-registrant codec in
+  * `{ registrants: Array(...) }`. Editing the stored `forms/registration.json` now
+  * changes what the form accepts with no code change.
+  *
+  * The engine codec's OUTPUT is a generic `Record<string, unknown>` (the data-driven
+  * decoder is field-name-agnostic), so conform's field metadata is re-typed at the
+- * seam to the oracle standard schema's precise registrant shape — the SAME shape
+- * the equivalence harness proves the engine decodes to. This is a TYPE-only
+- * annotation over an unchanged engine RUNTIME (the `configureForms` "cast at the
+- * seam" idiom this codebase already uses), NOT a re-declaration of the validation:
+- * `OracleStandardSchema` contributes only its `.Type` here; every issue the form
+- * shows is computed by the engine codec.
++ * seam to {@link RegistrantInput} — the form's own field-name contract. This is a
++ * TYPE-only annotation over an unchanged engine RUNTIME (the "cast at the seam"
++ * idiom this codebase already uses), NOT a re-declaration of the validation: every
++ * issue the form shows is computed by the engine codec.
+  */
+ const RegistrationSchema = Schema.Struct({
+   registrants: Schema.mutable(
+@@ -44,9 +107,15 @@ const RegistrationSchema = Schema.Struct({
+   ).annotateKey({ messageMissingKey: 'registration.form.type.required' }),
+ });
+ 
++const RegistrationFormShape = Schema.Struct({
++  registrants: Schema.mutable(Schema.Array(RegistrantInput)),
++});
++
+ const RegistrationStandardSchema = Schema.toStandardSchemaV1(
+   RegistrationSchema,
+-) as unknown as typeof OracleStandardSchema;
++) as unknown as ReturnType<
++  typeof Schema.toStandardSchemaV1<typeof RegistrationFormShape>
++>;
+ 
+ /**
+  * The form's initial / appended registrant value — the raw string/absent
+diff --git a/app/routes/($lang)+/registration-schema.oracle.ts b/app/routes/($lang)+/registration-schema.oracle.ts
+deleted file mode 100644
+index a90f7ab..0000000
+--- a/app/routes/($lang)+/registration-schema.oracle.ts
++++ /dev/null
+@@ -1,382 +0,0 @@
+-import { Schema, SchemaGetter } from 'effect';
+-
+-import type { TranslationKey } from '~/lib/localization/translations';
+-
+-/**
+- * Registration form schema — the equivalence ORACLE (registration-launch Branch
+- * 6.5, ADR 0007). This is the verbatim pre-migration hand-tuned schema, KEPT in
+- * the tree (renamed `…/registration-schema.oracle.ts`) only as the behavioural
+- * spec the structural Form engine's `defaultRegistrationForm` definition is proven
+- * against by `app/lib/forms/equivalence.registration.test.tsx` (valid + every
+- * invalid variant: identical decoded output + identical emitted `TranslationKey`
+- * sets). The live registration form derives its validation from the engine
+- * definition now (`derive-dont-sync`); this oracle is deleted once every form
+- * migration is green (6.6). See `docs/forms/registration-spec.md`.
+- *
+- * The Effect Schema port of the former zod `RegistrationSchema` (one per
+- * `{2024,2025,2026}/form` route, now shared).
+- *
+- * It is a **form-data codec**: every leaf decodes from the string (or absent)
+- * value the browser actually submits. The registration `action` is a no-op
+- * (product decision pending, see the plan's non-goals), so this schema only
+- * powers client-side validation via {@link RegistrationStandardSchema}; it is
+- * never run server-side. Messages are translation keys so `FieldErrors`
+- * (`translate(error as TranslationKey)`) renders them — consistent with the
+- * contact/volunteer/newsletter sibling forms.
+- *
+- * Every decode failure must emit a real `TranslationKey`: `FieldErrors` renders
+- * each message through `translate()`, so a default English Schema message (or a
+- * key absent from `translations.ts`) renders blank. The annotation idiom, per
+- * the contact/volunteer siblings:
+- * - `.check(Schema.isMinLength(1, { message }))` covers the empty-string case;
+- * - a node-level `.annotate({ message })` covers the invalid-type case (a
+- *   duplicate field name POSTs an array, surfacing an `InvalidType` issue);
+- * - `.annotateKey({ messageMissingKey })` covers the absent-field case.
+- * Where a field has no dedicated `.error` key, the invalid-type case reuses its
+- * `.required` key — safe copy on screen rather than a blank render.
+- *
+- * Boolean modeling (no `Schema.BooleanFromString` in effect beta.60):
+- * - radio/checkbox booleans render `value="true"` / `value="false"`
+- *   (`meals`, `extra.firstTimeAttending`, `extra.tos`);
+- * - the volunteer single-checkboxes render no explicit `value`, so the browser
+- *   submits the default checkbox value `"on"` when checked and omits the field
+- *   when unchecked.
+- * {@link StringToBoolean} decodes all three submitted tokens (`"true"`/`"on"`
+- *   → `true`, `"false"` → `false`); volunteer flags wrap it in `optionalKey`
+- *   so an unchecked (absent) box is valid.
+- */
+-
+-/**
+- * Form-value → boolean codec. Encodes back to the canonical `"true"`/`"false"`
+- * tokens. Accepts `"on"` on decode (the default value an attribute-less
+- * checkbox submits) so the volunteer single-checkboxes round-trip.
+- *
+- * The `message` re-labels every failure path with a real `TranslationKey`: it
+- * annotates the underlying `Literals` (an off-list token, e.g. an array from a
+- * duplicate field) and the decoded node, so neither emits a default English
+- * Schema message. Pair with `.annotateKey({ messageMissingKey: message })` at
+- * the struct field to cover the absent-required case.
+- */
+-const StringToBoolean = (message: TranslationKey) =>
+-  Schema.Literals(['true', 'false', 'on'])
+-    .annotate({ message })
+-    .pipe(
+-      Schema.decodeTo(Schema.Boolean, {
+-        decode: SchemaGetter.transform((value) => value !== 'false'),
+-        encode: SchemaGetter.transform((value) => (value ? 'true' : 'false')),
+-      }),
+-    )
+-    .annotate({ message });
+-
+-/**
+- * Optional volunteer flag: absent (unchecked) is valid; a present value decodes.
+- * The only failure path is an invalid present value (e.g. an array), so the
+- * `message` labels the inner codec; no `messageMissingKey` (absent is valid).
+- */
+-const OptionalFlag = (message: TranslationKey) =>
+-  Schema.optionalKey(StringToBoolean(message));
+-
+-/** Required free-text string: empty, absent, and non-string all map to `message`. */
+-const RequiredString = (message: TranslationKey) =>
+-  Schema.String.annotate({ message })
+-    .check(Schema.isMinLength(1, { message }))
+-    .annotateKey({ messageMissingKey: message });
+-
+-/**
+- * Present-but-empty-allowed free-text string (e.g. the "other notes" field):
+- * the old zod schema accepted an empty submission, so no `isMinLength` check —
+- * only the invalid-type (node) and absent (key) cases carry a translation key.
+- */
+-const OptionalText = (message: TranslationKey) =>
+-  Schema.String.annotate({ message }).annotateKey({
+-    messageMissingKey: message,
+-  });
+-
+-/** Optional string: absent is valid; a present non-string maps to `message`. */
+-const OptionalString = (message: TranslationKey) =>
+-  Schema.optional(Schema.String.annotate({ message }));
+-
+-/** Required literal union: an off-list value or non-string maps to `message`. */
+-const RequiredLiterals = <const L extends ReadonlyArray<string>>(
+-  literals: L,
+-  message: TranslationKey,
+-) =>
+-  Schema.Literals(literals)
+-    .annotate({ message })
+-    .annotateKey({ messageMissingKey: message });
+-
+-const Email = (message: TranslationKey, missing: TranslationKey) =>
+-  Schema.String.annotate({ message })
+-    .check(
+-      Schema.isMinLength(1, { message: missing }),
+-      // Match the former zod `.email()`: a basic, permissive email shape.
+-      Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, { message }),
+-    )
+-    .annotateKey({ messageMissingKey: missing });
+-
+-const Url = (message: TranslationKey) =>
+-  Schema.String.annotate({ message })
+-    .check(
+-      Schema.isMinLength(1, { message }),
+-      // Match the former zod `.url()`: require a parseable absolute URL.
+-      Schema.makeFilter((value: string) => URL.canParse(value), { message }),
+-    )
+-    .annotateKey({ messageMissingKey: message });
+-
+-const Parent = Schema.Struct({
+-  name: RequiredString('registration.form.parent.required'),
+-  email: RequiredString('registration.form.parent-email.required'),
+-  phone: RequiredString('registration.form.parent-phone.required'),
+-});
+-
+-const Extra = Schema.Struct({
+-  howDidYouHear: RequiredString('registration.form.how-did-you-hear.required'),
+-  whyAreYouAttending: RequiredString(
+-    'registration.form.why-are-you-attending.required',
+-  ),
+-  whatAreYouExcitedAbout: RequiredString(
+-    'registration.form.what-are-you-excited-about.required',
+-  ),
+-  firstTimeAttending: StringToBoolean(
+-    'registration.form.first-time-attending.required',
+-  ).annotateKey({
+-    messageMissingKey: 'registration.form.first-time-attending.required',
+-  }),
+-  church: OptionalString('registration.form.church.required'),
+-  // Conform's `getFieldList`/`FieldName` require mutable array types; Effect
+-  // Schema arrays are `readonly` by default, so opt into a mutable `Type`.
+-  merch: Schema.mutable(
+-    Schema.Array(
+-      RequiredLiterals(
+-        ['t-shirt', 'hoodie', 'shirt', 'none'],
+-        'registration.form.merch.required',
+-      ),
+-    ),
+-  ).annotateKey({ messageMissingKey: 'registration.form.merch.required' }),
+-  other: OptionalText('registration.form.other.required'),
+-  tos: StringToBoolean('registration.form.tos.required').annotateKey({
+-    messageMissingKey: 'registration.form.tos.required',
+-  }),
+-});
+-
+-const Volunteer = Schema.Struct({
+-  songLeader: OptionalFlag('registration.form.volunteer.required'),
+-  musician: OptionalFlag('registration.form.volunteer.required'),
+-  instrument: OptionalString('registration.form.instrument.required'),
+-  specialMusic: OptionalFlag('registration.form.volunteer.required'),
+-  hospitality: OptionalFlag('registration.form.volunteer.required'),
+-  registrationStation: OptionalFlag('registration.form.volunteer.required'),
+-  usher: OptionalFlag('registration.form.volunteer.required'),
+-  outreachLeader: OptionalFlag('registration.form.volunteer.required'),
+-  smallGroupLeader: OptionalFlag('registration.form.volunteer.required'),
+-  seminarRoomHost: OptionalFlag('registration.form.volunteer.required'),
+-  cameraOperator: OptionalFlag('registration.form.volunteer.required'),
+-  photographer: OptionalFlag('registration.form.volunteer.required'),
+-  roamingMic: OptionalFlag('registration.form.volunteer.required'),
+-});
+-
+-// The registrant discriminator. Modeled as a single `Literals` field rather
+-// than the per-member `Schema.Literal`s inside a `Schema.Union` it replaced: a
+-// union whose members all fail reports one top-level union-mismatch message
+-// (Effect v4 behavior) attached to the `registrants[n]` node, so a missing or
+-// off-list `type` could only surface a key at the array element, never at the
+-// `type` field the UI's RadioGroup renders — the error was a real key that
+-// never displayed. As a struct field with `message` (off-list value) +
+-// `messageMissingKey` (absent) annotations, a missing/invalid `type`
+-// attributes cleanly to `registrants[n].type`. This mirrors the
+-// contact.tsx/volunteer.tsx precedent (fab3d97) that solved the identical
+-// problem on those forms' `method` discriminator.
+-const Type = RequiredLiterals(
+-  ['attendee', 'exhibitor'],
+-  'registration.form.type.required',
+-);
+-
+-const Outreach = Schema.mutable(
+-  Schema.Array(
+-    RequiredLiterals(
+-      ['laws-of-health', 'homeless-carepacks', 'back-to-school', 'not-sure'],
+-      'registration.form.outreach.required',
+-    ),
+-  ),
+-).annotateKey({ messageMissingKey: 'registration.form.outreach.required' });
+-
+-const Meals = StringToBoolean('registration.form.meals.required').annotateKey({
+-  messageMissingKey: 'registration.form.meals.required',
+-});
+-
+-/**
+- * Single per-registrant struct, replacing the former `Schema.Union([Attendee,
+- * Exhibitor])`. The shared fields (`type`, `name`, `email`, `phone`) are always
+- * required; the variant-specific fields are `optional` so the off-variant never
+- * demands them at the struct level. Per-type requirements are enforced by the
+- * struct-level {@link Schema.makeFilter} below, which attaches each issue to its
+- * own field path (e.g. attendee-only `gender`, or the nested `extra.tos`) with
+- * the same translation key the field carried as a union member. A present
+- * variant field still validates its own format/literal/url checks; the filter
+- * only adds the per-type presence requirement.
+- */
+-const Registrant = Schema.Struct({
+-  type: Type,
+-  name: RequiredString('registration.form.name.required'),
+-  email: Email(
+-    'registration.form.email.error',
+-    'registration.form.email.required',
+-  ),
+-  phone: RequiredString('registration.form.phone.required'),
+-  // Attendee-only fields. Optional at the struct level so exhibitors don't
+-  // demand them; the filter requires them (at their own paths) when
+-  // `type === 'attendee'`. A present value still runs its own checks.
+-  dateOfBirth: Schema.optional(
+-    RequiredString('registration.form.date-of-birth.required'),
+-  ),
+-  parent: Schema.optional(Parent),
+-  gender: Schema.optional(
+-    RequiredLiterals(['male', 'female'], 'registration.form.gender.required'),
+-  ),
+-  meals: Schema.optional(Meals),
+-  dietaryRestrictions: OptionalString(
+-    'registration.form.dietary-restrictions.required',
+-  ),
+-  outreach: Schema.optional(Outreach),
+-  extra: Schema.optional(Extra),
+-  volunteer: Schema.optional(Volunteer),
+-  // Exhibitor-only fields. Optional at the struct level so attendees don't
+-  // demand them; the filter requires them (at their own paths) when
+-  // `type === 'exhibitor'`.
+-  synopsis: Schema.optional(RequiredString('registration.form.synopsis.required')),
+-  website: Schema.optional(Url('registration.form.website.required')),
+-  company: Schema.optional(RequiredString('registration.form.company.required')),
+-}).check(
+-  Schema.makeFilter((value) => {
+-    const issues: Array<{ path: ReadonlyArray<PropertyKey>; issue: string }> =
+-      [];
+-    if (value.type === 'attendee') {
+-      if (value.dateOfBirth === undefined) {
+-        issues.push({
+-          path: ['dateOfBirth'],
+-          issue: 'registration.form.date-of-birth.required',
+-        });
+-      }
+-      if (value.gender === undefined) {
+-        issues.push({
+-          path: ['gender'],
+-          issue: 'registration.form.gender.required',
+-        });
+-      }
+-      if (value.meals === undefined) {
+-        issues.push({
+-          path: ['meals'],
+-          issue: 'registration.form.meals.required',
+-        });
+-      }
+-      if (value.outreach === undefined) {
+-        issues.push({
+-          path: ['outreach'],
+-          issue: 'registration.form.outreach.required',
+-        });
+-      }
+-      // The nested attendee groups are always rendered (with defaults) when a
+-      // registrant is an attendee, so a wholly-absent group is an out-of-form
+-      // path. When present, the inner required-field annotations fire at their
+-      // own nested paths; when absent, surface a real key at the group path
+-      // rather than the raw `Missing key` the bare optional/required struct
+-      // would emit.
+-      if (value.extra === undefined) {
+-        issues.push({
+-          path: ['extra', 'tos'],
+-          issue: 'registration.form.tos.required',
+-        });
+-      }
+-    } else if (value.type === 'exhibitor') {
+-      if (value.synopsis === undefined) {
+-        issues.push({
+-          path: ['synopsis'],
+-          issue: 'registration.form.synopsis.required',
+-        });
+-      }
+-      if (value.website === undefined) {
+-        issues.push({
+-          path: ['website'],
+-          issue: 'registration.form.website.required',
+-        });
+-      }
+-      if (value.company === undefined) {
+-        issues.push({
+-          path: ['company'],
+-          issue: 'registration.form.company.required',
+-        });
+-      }
+-    }
+-    return issues.length === 0 ? undefined : issues;
+-  }),
+-);
+-
+-export const RegistrationSchema = Schema.Struct({
+-  // The array's `messageMissingKey` covers an absent `registrants` field; each
+-  // element is the discriminated {@link Registrant} struct, whose `type`
+-  // discriminator now attributes a missing/invalid value to `registrants[n].type`.
+-  registrants: Schema.mutable(Schema.Array(Registrant)).annotateKey({
+-    messageMissingKey: 'registration.form.type.required',
+-  }),
+-});
+-
+-/** Standard Schema view consumed by `useForm` for client-side validation. */
+-export const RegistrationStandardSchema =
+-  Schema.toStandardSchemaV1(RegistrationSchema);
+-
+-export type RegistrationForm = typeof RegistrationSchema.Type;
+-
+-type DeepPartial<T> = T extends object
+-  ? { [P in keyof T]?: DeepPartial<T[P]> }
+-  : T;
+-
+-/**
+- * The form's initial/appended registrant value. Derived from the schema's
+- * **encoded** (form-input) shape rather than the decoded `.Type`: the default
+- * holds the raw string/absent values the browser submits (e.g. `meals: ''`,
+- * `extra.firstTimeAttending: undefined`), not decoded booleans, and is what
+- * conform's `defaultValue` consumes. Basing it on the decoded `.Type` would
+- * type the boolean fields as `boolean`, which `useForm`'s input-shaped
+- * `defaultValue` rejects.
+- */
+-export type Registrant = DeepPartial<
+-  (typeof RegistrationSchema.Encoded)['registrants'][number]
+->;
+-
+-/** Empty attendee used as the form's initial / appended registrant value. */
+-export const makeDefaultRegistrant = (): Registrant => ({
+-  name: '',
+-  email: '',
+-  phone: '',
+-  dateOfBirth: '',
+-  parent: undefined,
+-  gender: undefined,
+-  dietaryRestrictions: undefined,
+-  meals: undefined,
+-  extra: {
+-    firstTimeAttending: undefined,
+-    howDidYouHear: '',
+-    whyAreYouAttending: '',
+-    whatAreYouExcitedAbout: '',
+-    church: undefined,
+-    merch: [],
+-    other: '',
+-    tos: undefined,
+-  },
+-  outreach: [],
+-  volunteer: {
+-    songLeader: undefined,
+-    musician: undefined,
+-    instrument: undefined,
+-    specialMusic: undefined,
+-    hospitality: undefined,
+-    registrationStation: undefined,
+-    usher: undefined,
+-    outreachLeader: undefined,
+-    smallGroupLeader: undefined,
+-    seminarRoomHost: undefined,
+-    cameraOperator: undefined,
+-    photographer: undefined,
+-    roamingMic: undefined,
+-  },
+-});
