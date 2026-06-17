@@ -8,6 +8,7 @@ import {
 } from "react-router";
 import { match } from "ts-pattern";
 
+import { Content } from "~/lib/content.server";
 import { FormProvider, useForm, useFormData } from "~/lib/conform";
 import { formValidationError } from "~/lib/effect/errors";
 import { routeFormAction, SubmissionContext } from "~/lib/effect/form";
@@ -16,6 +17,7 @@ import { routeHandler } from "~/lib/effect/route";
 import { ReactRouterContext } from "~/lib/effect/router-context";
 import { useTranslate } from "~/lib/localization/context";
 import { getLocale } from "~/lib/localization/localization";
+import { toVolunteerView } from "~/lib/content/pages/project";
 import type { TranslationKey } from "~/lib/localization/translations";
 import { Mailer } from "~/lib/mailer.server";
 import { Toast } from "~/lib/toast.server";
@@ -25,6 +27,7 @@ import { FieldErrors, fieldErrorStyle } from "~/ui/field-error";
 import { Label } from "~/ui/label";
 import { Main } from "~/ui/main";
 import { Radio, RadioGroup, Radios } from "~/ui/radio";
+import { RichText } from "~/ui/rich-text";
 import { TextField } from "~/ui/text-field";
 
 // `invalid_type_error` keys from the old zod schema fired when a field's
@@ -151,9 +154,12 @@ type Position = {
 };
 
 export const loader = routeHandler(function* () {
-  // No request-scoped data; `positions` is a static empty list.
-  yield* Effect.void;
+  const { params } = yield* ReactRouterContext;
+  const locale = getLocale(params);
+  const content = yield* Content.Service;
+  // `positions` is a static empty list (no request-scoped data yet).
   return {
+    page: toVolunteerView(yield* content.getPage("volunteer"), locale),
     positions: [] as Position[],
   };
 });
@@ -233,22 +239,16 @@ export default function Index() {
     <Main className="gap-10 px-4 py-12 text-2xl md:gap-16 md:px-16">
       <div className="flex flex-col gap-4 md:gap-16">
         <h1 className="text-5xl">
-          {translate("volunteer.title", {
-            movement: (
-              <span className="italic">
-                {translate("volunteer.title.movement")}
-              </span>
-            ),
-          })}
+          <RichText runs={data.page.title} />
         </h1>
-        <p>{translate("volunteer.subtitle")}</p>
+        <p>{data.page.subtitle}</p>
       </div>
 
       <FormProvider context={form.context}>
         <Form method="POST" className="flex flex-col gap-4" {...form.props}>
           {data.positions.length > 0 ? (
             <div className="flex flex-col gap-3">
-              <h2>{translate("volunteer.directions")}</h2>
+              <h2>{data.page.directions}</h2>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {data.positions.map((position) => (
                   <div

@@ -1,9 +1,12 @@
-import type { MetaFunction } from 'react-router';
+import { type MetaFunction, useLoaderData } from 'react-router';
 
-import { useTranslate } from '~/lib/localization/context';
+import { Content } from '~/lib/content.server';
+import { ReactRouterContext } from '~/lib/effect/router-context';
+import { routeHandler } from '~/lib/effect/route';
 import { getLocale } from '~/lib/localization/localization';
-import { ExternalLink } from '~/ui/external-link';
+import { toFaqView } from '~/lib/content/pages/project';
 import { Main } from '~/ui/main';
+import { RichText } from '~/ui/rich-text';
 
 export const meta: MetaFunction = ({ params }) => {
   const locale = getLocale(params);
@@ -19,69 +22,27 @@ export const meta: MetaFunction = ({ params }) => {
   ];
 };
 
-const email = (
-  <ExternalLink href="mailto:hello@gyccanada.org">
-    hello@gyccanada.org
-  </ExternalLink>
-);
+export const loader = routeHandler(function* () {
+  const { params } = yield* ReactRouterContext;
+  const locale = getLocale(params);
+  const content = yield* Content.Service;
+  return { page: toFaqView(yield* content.getPage('faq'), locale) };
+});
 
 export default function FaqPage() {
-  const translate = useTranslate();
+  const { page } = useLoaderData<typeof loader>();
   return (
     <Main className="gap-10 px-3 py-12 text-2xl md:px-16">
-      <h1 className="text-5xl">{translate('faq.title')}</h1>
+      <h1 className="text-5xl">{page.title}</h1>
 
-      <QuestionLayout>
-        <Question>{translate('faq.question.1.title')}</Question>
-        <Answer>
-          {translate('faq.question.1.answer.1', {
-            email,
-          })}
-          <br />
-          <br />
-          {translate('faq.question.1.answer.2')}
-          <br />
-          <br />
-          {translate('faq.question.1.answer.3', {
-            email,
-            before: (
-              <span className="font-bold">
-                {translate('faq.question.1.answer.3.before')}
-              </span>
-            ),
-          })}
-        </Answer>
-      </QuestionLayout>
-
-      <QuestionLayout>
-        <Question>{translate('faq.question.2.title')}</Question>
-        <Answer>
-          {translate('faq.question.2.answer.1', {
-            email,
-          })}
-          <br />
-          <br />
-          <span className="italic">{translate('faq.question.2.answer.2')}</span>
-        </Answer>
-      </QuestionLayout>
-
-      <QuestionLayout>
-        <Question>{translate('faq.question.3.title')}</Question>
-        <Answer>
-          {translate('faq.question.3.answer.1', {
-            website: (
-              <ExternalLink href="https://gyccanada.org">
-                gyccanada.org
-              </ExternalLink>
-            ),
-          })}
-          <br />
-          <br />
-          <span className="font-bold">
-            {translate('faq.question.3.answer.2')}
-          </span>
-        </Answer>
-      </QuestionLayout>
+      {page.items.map((item) => (
+        <QuestionLayout key={item.id}>
+          <Question>{item.question}</Question>
+          <Answer>
+            <RichText runs={item.answer} />
+          </Answer>
+        </QuestionLayout>
+      ))}
     </Main>
   );
 }

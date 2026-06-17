@@ -1,5 +1,4 @@
 import { Effect, Option, Result, Schema } from "effect";
-import clsx from "clsx";
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from "lucide-react";
 import * as React from "react";
 import {
@@ -13,6 +12,7 @@ import { match } from "ts-pattern";
 import { Breakpoint, useBreakpoint } from "~/lib/client-hints";
 import { FormProvider, useForm } from "~/lib/conform";
 import { Content } from "~/lib/content.server";
+import { toHomeView } from "~/lib/content/pages/project";
 import { dayjs } from "~/lib/dayjs";
 import { formValidationError, notFound } from "~/lib/effect/errors";
 import { routeFormAction, SubmissionContext } from "~/lib/effect/form";
@@ -54,6 +54,7 @@ export const loader = routeHandler(function* () {
   const env = yield* Env.Service;
   return {
     conference: yield* content.getCurrentConference(locale),
+    page: toHomeView(yield* content.getPage("home"), locale),
     newsletterEnabled: Option.isSome(env.sendgrid),
   };
 });
@@ -91,29 +92,13 @@ export const action = routeFormAction(function* () {
 });
 
 export default function Index() {
-  const translate = useTranslate();
-  const { newsletterEnabled } = useLoaderData<typeof loader>();
+  const { newsletterEnabled, page } = useLoaderData<typeof loader>();
   return (
     <Main>
       <Hero />
       <TimeLeft />
       <section className="flex flex-col px-3 py-12 text-5xl md:hidden">
-        <h3 className="text-5xl">
-          {translate("main.gyc_tagline", {
-            movement: (
-              <span className="inline-block w-max italic">
-                <GradientLine className="absolute inset-x-0 bottom-2" />
-                <span>{translate("main.gyc_tagline.movement")}</span>
-              </span>
-            ),
-            for: (
-              <span className="inline-block w-max italic">
-                <GradientLine className="absolute inset-x-0 bottom-2" />
-                <span>{translate("main.gyc_tagline.for")}</span>
-              </span>
-            ),
-          })}
-        </h3>
+        <h3 className="text-5xl">{page.tagline}</h3>
       </section>
       <section className="flex flex-col gap-6 pt-16 text-5xl md:flex-row-reverse md:justify-between">
         <img
@@ -122,25 +107,10 @@ export default function Index() {
           className="aspect-auto max-md:w-full md:flex-1"
         />
         <div className="flex flex-col gap-6 p-3 max-md:absolute max-md:top-0 md:flex-1">
-          <h3 className="text-5xl max-md:hidden">
-            {translate("main.gyc_tagline", {
-              movement: (
-                <span className="inline-block w-max italic">
-                  <GradientLine className="absolute inset-x-0 bottom-2" />
-                  <span>{translate("main.gyc_tagline.movement")}</span>
-                </span>
-              ),
-              for: (
-                <span className="inline-block w-max italic">
-                  <GradientLine className="absolute inset-x-0 bottom-2" />
-                  <span>{translate("main.gyc_tagline.for")}</span>
-                </span>
-              ),
-            })}
-          </h3>
+          <h3 className="text-5xl max-md:hidden">{page.tagline}</h3>
           <div>
             <Link to="/about" className={buttonStyle} data-variant="accent">
-              {translate("main.read_our_story")}
+              {page.mission.readStoryLabel}
             </Link>
           </div>
           {/* <div>
@@ -150,7 +120,9 @@ export default function Index() {
           </div> */}
         </div>
       </section>
-      {newsletterEnabled ? <NewsletterForm /> : null}
+      {newsletterEnabled ? (
+        <NewsletterForm newsletter={page.newsletter} />
+      ) : null}
 
       <section className="flex flex-col gap-6 overflow-hidden p-3 md:h-[800px] md:flex-row-reverse md:py-32">
         <img
@@ -160,22 +132,13 @@ export default function Index() {
         />
         <div className="flex flex-col gap-6 md:flex-1">
           <h2 className="text-accent-600 text-4xl font-bold">
-            {translate("main.join.title")}
+            {page.join.title}
           </h2>
-          <p>
-            {translate("main.join.subtitle", {
-              br: (
-                <>
-                  <br />
-                  <br />
-                </>
-              ),
-            })}
-          </p>
+          <p>{page.join.subtitle}</p>
           <div className="flex flex-col gap-4">
             <div>
               <Link to="/give" className={buttonStyle} data-variant="accent">
-                {translate("main.donate.link")}
+                {page.join.donateLabel}
               </Link>
             </div>
             <div>
@@ -184,7 +147,7 @@ export default function Index() {
                 className={buttonStyle}
                 data-variant="default"
               >
-                {translate("main.join.link")}
+                {page.join.volunteerLabel}
               </Link>
             </div>
           </div>
@@ -206,7 +169,6 @@ function Hero() {
 
 function MobileHero() {
   const { conference } = useLoaderData<typeof loader>();
-  const translate = useTranslate();
   return (
     <section
       style={
@@ -325,25 +287,6 @@ function TimeLeft() {
   );
 }
 
-function GradientLine({
-  children,
-  className,
-}: {
-  children?: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={clsx(
-        "to-link-700 h-2 w-full bg-gradient-to-r from-transparent",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
 // Match the previous zod `.email()` validation: a basic, permissive email shape.
 const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -362,7 +305,15 @@ const schema = Schema.Struct({
 
 const clientSchema = Schema.toStandardSchemaV1(schema);
 
-function NewsletterForm() {
+function NewsletterForm({
+  newsletter,
+}: {
+  newsletter: {
+    title: string;
+    subtitle: string;
+    socials: string;
+  };
+}) {
   const translate = useTranslate();
   const actionData = useActionData<typeof action>();
   const { form, fields } = useForm(clientSchema, {
@@ -386,11 +337,11 @@ function NewsletterForm() {
       <div className="flex flex-col gap-4 md:flex-row-reverse">
         <div className="flex flex-col gap-4 md:flex-1">
           <h2 className="text-accent-600 text-4xl font-bold">
-            {translate("main.newsletter.title")}
+            {newsletter.title}
             <PaperPlane className="inline size-20" />
           </h2>
 
-          <p>{translate("main.newsletter.subtitle")}</p>
+          <p>{newsletter.subtitle}</p>
           <FormProvider context={form.context}>
             <Form method="POST" className="flex flex-col gap-4" {...form.props}>
               <TextField name={fields.name.name}>
@@ -432,7 +383,7 @@ function NewsletterForm() {
         </div>
       </div>
       <div className="flex flex-col gap-6">
-        <p>{translate("main.socials.title")}</p>
+        <p>{newsletter.socials}</p>
         <div className="flex items-center gap-2.5">
           <a
             href="https://www.instagram.com/gyccanada"

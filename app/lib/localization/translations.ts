@@ -4,15 +4,7 @@ const en = {
   'main.reserve': 'Learn More',
   'main.read_bible': 'Read in Context',
   'main.time_left': 'See you in {{days}} days',
-  'main.gyc_tagline':
-    'GYC Canada is a {{movement}} founded by young people {{for}} young people.',
-  'main.gyc_tagline.movement': 'movement',
-  'main.gyc_tagline.for': 'for',
-  'main.read_our_story': 'Read our story',
   'main.meet_the_team': 'Meet the team',
-  'main.newsletter.title': 'Stay in the loop',
-  'main.newsletter.subtitle':
-    'We’ll send our monthly newsletter straight to your inbox, giving you a chance for early-bird pricing the moment it launches, updates on all our latest projects, and more!',
   'main.newsletter.name.label': 'Full Name',
   'main.newsletter.name.placeholder': 'Full Name',
   'main.newsletter.email.label': 'Email',
@@ -25,13 +17,6 @@ const en = {
   'main.newsletter.success.description':
     'You have been signed up successfully!',
   'main.newsletter.success.title': 'Thank you for signing up!',
-  'main.socials.title':
-    'Don’t forget to follow us on social media to get to know our team and stay up-to-date!',
-  'main.join.title': 'Join the Movement',
-  'main.join.subtitle':
-    'GYC Canada is a non-profit organization run by a handful of amazing volunteers.{{br}}That means we depend entirely on your attendance and your generous donations to keep the movement growing.',
-  'main.donate.link': 'Consider donating',
-  'main.join.link': 'Volunteer',
 
   'nav.home': '{{year}} Conference',
   'nav.about': 'About us',
@@ -43,9 +28,6 @@ const en = {
   'footer.copy': `© ${new Date().getFullYear()} GYC Canada. All rights reserved.`,
   'footer.affiliation': 'A {{gyc}} affiliate ministry.',
   'footer.links': 'Quick Links',
-  'contact.title': 'Get in touch with us!',
-  'contact.directions':
-    'You can reach us anytime via email at {{email}}, or with the form below.',
   'contact.form.name': 'What is your name?',
   'contact.form.name.placeholder': 'Type your full name here',
   'contact.form.name.required': 'Please enter your name',
@@ -71,17 +53,7 @@ const en = {
   'contact.form.success.title': 'Thank you for contacting us!',
   'contact.form.success.description':
     'Your message has been sent successfully! We will take notice of it and answer as soon as possible.',
-  'give.title': 'Support the {{movement}}.',
-  'give.movement': 'movement',
-  'give.reason':
-    "Our call to mission, is to be the light of the world. Our Savior calls us to a worldwide mission of spreading the gospel of Christ's love in this world filled with darkness. This light should not be hidden, covered by the humdrum of life, but out in the open, where all can see and hear. GYC Canada wants to magnify that light, to bring it to all of Canada and the world.",
   'give.directions': "Here's how you can give:",
-  'give.directions.1': "Enter the amount you'd like to give.",
-  'give.directions.2': 'Choose your preferred payment method.',
-  'give.directions.3':
-    'If you want to give monthly, tap on "Make this a monthly donation".',
-  'give.directions.4':
-    'If there\'s a specific purpose for your gift, let us know in the "Add a note" section.',
   'give.continue': 'Continue',
   'team.title': 'The people behind the {{movement}}.',
   'team.title.movement': 'movement',
@@ -98,11 +70,6 @@ const en = {
   'team.position.vp-missions': 'VP of Missions',
   'team.position.secretary': 'Executive Secretary',
   'team.position.treasurer': 'Treasurer',
-  'volunteer.title': 'Become a part of the {{movement}}.',
-  'volunteer.title.movement': 'movement',
-  'volunteer.subtitle':
-    'Join a group of dedicated and passionate young people, professionals, and laypersons. As a youth-led organization, GYC is mobilizing to share Christ with all of Canada.',
-  'volunteer.directions': 'Select the area you are interested in:',
   'volunteer.form.name.label': 'What is your name?',
   'volunteer.form.name.placeholder': 'Type your full name here',
   'volunteer.form.name.required': 'Please enter your name',
@@ -288,65 +255,6 @@ const en = {
   'registration.form.website.required': 'Please enter your website',
 
   'registration.form.submit': 'Submit',
-
-  'about.title': 'About Us',
-  'about.1': `GYC Canada (Generation of Youth for Christ) is a youth-initiated and led
-        movement of Seventh-day Adventists from various origins, united in a common
-        commitment to serious Bible study, intense prayer, uncompromising
-        lifestyle, and boldness in sharing Christ with others.`,
-  'about.2': `GYC Canada seeks to uphold the distinctive message of the Seventh-day
-        Adventist Church. We seek to equip and inspire young Adventists to be Christian
-        ambassadors in their respective places of work and study and wherever they go.`,
-  'about.3': `GYC Canada is the Canadian affiliate of the GYC movement initiated in 2002,
-        in the United States of America. We are Canadian Seventh-day Adventist young people
-        who seek to promote the spirit and ideals of GYC in Canada.`,
-  'about.4': `GYC Canada is a recognized independent supporting ministry of the
-        Seventh-day Adventist Church of Canada. GYC Canada encourages young Seventh-day Adventists across Canada
-        to be active members in their local churches.`,
-  'about.disclaimer': `Disclaimer: GYC Canada does not accept tithes. We encourage donors to
-        give tithes to their respective churches.`,
-  'about.quote.1': `“Let no one despise you for your youth, but set the believers an
-          example in speech, in conduct, in love, in faith, in purity.” {{verse}}`,
-  'about.quote.1.verse': '1 Timothy 4:12',
-  'about.quote.2': `“With such an army of workers as our youth, rightly trained, might
-          furnish, how soon the message of a crucified, risen, and soon-coming
-          Saviour might be carried to the whole world!” {{source}}`,
-  'about.quote.2.source': 'Education, p. 271.2',
-
-  'faq.title': 'Frequently Asked Questions',
-  'faq.question.1.title': 'Exhibitor Booths',
-  'faq.question.1.answer.1': `GYC Canada reserves the right to refuse any exhibitor that does not
-          uphold the Spirit of GYC as documented in the 'About Us' section of our
-          website. Email us with any questions at {{email}}.`,
-  'faq.question.1.answer.2': `A single-table exhibitor booth can be reserved for the price of $100, and a
-          two-table exhibitor booth for the price of $50. An exhibitor booth reservation does not include
-          registration(s) for the person(s) running the booth to the conference. The Exhibit
-          manager(s) must first register as attendees for the full conference.`,
-  'faq.question.1.answer.3': `{{before}} registering, please email {{email}} to get approval for your booth. This can avoid issues with your booth,
-          and can help avoid refund issues if we decide you are not a fit for our
-          conference. `,
-  'faq.question.1.answer.3.before': 'BEFORE',
-  'faq.question.2.title': 'Cancellation and Refunds',
-  'faq.question.2.answer.1': `Conference registration fees are strictly NON-refundable*. You may
-          transfer your registration to another person as long as they qualify
-          for the same type of registration. You must notify GYC Canada of this
-          change by emailing us at {{email}}.`,
-  'faq.question.2.answer.2': `* The ONLY exception to the above rule are government imposed restrictions that may
-            inhibit in-person events`,
-  'faq.question.3.title': 'Letter of Invitation',
-  'faq.question.3.answer.1': `GYC Canada does not and will not provide you with a letter of
-          invitation for any purpose. Everyone is welcome to attend our
-          conference, but you as an attendee are fully responsible for ensuring
-          you can attend and arranging your transport. We will have livestreams
-          available for those who are not able to attend in person or would like
-          to go back and review what was covered. Livestreams DO NOT cover
-          Workshops or Breakouts, which are only available for those who attend
-          in person. Livestreams will be available via our YouTube channel, Facebook page and
-          Website ({{website}}). If
-          you purchase a ticket and need an invitation, you are not viable for a
-          refund.`,
-  'faq.question.3.answer.1.website': 'gyccanada.org',
-  'faq.question.3.answer.2': `All ticket sales are final.`,
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -357,15 +265,7 @@ const fr: Record<TranslationKey, string> = {
 
   'main.time_left': 'Rendez-vous dans {{days}} jours',
 
-  'main.gyc_tagline':
-    'GYC Canada est un {{movement}} fondé par des jeunes {{for}} les jeunes.',
-  'main.gyc_tagline.movement': 'mouvement',
-  'main.gyc_tagline.for': 'pour',
-  'main.read_our_story': 'Lisez notre histoire',
   'main.meet_the_team': 'Rencontrez l’équipe',
-  'main.newsletter.title': 'Inscrivez-vous à notre bulletin d’information',
-  'main.newsletter.subtitle':
-    'Nous enverrons notre infolettre directement à votre boîte de réception, vous donnant la chance de profiter des tarifs de lancement, des nouvelles sur tous nos projets et bien plus!',
   'main.newsletter.name.label': 'Nom complet',
   'main.newsletter.name.placeholder': 'Nom complet',
   'main.newsletter.email.placeholder': 'Courriel',
@@ -378,13 +278,6 @@ const fr: Record<TranslationKey, string> = {
   'main.newsletter.success.title': 'Vous avez été inscrit avec succès!',
   'main.newsletter.success.description': 'Merci pour votre inscription!',
 
-  'main.socials.title':
-    'N’oubliez pas de nous suivre sur les réseaux sociaux pour mieux connaître notre équipe et rester à l’affût des nouveautés!',
-  'main.join.title': 'Rejoignez le mouvement',
-  'main.join.subtitle':
-    'GYC Canada est une organisation à but non lucratif dirigée par une poignée de bénévoles incroyables.{{br}}Cela signifie que nous dépendons entièrement de votre présence et de vos généreux dons pour faire croître le mouvement.',
-  'main.donate.link': 'Considérez un don',
-  'main.join.link': 'Faire du bénévolat',
   'nav.home': 'Conférence {{year}}',
   'nav.about': 'À propos de nous',
   'nav.team': 'Rencontrez l’équipe',
@@ -395,9 +288,6 @@ const fr: Record<TranslationKey, string> = {
   'footer.copy': `© ${new Date().getFullYear()} GYC Canada. Tous droits réservés.`,
   'footer.affiliation': 'Un ministère affilié à {{gyc}}.',
   'footer.links': 'Liens rapides',
-  'contact.title': 'Entrez en contact avec nous!',
-  'contact.directions':
-    'Vous pouvez nous joindre à tout moment par courriel à {{email}}, ou avec le formulaire ci-dessous.',
   'contact.form.name': 'Quel est votre nom?',
   'contact.form.name.placeholder': 'Entrez votre nom complet ici',
   'contact.form.name.required': 'Veuillez entrer votre nom',
@@ -424,17 +314,7 @@ const fr: Record<TranslationKey, string> = {
   'contact.form.success.title': 'Merci de nous avoir contacté!',
   'contact.form.success.description':
     'Votre message a été envoyé avec succès! Nous en prendrons connaissance et vous répondrons dès que possible.',
-  'give.title': 'Soutenez le {{movement}}.',
-  'give.movement': 'mouvement',
-  'give.reason':
-    "Notre appel à la mission est d'être la lumière du monde. Notre Seigneur nous appelle à répandre la bonne nouvelle de l'amour de Christ dans un monde rempli de ténèbres. Cette lumière ne devrait pas être cachée ou couverte par la routine de la vie, mais bien en vue, afin que tout le monde puisse la voir et l'entendre. GYC Canada veut amplifier cette lumière, la faire briller partout au Canada et dans le monde.",
   'give.directions': 'Voici comment vous pouvez donner :',
-  'give.directions.1': 'Entrez le montant que vous souhaitez donner.',
-  'give.directions.2': 'Choisissez votre mode de paiement préféré.',
-  'give.directions.3':
-    'Si vous souhaitez donner mensuellement, cliquez sur "Faire un don mensuel".',
-  'give.directions.4':
-    'Si votre don a un but spécifique, veuillez nous en informer dans la section "Ajouter une note".',
   'give.continue': 'Continuer',
   'team.title': 'Les personnes derrière le {{movement}}.',
   'team.title.movement': 'mouvement',
@@ -451,11 +331,6 @@ const fr: Record<TranslationKey, string> = {
   'team.position.vp-missions': 'Vice-président des missions',
   'team.position.secretary': 'Secrétaire exécutif',
   'team.position.treasurer': 'Trésorier',
-  'volunteer.title': 'Faites partie du {{movement}}.',
-  'volunteer.title.movement': 'mouvement',
-  'volunteer.subtitle':
-    'Rejoignez un groupe de jeunes adultes, de professionnels et de laïcs dédiés et passionnés. En tant qu’organisation dirigée par des jeunes, GYC se mobilise pour partager Christ avec tout le Canada.',
-  'volunteer.directions': 'Sélectionnez le domaine qui vous intéresse :',
   'volunteer.form.name.label': 'Quel est votre nom?',
   'volunteer.form.name.placeholder': 'Entrez votre nom complet ici',
   'volunteer.form.name.required': 'Veuillez entrer votre nom',
@@ -661,70 +536,6 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.website.placeholder': 'Entrez votre site Web ici',
   'registration.form.website.required': 'Veuillez entrer votre site Web',
   'registration.form.submit': 'Soumettre',
-
-  'about.title': 'Notre histoire',
-  'about.1': `GYC Canada (Generation of Youth for Christ) est un mouvement de jeunes
-        adventistes du septième jour provenant de diverses origines, unis toutefois
-        par un engagement commun à un style de vie chrétien sans compromis:
-        une étude sérieuse de la Bible, une vie de prière active et le courage de
-        partager Christ avec les autres.`,
-  'about.2': `GYC Canada soutient le message unique de l'Église
-        adventiste du septième jour. Nous voulons équiper et inspirer les jeunes
-        adventistes à être des ambassadeurs chrétiens dans leurs lieux respectifs de
-        travail et d'études.`,
-  'about.3': `GYC Canada est l'affilié canadien du mouvement GYC initié en 2002,
-        aux États-Unis d'Amérique. Nous sommes de jeunes canadiens, adventistes
-        du septième jour, qui cherchent à promouvoir l'esprit et les principes de GYC au Canada.`,
-  'about.4': `GYC Canada est un ministère indépendant, soutenant
-        l'Église adventiste du septième jour au Canada et reconnu par celle-ci. GYC Canada encourage
-        les jeunes adventistes du septième jour à être des membres actifs de leurs églises locales.`,
-  'about.disclaimer': `Notice importante : GYC Canada n'accepte pas les dîmes.
-        Nous encourageons les donateurs à donner leurs dîmes à leurs églises
-        respectives.`,
-  'about.quote.1': `“Que personne ne méprise ta jeunesse, mais sois un modèle pour les
-          croyants en parole, en conduite, en amour, en foi et en pureté.” {{verse}}`,
-  'about.quote.1.verse': '1 Timothée 4:12',
-  'about.quote.2': `“Avec l'armée que formeraient nos jeunes, bien préparés, la bonne nouvelle de notre Sauveur crucifié, ressuscité, prêt à revenir, serait vite portée au monde entier.” {{source}}`,
-  'about.quote.2.source': 'Éducation, p. 304.2',
-
-  'faq.title': 'Foire aux questions',
-  'faq.question.1.title': 'Stands d’exposants',
-  'faq.question.1.answer.1': `GYC Canada se réserve le droit de refuser tout exposant qui ne
-          respecte pas l’esprit de GYC tel que documenté dans la section 'À
-          propos de nous' de notre site Web. Pour toute question envoyez-nous un message à l'adresse courriel {{email}}.`,
-
-  'faq.question.1.answer.2': `Un stand d’exposant d’une table peut être acheté pour le prix de 100 $, et un
-          stand d’exposant de deux tables pour le prix de 50 $. Un stand d’exposant n'inclut pas l’inscription à la conférence des personnes
-          qui présentent le stand. Le responsable du stand doit d'abord inscrire tous les présentateurs du stand en tant que participants à la conférence
-          pour la durée totale de la conférence avant de réserver un stand d'exposant.`,
-
-  'faq.question.1.answer.3': `Veuillez envoyer un courriel à {{email}}{{before}} de vous inscrire afin d'obtenir l’approbation pour votre stand.
-          Cela peut éviter des problèmes avec votre stand et de remboursement si jamais nous décidons que vous ne correspondez pas avec les critères pour participer à notre conférence.`,
-
-  'faq.question.1.answer.3.before': 'AVANT',
-
-  'faq.question.2.title': 'Annulation et remboursements',
-  'faq.question.2.answer.1': `Les frais d’inscription à la conférence sont strictement NON-remboursables*.
-          Vous pouvez transférer votre inscription à une autre
-          personne tant qu’elle est admissible pour le même type d’inscription.
-          Vous devez informer GYC Canada de ce changement en nous envoyant un courriel à {{email}}.`,
-
-  'faq.question.2.answer.2': `* La SEULE exception admissible à la règle mentionnée plus haut est le cas d'une restriction
-          imposée par le gouvernement qui pourrait empêcher la participation de quelqu'un à l'évènement.`,
-
-  'faq.question.3.title': 'Lettre d’invitation',
-  'faq.question.3.answer.1': `GYC Canada ne peut vous fournir une lettre
-          d’invitation peu importe votre besoin. Tout le monde est le
-          bienvenu à notre conférence, mais en tant que participant vous êtes
-          entièrement responsable de vous assurer que vous pouvez y assister et êtes responsable
-          d’organiser votre transport. Nous aurons des diffusions en direct
-          disponibles pour ceux qui ne peuvent pas assister en personne ou
-          aimeraient revenir sur ce qui a été présenté. Les diffusions en direct
-          NE présenteront PAS les ateliers, car ceux-ci ne sont
-          disponibles que pour ceux qui assistent en personne. Les diffusions en
-          direct seront disponibles via notre canal YouTube, page Facebook et Site Web ({{website}}). Si vous achetez un billet et avez besoin d’une invitation, vous n’êtes pas admissible à un remboursement.`,
-  'faq.question.3.answer.1.website': 'gyccanada.org',
-  'faq.question.3.answer.2': `Toutes les ventes de billets sont finales.`,
 };
 
 export const root = {

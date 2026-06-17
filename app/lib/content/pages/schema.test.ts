@@ -136,6 +136,9 @@ describe('RichText (closed inline-token model, never HTML)', () => {
         RichTextNode.cases.bold.make({
           value: { en: ' today.', fr: " aujourd'hui." },
         }),
+        RichTextNode.cases.italic.make({
+          value: { en: ' * footnote', fr: ' * note' },
+        }),
       ];
       const restored = yield* roundTrips(RichText, value);
       expect(restored).toEqual(value);

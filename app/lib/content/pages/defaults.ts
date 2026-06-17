@@ -115,12 +115,17 @@ export const defaultFaqPage: FaqPage = Schema.decodeUnknownSync(FaqPage)({
     {
       id: newListItemId(),
       question: { en: 'Exhibitor Booths', fr: 'Stands d’exposants' },
+      // Three answer paragraphs (`faq.question.1.answer.1/.2/.3`); the `\n\n`
+      // breaks carry today's `<br/><br/>` paragraph separators through the
+      // inline RichText model. EN answer.3 reads "BEFORE registering, please
+      // email {{email}} …"; FR answer.3 reorders to "… courriel à {{email}}
+      // AVANT de vous inscrire …", so the bold "AVANT" token follows the link.
       answer: [
         {
           _tag: 'text',
           value: {
             en: "GYC Canada reserves the right to refuse any exhibitor that does not uphold the Spirit of GYC as documented in the 'About Us' section of our website. Email us with any questions at ",
-            fr: 'GYC Canada se réserve le droit de refuser tout exposant qui ne respecte pas l’esprit de GYC. Pour toute question, écrivez-nous à ',
+            fr: "GYC Canada se réserve le droit de refuser tout exposant qui ne respecte pas l’esprit de GYC tel que documenté dans la section 'À propos de nous' de notre site Web. Pour toute question envoyez-nous un message à l'adresse courriel ",
           },
         },
         {
@@ -128,7 +133,36 @@ export const defaultFaqPage: FaqPage = Schema.decodeUnknownSync(FaqPage)({
           text: { en: 'hello@gyccanada.org', fr: 'hello@gyccanada.org' },
           href: GYCC_EMAIL,
         },
-        { _tag: 'text', value: { en: '.', fr: '.' } },
+        {
+          _tag: 'text',
+          value: {
+            en: '.\n\nA single-table exhibitor booth can be reserved for the price of $100, and a two-table exhibitor booth for the price of $50. An exhibitor booth reservation does not include registration(s) for the person(s) running the booth to the conference. The Exhibit manager(s) must first register as attendees for the full conference.\n\n',
+            fr: ".\n\nUn stand d’exposant d’une table peut être acheté pour le prix de 100 $, et un stand d’exposant de deux tables pour le prix de 50 $. Un stand d’exposant n'inclut pas l’inscription à la conférence des personnes qui présentent le stand. Le responsable du stand doit d'abord inscrire tous les présentateurs du stand en tant que participants à la conférence pour la durée totale de la conférence avant de réserver un stand d'exposant.\n\n",
+          },
+        },
+        {
+          _tag: 'bold',
+          value: { en: 'BEFORE', fr: 'AVANT' },
+        },
+        {
+          _tag: 'text',
+          value: {
+            en: ' registering, please email ',
+            fr: ' courriel à ',
+          },
+        },
+        {
+          _tag: 'link',
+          text: { en: 'hello@gyccanada.org', fr: 'hello@gyccanada.org' },
+          href: GYCC_EMAIL,
+        },
+        {
+          _tag: 'text',
+          value: {
+            en: ' to get approval for your booth. This can avoid issues with your booth, and can help avoid refund issues if we decide you are not a fit for our conference.',
+            fr: " de vous inscrire afin d'obtenir l’approbation pour votre stand. Cela peut éviter des problèmes avec votre stand et de remboursement si jamais nous décidons que vous ne correspondez pas avec les critères pour participer à notre conférence.",
+          },
+        },
       ],
     },
     {
@@ -137,12 +171,17 @@ export const defaultFaqPage: FaqPage = Schema.decodeUnknownSync(FaqPage)({
         en: 'Cancellation and Refunds',
         fr: 'Annulation et remboursements',
       },
+      // `faq.question.2.answer.1` (with the "NON-refundable*" asterisk) ends the
+      // first paragraph, then a `\n\n` break, then the `faq.question.2.answer.2`
+      // footnote as an `italic` run — the pre-migration route wrapped this footnote
+      // in `<span className="italic">`, so it carries an `italic` token to preserve
+      // that styling without HTML (closed RichText model; renderer maps it to `<em>`).
       answer: [
         {
           _tag: 'text',
           value: {
-            en: 'Conference registration fees are strictly NON-refundable. You may transfer your registration to another person as long as they qualify for the same type of registration. You must notify GYC Canada by emailing us at ',
-            fr: 'Les frais d’inscription à la conférence sont strictement NON-remboursables. Vous pouvez transférer votre inscription à une autre personne admissible au même type d’inscription. Vous devez en informer GYC Canada par courriel à ',
+            en: 'Conference registration fees are strictly NON-refundable*. You may transfer your registration to another person as long as they qualify for the same type of registration. You must notify GYC Canada of this change by emailing us at ',
+            fr: 'Les frais d’inscription à la conférence sont strictement NON-remboursables*. Vous pouvez transférer votre inscription à une autre personne tant qu’elle est admissible pour le même type d’inscription. Vous devez informer GYC Canada de ce changement en nous envoyant un courriel à ',
           },
         },
         {
@@ -150,18 +189,32 @@ export const defaultFaqPage: FaqPage = Schema.decodeUnknownSync(FaqPage)({
           text: { en: 'hello@gyccanada.org', fr: 'hello@gyccanada.org' },
           href: GYCC_EMAIL,
         },
-        { _tag: 'text', value: { en: '.', fr: '.' } },
+        {
+          _tag: 'text',
+          value: { en: '.\n\n', fr: '.\n\n' },
+        },
+        {
+          _tag: 'italic',
+          value: {
+            en: '* The ONLY exception to the above rule are government imposed restrictions that may inhibit in-person events',
+            fr: "* La SEULE exception admissible à la règle mentionnée plus haut est le cas d'une restriction imposée par le gouvernement qui pourrait empêcher la participation de quelqu'un à l'évènement.",
+          },
+        },
       ],
     },
     {
       id: newListItemId(),
       question: { en: 'Letter of Invitation', fr: 'Lettre d’invitation' },
+      // The full `faq.question.3.answer.1` paragraph (everyone welcome /
+      // attendee responsible / livestreams DO NOT cover Workshops or Breakouts /
+      // "not viable for a refund") with the inline website link, then the bold
+      // `faq.question.3.answer.2` ("All ticket sales are final.").
       answer: [
         {
           _tag: 'text',
           value: {
-            en: 'GYC Canada does not and will not provide you with a letter of invitation for any purpose. Livestreams will be available via our YouTube channel, Facebook page and website (',
-            fr: 'GYC Canada ne peut vous fournir une lettre d’invitation, peu importe la raison. Les diffusions en direct seront disponibles sur notre chaîne YouTube, notre page Facebook et notre site web (',
+            en: 'GYC Canada does not and will not provide you with a letter of invitation for any purpose. Everyone is welcome to attend our conference, but you as an attendee are fully responsible for ensuring you can attend and arranging your transport. We will have livestreams available for those who are not able to attend in person or would like to go back and review what was covered. Livestreams DO NOT cover Workshops or Breakouts, which are only available for those who attend in person. Livestreams will be available via our YouTube channel, Facebook page and Website (',
+            fr: 'GYC Canada ne peut vous fournir une lettre d’invitation peu importe votre besoin. Tout le monde est le bienvenu à notre conférence, mais en tant que participant vous êtes entièrement responsable de vous assurer que vous pouvez y assister et êtes responsable d’organiser votre transport. Nous aurons des diffusions en direct disponibles pour ceux qui ne peuvent pas assister en personne ou aimeraient revenir sur ce qui a été présenté. Les diffusions en direct NE présenteront PAS les ateliers, car ceux-ci ne sont disponibles que pour ceux qui assistent en personne. Les diffusions en direct seront disponibles via notre canal YouTube, page Facebook et Site Web (',
           },
         },
         {
@@ -171,13 +224,16 @@ export const defaultFaqPage: FaqPage = Schema.decodeUnknownSync(FaqPage)({
         },
         {
           _tag: 'text',
-          value: { en: ').', fr: ').' },
+          value: {
+            en: '). If you purchase a ticket and need an invitation, you are not viable for a refund.\n\n',
+            fr: '). Si vous achetez un billet et avez besoin d’une invitation, vous n’êtes pas admissible à un remboursement.\n\n',
+          },
         },
         {
           _tag: 'bold',
           value: {
-            en: ' All ticket sales are final.',
-            fr: ' Toutes les ventes de billets sont finales.',
+            en: 'All ticket sales are final.',
+            fr: 'Toutes les ventes de billets sont finales.',
           },
         },
       ],

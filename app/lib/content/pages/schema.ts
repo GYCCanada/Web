@@ -76,20 +76,24 @@ export type LinkHref = typeof LinkHref.Type;
 
 /**
  * One inline token of rich page copy. A CLOSED discriminated union (`_tag`) over
- * exactly three kinds — the only inline formatting the evergreen pages actually
- * use (plain runs, bold runs, and links). A `RichText` value is a *sequence* of
- * these tokens, so "{{before}} registering, please email {{email}} …" round-trips
- * as `[bold('BEFORE'), text(' registering, please email '), link(email), …]`
+ * exactly four kinds — the only inline formatting the evergreen pages actually
+ * use (plain runs, bold runs, italic runs, and links). A `RichText` value is a
+ * *sequence* of these tokens, so "{{before}} registering, please email {{email}} …"
+ * round-trips as `[bold('BEFORE'), text(' registering, please email '), link(email), …]`
  * without any HTML ever entering the model — the renderer (Branch 5.4) maps each
- * token to a `<span>` / `<strong>` / `<a>` (`make-impossible-states-unrepresentable`).
+ * token to a `<span>` / `<strong>` / `<em>` / `<a>` (`make-impossible-states-unrepresentable`).
  *
- *   - `text`  — a bilingual plain run.
- *   - `bold`  — a bilingual bold run.
- *   - `link`  — a bilingual label plus a validated `LinkHref` (locale-neutral).
+ *   - `text`    — a bilingual plain run.
+ *   - `bold`    — a bilingual bold run.
+ *   - `italic`  — a bilingual emphasized run (the FAQ refund footnote, rendered in
+ *     an `<span className="italic">` by the pre-migration route — modelling it as a
+ *     token preserves that styling without HTML).
+ *   - `link`    — a bilingual label plus a validated `LinkHref` (locale-neutral).
  */
 export const RichTextNode = Schema.TaggedUnion({
   text: { value: Text },
   bold: { value: Text },
+  italic: { value: Text },
   link: { text: Text, href: LinkHref },
 });
 export type RichTextNode = typeof RichTextNode.Type;
