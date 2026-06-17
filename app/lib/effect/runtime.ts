@@ -3,6 +3,7 @@ import { data, redirect } from 'react-router';
 
 import { AdminDisabled, Auth, BadPassword, Unauthorized } from '~/lib/auth.server';
 import { Content } from '~/lib/content.server';
+import { DraftEditor } from '~/lib/content/draft-editor.server';
 import { Env } from '~/lib/env.server';
 import { Sendgrid, SendgridDisabled, SendgridError } from '~/lib/sendgrid.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
@@ -23,6 +24,7 @@ export type AppServices =
   | Mailer.Service
   | Sendgrid.Service
   | Content.Service
+  | DraftEditor.Service
   | Auth.Service
   | Storage.Service
   | Toast;
@@ -56,14 +58,24 @@ export type AppError =
 //
 // `Auth` is likewise optional everywhere: with `ADMIN_PASSWORD` unset its layer
 // builds a disabled instance (admin 404s), so it never fails to build either.
-const AppLayer = Layer.mergeAll(
+//
+// `DraftEditor.layer` (the `/admin` editor's write pipeline) is layered ON TOP
+// of this base via `provideMerge`, so it consumes the SAME exposed
+// `Content.Service` (its `publish` busts the very cache the public read serves
+// from) and the SAME exposed `Storage.Service` the editor route reads/writes —
+// no second Content/Storage instance to coordinate.
+const BaseLayer = Layer.mergeAll(
   Mailer.layer,
   Sendgrid.layer,
   Toast.layer,
   Content.defaultLayer,
   Storage.layerOptional,
   Auth.layer,
-).pipe(Layer.provideMerge(Env.layer));
+);
+const AppLayer = DraftEditor.layer.pipe(
+  Layer.provideMerge(BaseLayer),
+  Layer.provideMerge(Env.layer),
+);
 const AppRuntime = ManagedRuntime.make(AppLayer);
 
 const isResponse = (v: unknown): v is Response =>

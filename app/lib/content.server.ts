@@ -26,7 +26,6 @@ import { dayjs } from './dayjs';
 import { assertValidLocale } from './localization/localization';
 import type { Locale } from './localization/localization';
 import { Storage } from './storage.server';
-import type { ObjectHead } from './storage.server';
 
 /**
  * The deep module the public routes talk to (CMS plan §"Services", decision
@@ -331,13 +330,6 @@ export class Service extends Context.Service<
       readonly board: readonly string[];
     }>;
     /**
-     * Load the document the `/admin` editor edits: the unpublished draft if one
-     * exists, else the published document, else the bundled defaults. Unlike
-     * the public read path this is NOT cached and NOT converted to the legacy
-     * boundary shape — the editor edits the raw `SiteContent` document.
-     */
-    readonly getAdminContent: () => Effect.Effect<AdminContent>;
-    /**
      * Invalidate the public read cache so a subsequent `getSiteContent`
      * re-reads the bucket. Called by the editor's publish action so a publish
      * is visible with no redeploy and without waiting out the TTL (D3,
@@ -460,60 +452,6 @@ export const layer = Layer.effect(
       };
     });
 
-    /**
-     * Load the document the `/admin` editor edits, reconciling draft vs
-     * published by their bucket `lastModified` rather than by the mere
-     * *presence* of a draft object (`derive-dont-sync`,
-     * `make-impossible-states-unrepresentable`).
-     *
-     * A draft represents pending unpublished edits **only when it is strictly
-     * newer than the published document** — i.e. it was saved after the last
-     * publish. The publish path deletes the draft best-effort, but correctness
-     * must not depend on that delete succeeding: a draft left behind by a
-     * failed delete, or a stale draft that predates the current published doc,
-     * is older-or-equal and is therefore ignored, so the editor opens from the
-     * published document and a subsequent save/publish can never overwrite the
-     * live content with stale draft values. A draft with no published document
-     * to compare against is always a valid edit source.
-     *
-     * (Bucket `lastModified` is second-granular on some backends, so a draft
-     * saved and published within the same second compares equal — the strict
-     * `>` then drops the ambiguous draft in favour of the just-published live
-     * content, the safe direction.)
-     */
-    const getAdminContent = Effect.fn('Content.getAdminContent')(
-      function* () {
-        const draft = yield* readDocument(SITE_CONTENT_DRAFT_KEY);
-        const published = yield* readDocument(SITE_CONTENT_KEY);
-
-        if (Option.isSome(draft)) {
-          if (Option.isNone(published)) {
-            return { content: draft.value, source: 'draft' as const };
-          }
-          const draftHead = yield* storage
-            .head(SITE_CONTENT_DRAFT_KEY)
-            .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
-          const publishedHead = yield* storage
-            .head(SITE_CONTENT_KEY)
-            .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
-          const draftIsNewer =
-            Option.isSome(draftHead) &&
-            Option.isSome(publishedHead) &&
-            draftHead.value.lastModified.getTime() >
-              publishedHead.value.lastModified.getTime();
-          if (draftIsNewer) {
-            return { content: draft.value, source: 'draft' as const };
-          }
-          return { content: published.value, source: 'published' as const };
-        }
-
-        if (Option.isSome(published)) {
-          return { content: published.value, source: 'published' as const };
-        }
-        return { content: defaultContent, source: 'defaults' as const };
-      },
-    );
-
     // Arm the next public read to re-fetch the bucket so a publish is visible
     // immediately, with no redeploy and without waiting out the TTL (D3). This
     // is the built-in cache's `invalidate`: it expires the cached document and
@@ -536,7 +474,6 @@ export const layer = Layer.effect(
       getCurrentConference,
       getTranslations,
       getTeam,
-      getAdminContent,
       bust,
     });
   }),

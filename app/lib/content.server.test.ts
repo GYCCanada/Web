@@ -2,11 +2,7 @@ import { describe, expect, it } from 'effect-bun-test';
 import { Effect, Layer, Option, Ref, Schema } from 'effect';
 import { TestClock } from 'effect/testing';
 
-import {
-  Content,
-  SITE_CONTENT_DRAFT_KEY,
-  SITE_CONTENT_KEY,
-} from './content.server';
+import { Content, SITE_CONTENT_KEY } from './content.server';
 import { defaultContent } from './content/defaults';
 import { HexColour, SiteContent } from './content/schema';
 import type { SiteContent as SiteContentType } from './content/schema';
@@ -413,92 +409,6 @@ describe('Content cache (TTL + single-flight)', () => {
     }).pipe(provideCounting(defaultContent)));
 });
 
-describe('Content admin read (draft → published → defaults)', () => {
-  const adminStorage = (objects: Record<string, string>) =>
-    layerTest(
-      Object.fromEntries(
-        Object.entries(objects).map(([key, body]) => [key, { body }]),
-      ),
-    );
-
-  it.effect('falls back to the bundled defaults when nothing is stored', () =>
-    Effect.gen(function* () {
-      const content = yield* Content.Service;
-      const result = yield* content.getAdminContent();
-      expect(result.source).toBe('defaults');
-      expect(result.content).toEqual(defaultContent);
-    }).pipe(provideContent(adminStorage({}))));
-
-  it.effect('prefers the published document over the defaults', () =>
-    Effect.gen(function* () {
-      const content = yield* Content.Service;
-      const result = yield* content.getAdminContent();
-      expect(result.source).toBe('published');
-    }).pipe(
-      provideContent(
-        seededStorage(defaultContent, (published) =>
-          adminStorage({ [SITE_CONTENT_KEY]: published }),
-        ),
-      ),
-    ));
-
-  it.effect(
-    'prefers a draft saved after the last publish over the published document',
-    () =>
-      Effect.gen(function* () {
-        const draftDoc = SiteContent.make({
-          ...defaultContent,
-          board: ['Only In The Draft'],
-        });
-        const draft = yield* encode(draftDoc);
-        const content = yield* Content.Service;
-        const storage = yield* Storage.Service;
-        // The published document is seeded at epoch; the draft is written through
-        // `Storage.put` AFTER advancing the clock so it is strictly newer — the
-        // real "I edited and saved a draft after the last publish" timeline.
-        yield* TestClock.adjust('1 second');
-        yield* storage.put(SITE_CONTENT_DRAFT_KEY, draft, 'application/json');
-        const result = yield* content.getAdminContent();
-        expect(result.source).toBe('draft');
-        expect(result.content.board).toEqual(['Only In The Draft']);
-      }).pipe(
-        provideContent(
-          seededStorage(defaultContent, (published) =>
-            adminStorage({ [SITE_CONTENT_KEY]: published }),
-          ),
-        ),
-      ),
-  );
-
-  it.effect(
-    'ignores a stale draft that predates the published document (failed-delete / pre-existing draft)',
-    () =>
-      // The bug this guards: a stale draft left intact after a publish (delete
-      // failed, or a pre-existing older draft) must NOT reopen as the edit source,
-      // or a later save/publish would overwrite the live content with stale values.
-      Effect.gen(function* () {
-        const staleDraftDoc = SiteContent.make({
-          ...defaultContent,
-          board: ['Stale Draft Values'],
-        });
-        const publishedDoc = SiteContent.make({
-          ...defaultContent,
-          board: ['Freshly Published'],
-        });
-        const staleDraft = yield* encode(staleDraftDoc);
-        const published = yield* encode(publishedDoc);
-        const content = yield* Content.Service;
-        const storage = yield* Storage.Service;
-        // Draft written first…
-        yield* storage.put(SITE_CONTENT_DRAFT_KEY, staleDraft, 'application/json');
-        // …then a later publish writes the live document (and would normally
-        // delete the draft, but here the delete is simulated as having failed —
-        // the draft is left intact).
-        yield* TestClock.adjust('1 second');
-        yield* storage.put(SITE_CONTENT_KEY, published, 'application/json');
-        const result = yield* content.getAdminContent();
-        expect(result.source).toBe('published');
-        expect(result.content.board).toEqual(['Freshly Published']);
-      }).pipe(provideContent(adminStorage({}))),
-  );
-});
+// The admin draft → published → defaults reconciliation moved from
+// `Content.getAdminContent` into `DraftEditor.load` (registration-launch Branch
+// 1, sub-commit 1.1). Its tests live in `content/draft-editor.server.test.ts`.

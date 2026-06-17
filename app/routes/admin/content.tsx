@@ -1,4 +1,4 @@
-import { Cause, Clock, Effect, Option, Schema, SchemaIssue } from 'effect';
+import { Cause, Clock, Effect, Option, Schema } from 'effect';
 import { useRef } from 'react';
 import {
   Form,
@@ -13,17 +13,16 @@ import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
 import { Auth } from '~/lib/auth.server';
 import { Env } from '~/lib/env.server';
 import {
-  Content,
-  SITE_CONTENT_DRAFT_KEY,
-  SITE_CONTENT_KEY,
-} from '~/lib/content.server';
+  DraftEditor,
+  siteScope,
+  type IssueError,
+} from '~/lib/content/draft-editor.server';
 import {
   assembleOverrides,
   collectTranslations,
   deepMerge,
   imageUploadTarget,
   isAcceptedImageType,
-  setAtPath,
   translationFieldName,
   uploadedImageKey,
   type Json,
@@ -57,15 +56,10 @@ export const headers = adminSecurityHeaders;
  * (`boundary-discipline`, `make-impossible-states-unrepresentable`).
  */
 
-// `encodeDocument` yields the encoded object (handed to the React view via the
-// loader); `encodeDocumentJson` yields the JSON STRING stored in the bucket
-// (Effect-Schema's JSON codec, not `JSON.stringify`, per the project lint rule).
+// `encodeDocument` yields the encoded object the React view renders from the
+// loader's `AdminContent`. The merge/decode/re-encode/store choreography now
+// lives in `DraftEditor`; the route only encodes for display.
 const encodeDocument = Schema.encodeUnknownEffect(SiteContent);
-const encodeDocumentJson = Schema.encodeUnknownEffect(
-  Schema.fromJsonString(SiteContent),
-);
-const decodeDocument = Schema.decodeUnknownEffect(SiteContent);
-const formatIssue = SchemaIssue.makeFormatterStandardSchemaV1();
 
 type EncodedDocument = typeof SiteContent.Encoded;
 
@@ -73,25 +67,12 @@ type ActionResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly error: string; readonly issues: readonly string[] };
 
-/**
- * Walk a decode failure cause for its `SchemaIssue` and flatten it to dotted-path
- * messages, so the editor can show *which* field a publish/save was rejected on
- * rather than a raw cause dump.
- */
-const issueMessages = (cause: Cause.Cause<unknown>): readonly string[] => {
-  for (const reason of cause.reasons) {
-    if (Cause.isFailReason(reason)) {
-      const error = reason.error as { readonly issue?: unknown };
-      if (error && SchemaIssue.isIssue(error.issue)) {
-        return formatIssue(error.issue).issues.map((entry) => {
-          const path = entry.path?.map((segment) => String(segment)).join('.');
-          return path ? `${path}: ${entry.message}` : entry.message;
-        });
-      }
-    }
-  }
-  return [];
-};
+/** Map a `DraftEditor` `IssueError` to the editor's JSON action response. */
+const issueResponse = (error: IssueError): Response =>
+  Response.json(
+    { ok: false, error: error.message, issues: error.issues },
+    { status: error.status },
+  );
 
 export const loader = routeHandler(function* () {
   const { request } = yield* ReactRouterContext;
@@ -106,9 +87,9 @@ export const loader = routeHandler(function* () {
     }),
   );
 
-  const content = yield* Content.Service;
+  const editor = yield* DraftEditor.Service;
   const env = yield* Env.Service;
-  const { content: document, source } = yield* content.getAdminContent();
+  const { content: document, source } = yield* editor.load(siteScope);
   const encoded = yield* encodeDocument(document);
 
   // The bucket is "configured" exactly when `Env.bucket` is present — the single
@@ -130,12 +111,15 @@ export const action = routeAction(function* () {
     }),
   );
 
-  const content = yield* Content.Service;
+  const editor = yield* DraftEditor.Service;
   const storage = yield* Storage.Service;
   const form = yield* Effect.promise(() => request.formData());
   const intent = String(form.get('intent') ?? 'save-draft');
 
   // ---- image upload --------------------------------------------------------
+  // The route owns the FormData side: validate the file and store its raw bytes;
+  // `DraftEditor.applyImageUpload` then rewrites the targeted `…key` field on the
+  // draft so the new image survives a reload and a later publish.
   const uploadTarget = imageUploadTarget(intent);
   if (uploadTarget !== null) {
     const file = form.get('file');
@@ -174,36 +158,10 @@ export const action = routeAction(function* () {
       );
     }
 
-    // Point the targeted `…key` field at the new object on the current draft and
-    // persist it, so the new image survives the reload and a later publish.
-    const { content: current } = yield* content.getAdminContent();
-    const encoded = (yield* encodeDocument(current)) as Json;
-    const next = setAtPath(encoded, uploadTarget, key);
-    const decodeExit = yield* Effect.exit(decodeDocument(next));
-    if (decodeExit._tag !== 'Success') {
-      return Response.json(
-        {
-          ok: false,
-          error: 'Uploaded image, but the document no longer decodes.',
-          issues: issueMessages(decodeExit.cause),
-        },
-        { status: 400 },
-      );
-    }
-    const json = yield* encodeDocumentJson(decodeExit.value);
-    const saveExit = yield* Effect.exit(
-      storage.put(SITE_CONTENT_DRAFT_KEY, json, 'application/json'),
-    );
-    if (saveExit._tag === 'Failure') {
-      return Response.json(
-        {
-          ok: false,
-          error: `Image stored, but saving the draft failed: ${Cause.pretty(saveExit.cause)}`,
-          issues: [],
-        },
-        { status: 502 },
-      );
-    }
+    const applied = yield* editor
+      .applyImageUpload(siteScope, uploadTarget, key)
+      .pipe(Effect.result);
+    if (applied._tag === 'Failure') return issueResponse(applied.failure);
     return redirect(
       `/admin/content?status=${encodeURIComponent(`Image uploaded: ${key}`)}`,
     );
@@ -217,72 +175,28 @@ export const action = routeAction(function* () {
   }
 
   // ---- save / publish ------------------------------------------------------
-  const { content: current } = yield* content.getAdminContent();
-  const base = (yield* encodeDocument(current)) as Json;
-  const overrides = assembleOverrides(form.entries());
-  // Translation fields are named `t:<locale>:<key>` (their keys carry dots, so
-  // they can't ride the dotted-path convention); fold them in as a flat-map
-  // override on `translations` before merging onto the current document.
-  const translations = collectTranslations(form.entries());
-  const merged = deepMerge(deepMerge(base, overrides), {
-    translations,
+  // Parse the form into ONE override: dotted-path fields via `assembleOverrides`,
+  // plus the `t:<locale>:<key>` translation fields folded onto `translations`
+  // (their keys carry dots, so they can't ride the dotted-path convention).
+  // `DraftEditor.editDocument` merges it onto the current document, decodes at
+  // the single boundary, and stores the draft.
+  const override = deepMerge(assembleOverrides(form.entries()), {
+    translations: collectTranslations(form.entries()),
   } as Json);
 
-  const decodeExit = yield* Effect.exit(decodeDocument(merged));
-  if (decodeExit._tag !== 'Success') {
-    return Response.json(
-      {
-        ok: false,
-        error: 'Validation failed — fix the fields below and resubmit.',
-        issues: issueMessages(decodeExit.cause),
-      },
-      { status: 400 },
-    );
-  }
-
-  // Re-encode the decoded value so what we store is exactly what the schema
-  // produces (drops any stray override keys, normalises `Option` shapes).
-  const json = yield* encodeDocumentJson(decodeExit.value);
+  const edited = yield* editor
+    .editDocument(siteScope, override)
+    .pipe(Effect.result);
+  if (edited._tag === 'Failure') return issueResponse(edited.failure);
 
   if (intent === 'save-draft') {
-    const saveExit = yield* Effect.exit(
-      storage.put(SITE_CONTENT_DRAFT_KEY, json, 'application/json'),
-    );
-    if (saveExit._tag === 'Failure') {
-      return Response.json(
-        {
-          ok: false,
-          error: `Saving the draft failed — is the bucket configured? ${Cause.pretty(saveExit.cause)}`,
-          issues: [],
-        },
-        { status: 502 },
-      );
-    }
     return redirect('/admin/content?status=Draft%20saved.');
   }
 
-  // publish: write the live document, drop the draft, bust the read cache.
-  const publishExit = yield* Effect.exit(
-    storage.put(SITE_CONTENT_KEY, json, 'application/json'),
-  );
-  if (publishExit._tag === 'Failure') {
-    return Response.json(
-      {
-        ok: false,
-        error: `Publishing failed — is the bucket configured? ${Cause.pretty(publishExit.cause)}`,
-        issues: [],
-      },
-      { status: 502 },
-    );
-  }
-  // Best-effort cleanup so the bucket stays tidy. Correctness does NOT depend on
-  // it: `Content.getAdminContent` reconciles draft-vs-published by `lastModified`
-  // and only reopens a draft that is strictly newer than the just-published
-  // document, so a leftover draft from a failed delete (now older-or-equal to the
-  // live doc) can never reopen stale content. Hence this must not fail the
-  // publish — the live document is already written.
-  yield* storage.delete(SITE_CONTENT_DRAFT_KEY).pipe(Effect.ignore);
-  yield* content.bust();
+  // publish: promote the just-saved draft to the live document, drop the draft,
+  // and bust the read cache so the change is live on the next public read.
+  const published = yield* editor.publish(siteScope).pipe(Effect.result);
+  if (published._tag === 'Failure') return issueResponse(published.failure);
   return redirect(
     '/admin/content?status=Published.%20Live%20on%20the%20next%20page%20load.',
   );

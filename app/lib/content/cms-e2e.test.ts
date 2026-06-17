@@ -2,37 +2,30 @@ import { describe, expect, it } from 'bun:test';
 import { Effect, Layer, Schema } from 'effect';
 import { TestClock } from 'effect/testing';
 
-import {
-  Content,
-  SITE_CONTENT_DRAFT_KEY,
-  SITE_CONTENT_KEY,
-} from '../content.server';
+import { Content, SITE_CONTENT_KEY } from '../content.server';
 import { Storage } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
 import {
   assembleOverrides,
-  deepMerge,
   isAcceptedImageType,
-  setAtPath,
   uploadedImageKey,
   type Json,
 } from './admin-form';
+import { DraftEditor, siteScope } from './draft-editor.server';
 import { defaultContent } from './defaults';
 import { SiteContent } from './schema';
 
 /**
  * End-to-end-ish proof of the C5 publish + image paths against the in-memory
- * `layerTest` storage helper (a real S3 / MinIO is not reachable headless in CI —
- * flagged in the C5 runtime-verify notes). It reproduces, step for step, what
- * the `/admin/content` route's action does — assemble form → deepMerge onto the
- * current document → decode → `Storage.put(site.json)` → `Content.bust()` — and
- * asserts the public read path reflects the edit WITHOUT a TTL wait or redeploy
- * (D3), then that an uploaded image is retrievable from `Storage.get` under its
- * `images/uploads/<key>` (the same key the `GET /images/*` route streams).
+ * `layerTest` storage helper (a real S3 / MinIO is not reachable headless in CI).
+ * Post-Branch-1 the `/admin/content` route action is auth + a `DraftEditor`
+ * call only: this test drives that ONE service — `editDocument` (save draft),
+ * `publish` (promote draft → live + bust), `applyImageUpload` (rewrite a key on
+ * the draft) — and asserts the public read path reflects the edit WITHOUT a TTL
+ * wait or redeploy (D3), and that an uploaded image is retrievable from
+ * `Storage.get` under its `images/uploads/<key>`.
  */
 
-const encodeDocument = Schema.encodeUnknownEffect(SiteContent);
-const decodeDocument = Schema.decodeUnknownEffect(SiteContent);
 // The JSON-string codec (not `JSON.stringify`, per the project lint rule):
 // `encodeJson(value)` is exactly the bytes stored at `content/site.json`.
 const encodeJson = Schema.encodeUnknownEffect(Schema.fromJsonString(SiteContent));
@@ -41,15 +34,27 @@ const encodeJson = Schema.encodeUnknownEffect(Schema.fromJsonString(SiteContent)
 const seedBody = (): Promise<string> =>
   Effect.runPromise(encodeJson(defaultContent));
 
-/** Wire `Content` over a shared in-memory bucket also exposed to the test. */
+/**
+ * Wire `DraftEditor` (over the `Content` it depends on) and `Content` itself
+ * over ONE shared in-memory bucket, also exposed to the test — so the editor's
+ * writes and the public read path hit the same store. `Content.layer` feeds
+ * `DraftEditor.layer`'s `Content.Service` requirement and stays exposed.
+ */
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Content.Service | Storage.Service>,
+  effect: Effect.Effect<
+    A,
+    E,
+    DraftEditor.Service | Content.Service | Storage.Service
+  >,
   objects: Record<string, { body: string }> = {},
 ) =>
   Effect.runPromise(
     Effect.scoped(
       Effect.provide(effect, [
-        Layer.provideMerge(Content.layer, layerTest(objects)),
+        Layer.provideMerge(
+          Layer.provideMerge(DraftEditor.layer, Content.layer),
+          layerTest(objects),
+        ),
         TestClock.layer(),
       ]),
     ),
@@ -62,28 +67,23 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
     const result = await run(
       Effect.gen(function* () {
         const content = yield* Content.Service;
-        const storage = yield* Storage.Service;
+        const editor = yield* DraftEditor.Service;
 
         // 1. The public site reads the seeded defaults.
         const before = yield* content.getConference('en', 2026);
 
-        // 2. The admin edits the 2026 theme name + accent (simulating the form).
-        const { content: current } = yield* content.getAdminContent();
-        const base = (yield* encodeDocument(current)) as Json;
-        const overrides = assembleOverrides([
+        // 2. The admin edits the 2026 theme name + accent (simulating the form's
+        //    parsed override), then publishes — the route's two-step.
+        const override = assembleOverrides([
           ['conferences.2.themeName.en', 'Speak Boldly'],
           ['conferences.2.accentColor', '#112233'],
-        ]);
-        const merged = deepMerge(base, overrides);
-        const decoded = yield* decodeDocument(merged);
-        const canonical = yield* encodeJson(decoded);
+        ]) as Json;
+        // Advance so the saved draft is strictly newer than the epoch seed.
+        yield* TestClock.adjust('1 second');
+        yield* editor.editDocument(siteScope, override);
+        yield* editor.publish(siteScope);
 
-        // 3. Publish: write site.json, drop the draft, bust the read cache.
-        yield* storage.put(SITE_CONTENT_KEY, canonical, 'application/json');
-        yield* storage.delete(SITE_CONTENT_DRAFT_KEY).pipe(Effect.ignore);
-        yield* content.bust();
-
-        // 4. The public site reflects the edit immediately — no TTL advance.
+        // 3. The public site reflects the edit immediately — no TTL advance.
         const after = yield* content.getConference('en', 2026);
 
         return { before, after };
@@ -105,24 +105,19 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
     const result = await run(
       Effect.gen(function* () {
         const content = yield* Content.Service;
-        const storage = yield* Storage.Service;
+        const editor = yield* DraftEditor.Service;
 
         // Save a draft that renames 2026 — public read must NOT see it. The
         // draft is saved AFTER the seeded publish (clock advanced) so it is the
         // strictly-newer pending edit the editor should reopen.
-        const base = (yield* encodeDocument(defaultContent)) as Json;
-        const merged = deepMerge(
-          base,
-          assembleOverrides([['conferences.2.themeName.en', 'Draft Only']]),
-        );
-        const decoded = yield* decodeDocument(merged);
-        const canonical = yield* encodeJson(decoded);
         yield* TestClock.adjust('1 second');
-        yield* storage.put(SITE_CONTENT_DRAFT_KEY, canonical, 'application/json');
-        yield* content.bust();
+        yield* editor.editDocument(
+          siteScope,
+          assembleOverrides([['conferences.2.themeName.en', 'Draft Only']]) as Json,
+        );
 
         const publicRead = yield* content.getConference('en', 2026);
-        const adminRead = yield* content.getAdminContent();
+        const adminRead = yield* editor.load(siteScope);
         return { publicTitle: publicRead.title, adminSource: adminRead.source };
       }),
       { [SITE_CONTENT_KEY]: { body: seed } },
@@ -141,27 +136,20 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
 
     const result = await run(
       Effect.gen(function* () {
-        const content = yield* Content.Service;
+        const editor = yield* DraftEditor.Service;
         const storage = yield* Storage.Service;
 
-        // Validate + store the upload exactly as the route action does.
+        // Validate + store the raw upload exactly as the route action does, then
+        // rewrite the draft's targeted key via the one service.
         const contentType = 'image/png';
         expect(isAcceptedImageType(contentType)).toBe(true);
         const target = 'team.0.photo.key';
         const key = uploadedImageKey(target, contentType, 1_700_000_000_000);
         yield* storage.put(key, png, contentType);
-
-        // Point the draft's targeted key at the new object + persist (route does
-        // this so the new image survives a reload and a later publish).
-        const { content: current } = yield* content.getAdminContent();
-        const encoded = (yield* encodeDocument(current)) as Json;
-        const next = setAtPath(encoded, target, key);
-        const decoded = yield* decodeDocument(next);
-        yield* storage.put(
-          SITE_CONTENT_DRAFT_KEY,
-          yield* encodeJson(decoded),
-          'application/json',
-        );
+        // Advance so the draft the rewrite writes is strictly newer than the
+        // epoch-seeded published doc and `load` reopens it.
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyImageUpload(siteScope, target, key);
 
         // Retrieve through the same `Storage.get` the `GET /images/*` route uses.
         const served = yield* storage.get(key);
@@ -171,25 +159,26 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
           ),
         );
 
-        // The draft now references the uploaded key for team member 0…
-        const draft = yield* content.getTeam();
+        // The reopened draft now references the uploaded key for team member 0.
+        const draft = yield* editor.load(siteScope);
         return {
           key,
           servedContentType: served.contentType,
           bytes,
-          teamImage: draft.team[0]?.image,
+          draftKey: String(draft.content.team[0]?.photo.key),
         };
       }),
       { [SITE_CONTENT_KEY]: { body: seed } },
     );
 
-    expect(result.key).toBe('images/uploads/team-0-photo-key-1700000000000.png');
+    expect(String(result.key)).toBe(
+      'images/uploads/team-0-photo-key-1700000000000.png',
+    );
     expect(result.servedContentType).toBe('image/png');
     expect([...result.bytes]).toEqual([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
     ]);
-    // After bust the public read would surface the draft only on publish; here
-    // we still confirm the boundary resolves the new key to a `/images/<key>` URL.
+    expect(result.draftKey).toBe(result.key);
   });
 
   it('resolves a managed key to a /images/<key> URL at the Content boundary', async () => {
