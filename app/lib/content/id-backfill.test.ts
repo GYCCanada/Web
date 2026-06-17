@@ -32,7 +32,7 @@ const clone = (value: JsonRecord): JsonRecord =>
 const stripIds = (encoded: JsonRecord): JsonRecord => {
   const doc = clone(encoded);
   for (const conference of (doc['conferences'] as JsonRecord[]) ?? []) {
-    for (const listKey of ['speakers', 'seminars']) {
+    for (const listKey of ['speakers', 'seminars', 'hotels']) {
       for (const item of (conference[listKey] as JsonRecord[]) ?? []) {
         delete item['id'];
       }
@@ -44,21 +44,51 @@ const stripIds = (encoded: JsonRecord): JsonRecord => {
   return doc;
 };
 
-const idsOf = (doc: unknown): string[] => {
+/**
+ * The shape of a `content/site.json` published BEFORE Branch 3.1 added the
+ * (required) `hotels` field: every conference is missing the `hotels` key
+ * entirely (and the sibling optional URL fields). Used to pin that the read
+ * boundary repairs the absent required list rather than failing decode and
+ * silently falling back to bundled defaults — discarding live CMS content.
+ */
+const pre31Shape = (encoded: JsonRecord): JsonRecord => {
+  const doc = stripIds(encoded);
+  for (const conference of (doc['conferences'] as JsonRecord[]) ?? []) {
+    delete conference['hotels'];
+    delete conference['registrationUrl'];
+    delete conference['scheduleUrl'];
+    delete conference['mapEmbedUrl'];
+  }
+  return doc;
+};
+
+/** Ids on the conference lists only (speakers + seminars + hotels). */
+const conferenceIdsOf = (doc: unknown): string[] => {
   const out: string[] = [];
   const record = doc as JsonRecord;
   for (const conference of (record['conferences'] as JsonRecord[]) ?? []) {
-    for (const listKey of ['speakers', 'seminars']) {
+    for (const listKey of ['speakers', 'seminars', 'hotels']) {
       for (const item of (conference[listKey] as JsonRecord[]) ?? []) {
         if (typeof item['id'] === 'string') out.push(item['id']);
       }
     }
   }
-  for (const member of (record['team'] as JsonRecord[]) ?? []) {
+  return out;
+};
+
+/** Ids on the team list only. */
+const teamIdsOf = (doc: unknown): string[] => {
+  const out: string[] = [];
+  for (const member of ((doc as JsonRecord)['team'] as JsonRecord[]) ?? []) {
     if (typeof member['id'] === 'string') out.push(member['id']);
   }
   return out;
 };
+
+const idsOf = (doc: unknown): string[] => [
+  ...conferenceIdsOf(doc),
+  ...teamIdsOf(doc),
+];
 
 describe('backfillListItemIds — production read-safety (ADR 0006)', () => {
   test('an id-less document (the pre-migration shape) decodes after backfill', () => {
@@ -73,14 +103,34 @@ describe('backfillListItemIds — production read-safety (ADR 0006)', () => {
     expect(decodes(repaired)).toBe(true);
   });
 
+  test('a pre-3.1 document (no `hotels` key) decodes after backfill', () => {
+    const pre31 = pre31Shape(encodedDefaults());
+
+    // Sanity: WITHOUT backfill the pre-3.1 document fails decode because
+    // `hotels` is a required (Branch 3.1) field that the legacy shape lacks —
+    // the very read-safety hazard that would otherwise discard live CMS content
+    // and silently fall back to the bundled defaults.
+    expect(decodes(pre31)).toBe(false);
+
+    // WITH backfill every conference gains an empty `hotels: []` (plus ids), so
+    // the live document decodes and the deploy keeps the CMS-authored content.
+    const repaired = backfillListItemIds(pre31);
+    expect(decodes(repaired)).toBe(true);
+    for (const conference of (repaired as JsonRecord)[
+      'conferences'
+    ] as JsonRecord[]) {
+      expect(Array.isArray(conference['hotels'])).toBe(true);
+    }
+  });
+
   test('assigns a fresh, distinct id to every id-less list item', () => {
     const idLess = stripIds(encodedDefaults());
     expect(idsOf(idLess)).toHaveLength(0);
 
     const repaired = backfillListItemIds(idLess);
-    // 2024 has 2 speakers + 3 seminars; team has 3 members = 8 ids.
-    expect(idsOf(repaired)).toHaveLength(8);
-    expect(new Set(idsOf(repaired)).size).toBe(8);
+    // 2024 has 2 speakers + 3 seminars + 5 hotels; team has 3 members = 13 ids.
+    expect(idsOf(repaired)).toHaveLength(13);
+    expect(new Set(idsOf(repaired)).size).toBe(13);
   });
 
   test('is idempotent — re-running leaves an already-id-complete document untouched', () => {
@@ -96,19 +146,19 @@ describe('backfillListItemIds — production read-safety (ADR 0006)', () => {
 
   test('never mints over an existing id (a partial document keeps its ids)', () => {
     const encoded = encodedDefaults();
-    const allIds = idsOf(encoded);
-    expect(allIds).toHaveLength(8);
+    expect(idsOf(encoded)).toHaveLength(13);
 
     // Strip only the team ids; the conference list ids must survive verbatim.
+    const conferenceIds = conferenceIdsOf(encoded);
+    expect(conferenceIds).toHaveLength(10); // 2 speakers + 3 seminars + 5 hotels
     const doc = clone(encoded);
     for (const member of doc['team'] as JsonRecord[]) {
       delete member['id'];
     }
     const repaired = backfillListItemIds(doc);
 
-    const conferenceIds = allIds.slice(0, 5); // 2 speakers + 3 seminars
-    const survived = idsOf(repaired).filter((id) => conferenceIds.includes(id));
-    expect(survived).toEqual(conferenceIds);
+    // Every conference-list id (speakers, seminars, hotels) survives verbatim.
+    expect(conferenceIdsOf(repaired)).toEqual(conferenceIds);
     // Team got fresh ids, so the whole document now decodes.
     expect(decodes(repaired)).toBe(true);
   });

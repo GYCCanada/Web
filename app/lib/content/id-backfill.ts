@@ -24,12 +24,23 @@
  *     which remains the sole gate that brands the ids. The input is `unknown`
  *     (raw parsed JSON), so the walk narrows defensively and never trusts shape.
  *
- * The list-item locations are the three id-bearing structs the schema names
- * today (`Speaker`, `Seminar`, `TeamMember`); Branch 3+ widens them as the
+ * The list-item locations are the id-bearing structs the schema names today
+ * (`Speaker`, `Seminar`, `Hotel`, `TeamMember`); Branch 3+ widens them as the
  * Conference / Page schemas grow id-bearing lists, and this walk grows with
  * them. The walk descends only into the arrays/objects that are actually present
  * and the expected shape, so a malformed document still reaches the decoder
  * (which rejects it) rather than throwing here.
+ *
+ * Branch 3.1 grows the Conference with a *required* `hotels: IdListArray(Hotel)`.
+ * That is the same read-safety hazard as the required `id` itself: a
+ * `content/site.json` published BEFORE 3.1 has no `hotels` key, so a required
+ * field would FAIL decode on the next read and silently discard the live
+ * CMS-authored content. Absence of an *empty-able* list normalizes to `[]`
+ * (idempotent: a conference already carrying `hotels` keeps it, ids and all),
+ * which is the one structural gap a pre-3.1 document leaves. (The sibling URL
+ * fields — `registrationUrl` / `scheduleUrl` / `mapEmbedUrl` — are
+ * `OptionFromOptionalKey`, so their absence already decodes to `Option.none()`
+ * and needs no backfill.)
  */
 
 import { newListItemId } from './schema';
@@ -52,9 +63,11 @@ const backfillItems = (value: unknown): readonly Json[] | undefined =>
 /**
  * Return a copy of the parsed `SiteContent` JSON with a fresh id assigned to any
  * id-less list item (`conferences[].speakers[]`, `conferences[].seminars[]`,
- * `team[]`). Items already carrying an `id` are untouched (idempotent). A value
- * that is not the expected shape is returned as-is so the decoder — not this
- * normalizer — is the one to reject it.
+ * `conferences[].hotels[]`, `team[]`) and an empty `hotels: []` supplied to any
+ * conference that predates 3.1 and lacks the (required) key. Items already
+ * carrying an `id` — and a `hotels` array that is already present — are
+ * untouched (idempotent). A value that is not the expected shape is returned
+ * as-is so the decoder — not this normalizer — is the one to reject it.
  */
 export const backfillListItemIds = (document: unknown): unknown => {
   if (!isObject(document)) return document;
@@ -70,6 +83,11 @@ export const backfillListItemIds = (document: unknown): unknown => {
       if (speakers !== undefined) conf['speakers'] = speakers;
       const seminars = backfillItems(conference['seminars']);
       if (seminars !== undefined) conf['seminars'] = seminars;
+      // `hotels` is a *required* (Branch 3.1) id-keyed list. A pre-3.1 document
+      // has no key: supply `[]`. A present `hotels` is backfilled like any other
+      // id list (and left as-is when already id-complete) — never overwritten.
+      const hotels = backfillItems(conference['hotels']);
+      conf['hotels'] = hotels !== undefined ? hotels : [];
       return conf;
     });
   }
