@@ -128,6 +128,25 @@ export interface Conference {
    * document field is the correctly-named `accentColor` (CMS decision D5).
    */
   readonly theme: string;
+  /**
+   * The optional detail-page data the forked `/YYYY` pages hard-coded
+   * (registration-launch Branch 3, settled #4). The document models each as
+   * `Option` (`OptionFromOptionalKey` / empty list); this boundary projects them
+   * to `string | undefined` and a plain object array so React never sees an
+   * `Option<string>` (`boundary-discipline`). An absent field is `undefined`, an
+   * absent list is `[]` — that is the section-presence discriminator Branch 4's
+   * section-skip gates on (`registrationUrl !== undefined`,
+   * `mapEmbedUrl !== undefined`, `hotels.length > 0`). Each URL crossed the
+   * `ExternalHttpsUrl` / `GoogleMapsEmbedUrl` brand on decode, so the rendered
+   * `href` / iframe `src` is already an XSS-safe https string.
+   */
+  readonly registrationUrl: string | undefined;
+  readonly scheduleUrl: string | undefined;
+  readonly mapEmbedUrl: string | undefined;
+  readonly hotels: readonly {
+    readonly name: string;
+    readonly note?: string;
+  }[];
 }
 
 /**
@@ -195,6 +214,21 @@ const toSeminar = (seminar: DocSeminar, locale: Locale): Seminar => ({
   description: seminar.description[locale],
 });
 
+/**
+ * Project a document `Hotel` to the boundary shape: the bilingual `name`/`note`
+ * `Text`s collapse to this locale's string, and the optional `note` becomes a
+ * `string | undefined` (omitted when the document carries no note). The `id`
+ * (list identity, ADR 0006) is not part of the read boundary the detail page
+ * renders, so it is dropped here.
+ */
+const toHotel = (
+  hotel: DocConference['hotels'][number],
+  locale: Locale,
+): Conference['hotels'][number] => ({
+  name: hotel.name[locale],
+  ...(hotel.note === undefined ? {} : { note: hotel.note[locale] }),
+});
+
 const toConference = (
   conference: DocConference,
   locale: Locale,
@@ -231,6 +265,16 @@ const toConference = (
   speakers: conference.speakers.map((speaker) => toSpeaker(speaker, locale)),
   seminars: conference.seminars.map((seminar) => toSeminar(seminar, locale)),
   promos: [...conference.promos],
+  // The optional detail-page fields: each document `Option` projects to
+  // `string | undefined` via `Option.getOrUndefined` (the convention for ALL
+  // new optional Conference fields — `Option` at the document layer, plain
+  // `string | undefined` at the boundary so React never sees an `Option`,
+  // matching the `registration` `Option.isSome` gate above). `hotels` projects
+  // each item to this locale's strings; an empty document list stays `[]`.
+  registrationUrl: Option.getOrUndefined(conference.registrationUrl),
+  scheduleUrl: Option.getOrUndefined(conference.scheduleUrl),
+  mapEmbedUrl: Option.getOrUndefined(conference.mapEmbedUrl),
+  hotels: conference.hotels.map((hotel) => toHotel(hotel, locale)),
 });
 
 const toTeamMember = (member: DocTeamMember): TeamMember => ({
