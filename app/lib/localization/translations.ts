@@ -124,6 +124,11 @@ const en = {
   'registration.hotels.description.facebook':
     'Facebook Rides & Roommates Group',
   'registration.form.title': 'Register for GYC Canada {{year}}',
+  'registration.form.error':
+    'An error occurred while submitting your registration. Please try again later.',
+  'registration.form.success.title': 'Thank you for registering!',
+  'registration.form.success.description':
+    'Your registration has been received. We will be in touch with more details soon.',
   'registration.form.attendee': 'Attendee',
   'registration.form.exhibitor': 'Exhibitor',
   'registration.form.type.required':
@@ -387,6 +392,11 @@ const fr: Record<TranslationKey, string> = {
     'Groupe Facebook Rides & Roommates',
 
   'registration.form.title': 'Inscrivez-vous à GYC Canada {{year}}',
+  'registration.form.error':
+    "Une erreur s'est produite lors de l'envoi de votre inscription. Veuillez réessayer plus tard.",
+  'registration.form.success.title': 'Merci de votre inscription!',
+  'registration.form.success.description':
+    'Votre inscription a bien été reçue. Nous vous contacterons bientôt avec plus de détails.',
   'registration.form.attendee': 'Participant',
   'registration.form.exhibitor': 'Exposant',
   'registration.form.type.required':

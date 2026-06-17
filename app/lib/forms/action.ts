@@ -14,17 +14,19 @@ import type { TranslationKey } from '../localization/translations';
 import { Mailer } from '../mailer.server';
 import { Toast } from '../toast.server';
 
-import { decodeForm, type DecodedForm } from './decode';
+import { decodeForm } from './decode';
+import type { Submission } from './submission';
+import { Submissions } from './submissions.server';
 
 /**
- * The generic form action skeleton (ADR 0007; registration-launch Branch 6.2).
- * Collapses the `parse → decode → notify → toast.redirect` pipeline triplicated
- * verbatim across `contact.tsx`, `volunteer.tsx`, and the registration route into
- * ONE parameterized effect, driven by the form's `FormDefinition` (read through
- * Branch 5's `Content.getForm`). Branches 6.3–6.5 migrate the three actions onto
- * it behind the equivalence harness; this sub-commit lands the skeleton + tests.
+ * The generic form action skeleton (ADR 0007; registration-launch Branch 6.2,
+ * persist-then-notify wired in Branch 7.3). Collapses the `parse → decode →
+ * persist → notify → toast.redirect` pipeline triplicated verbatim across
+ * `contact.tsx`, `volunteer.tsx`, and (for the single-registrant shape) the
+ * registration route into ONE parameterized effect, driven by the form's
+ * `FormDefinition` (read through Branch 5's `Content.getForm`).
  *
- * The triplicated body each route writes today (`contact.tsx:139-179`):
+ * The triplicated body each route wrote (`contact.tsx:139-179`):
  *   1. read the parsed `SubmissionContext`;
  *   2. `parseSchema(handTunedSchema, payload)` → on failure
  *      `formValidationError(formatSchemaResult(...))`;
@@ -33,18 +35,28 @@ import { decodeForm, type DecodedForm } from './decode';
  *   4. `toast.redirect` to the same path with a success toast.
  *
  * The skeleton reproduces steps 1, 2, and 4 exactly; step 3 (the notification) is
- * the only form-specific part, so it is the caller's `notify` callback. The
+ * the only form-specific part, so it is the caller's `notify` callback. Branch 7.3
+ * inserts a `Submissions.persist` step BETWEEN decode and notify: a valid
+ * submission is written to its durable `submissions/<form>/<id>.json` object FIRST,
+ * and only then is `notify` run over the *stored* `Submission` (CONTEXT §Submission:
+ * the email is a notification OF the persisted record, referencing its id). Because
+ * `persist` returns the durable record before `notify` runs, a notify failure
+ * provably cannot lose the record — the bucket object is already written. The
  * notification stays a CALLBACK rather than baked in because the decoded payload's
- * shape differs per form (contact's `name`/`method`, volunteer's positions list,
- * registration's registrant array) and Branch 7 splits notification from a
- * durable `Submissions.persist` write — keeping `notify` separable here is what
- * lets Branch 7 add `persist` before it without rewriting this skeleton
- * (`subtract-before-you-add`, the persist/notify split the Submission plan
- * demands).
+ * shape differs per form (contact's `name`/`method`, volunteer's positions list);
+ * keeping `persist` (one durable write) separate from `notify` (the form-specific
+ * mailer) is exactly the split the Submission plan demands (settled #8).
  *
  * `derive-dont-sync`: the validation comes from the stored `FormDefinition` via
- * `decodeForm`, never a re-declared schema — editing `forms/<form>.json` changes
- * what the action accepts with no code change (ADR 0007 consequence).
+ * `decodeForm`, and the persisted record's payload codec is derived from the SAME
+ * definition (`Submissions.persist` → `submissionSchema`), never a re-declared
+ * schema — editing `forms/<form>.json` changes both what the action accepts and
+ * what it stores with no code change (ADR 0007 + ADR 0008 consequence).
+ *
+ * Registration's multi-registrant `{ registrants: [...] }` shell is NOT a closed
+ * `FieldKind`, so it does not flow through this flat skeleton; it has its own
+ * persist-then-notify action (`registration-action.ts`) that reuses the same
+ * `Submissions.persist` + `routeFormAction` machinery over the registrant array.
  */
 
 /** The success toast copy a form shows after a valid submission. */
@@ -56,21 +68,23 @@ export interface SuccessToast {
 /**
  * Configure the generic form action for one form. `form` is the `FormId` whose
  * `FormDefinition` drives decode (and names the toast's `form` slot); `notify`
- * runs the form-specific notification over the decoded payload and fails (with any
- * `AppError`, e.g. a mailer failure mapped to a form-level key) to abort the
- * redirect; `success` is the post-submit toast copy.
+ * runs the form-specific notification over the PERSISTED `Submission` (the durable
+ * record, already on the bucket — so the email can reference its id) and fails
+ * (with any `AppError`, e.g. a mailer failure mapped to a form-level key) to abort
+ * the redirect; `success` is the post-submit toast copy.
  *
- * `notify`'s context is the form-notification slice of the request runtime
- * (`makeRequestRuntime`): `Mailer` (every form notifies by mail today), plus
- * `ReactRouterContext` / `Content` for a notifier that needs the request or
- * page/form copy. Branch 7 widens the terminal step to `persist`-then-`notify`
- * over a durable `Submissions` write; keeping `notify` a caller callback (not a
- * baked-in mailer) is what lets that land without rewriting this skeleton.
+ * `notify` receives the stored `Submission`, not the bare decoded payload: by the
+ * time it runs, `Submissions.persist` has already written
+ * `submissions/<form>/<id>.json`, so the record survives a notify failure
+ * (settled #8). `notify`'s context is the form-notification slice of the request
+ * runtime (`makeRequestRuntime`): `Mailer` (every form notifies by mail today),
+ * plus `ReactRouterContext` / `Content` for a notifier that needs the request or
+ * page/form copy.
  */
 export interface FormActionConfig<E> {
   readonly form: FormId;
   readonly notify: (
-    decoded: DecodedForm,
+    submission: Submission,
   ) => Effect.Effect<
     void,
     E,
@@ -92,14 +106,19 @@ export interface FormActionConfig<E> {
  *   1. `Content.getForm(form)` → the form's `FormDefinition`;
  *   2. `decodeForm(definition, submission.payload)` → on failure,
  *      `formValidationError(formatSchemaResult(...))` (bucketed field/form errors);
- *   3. `notify(decoded)` — the caller's form-specific notification;
- *   4. `toast.redirect(pathname, { success copy, form })`.
+ *   3. `Submissions.persist(form, decoded)` → the durable record is written to
+ *      `submissions/<form>/<id>.json` and returned BEFORE any notification;
+ *   4. `notify(submission)` — the caller's form-specific notification OF the
+ *      stored record (a failure here cannot lose the record — it is already on
+ *      the bucket);
+ *   5. `toast.redirect(pathname, { success copy, form })`.
  */
 export const formAction = <E>(config: FormActionConfig<E>) =>
   routeFormAction(function* () {
     const { url } = yield* ReactRouterContext;
     const submission = yield* SubmissionContext;
     const content = yield* Content.Service;
+    const submissions = yield* Submissions.Service;
     const toast = yield* Toast;
 
     const definition = yield* content.getForm(config.form);
@@ -109,7 +128,13 @@ export const formAction = <E>(config: FormActionConfig<E>) =>
       return yield* formValidationError(formatSchemaResult(decoded) ?? {});
     }
 
-    yield* config.notify(decoded.success);
+    // Persist FIRST: the durable `submissions/<form>/<id>.json` object is written
+    // and returned before any notification runs, so a `notify` failure provably
+    // cannot lose the record (settled #8). A `StorageError` here aborts the
+    // submission (losing a record must never look like success).
+    const stored = yield* submissions.persist(config.form, decoded.success);
+
+    yield* config.notify(stored);
 
     yield* toast.redirect(url.pathname, {
       title: config.success.title,
