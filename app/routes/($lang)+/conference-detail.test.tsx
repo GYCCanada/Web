@@ -4,6 +4,7 @@ import { createRoutesStub } from 'react-router';
 
 import { Breakpoint } from '~/lib/client-hints';
 import type { Conference } from '~/lib/content.server';
+import { defaultContent } from '~/lib/content/defaults';
 import { LocalizationProvider } from '~/lib/localization/provider';
 import { root as translations } from '~/lib/localization/translations';
 
@@ -181,6 +182,54 @@ describe('ConferenceDetail', () => {
     expect(html).toContain('Fairfield Inn &amp; Suites Kelowna');
     // The optional note is appended after the name.
     expect(html).toContain('Group Code: GYC');
+  });
+
+  /**
+   * Pin the 2024 hotel list render against the REAL bundled defaults (not the
+   * synthetic `fullConference` above), so the `{name}{note ? ` ${note}` : null}`
+   * template + the authored hotel strings are guarded together going forward.
+   *
+   * The pre-migration `2024/_index.tsx` fork hard-coded hotel #2 as one `<li>`:
+   *   `Fairfield Inn & Suites Kelowna Holiday Inn Express & Suites Kelowna
+   *    - "GYC Canada” or Group Code: “GYC" (call 778-484-2999 for discount)`
+   * — with a literal `- ` separator and *mismatched* straight-then-curly quotes
+   * (`"GYC Canada”` … `“GYC"`), a pre-existing typo. The plan (line 136) pinned a
+   * "byte-identical 2024 render"; this branch CONSCIOUSLY cleans that typo: the
+   * default note (`defaults.ts`) uses an em-dash separator and consistent quotes.
+   * That is the single intentional render delta vs the old fork. This test is the
+   * regression assertion the plan amendment requires — it pins the cleaned text
+   * exactly, so any future drift is caught.
+   */
+  it('renders the 2024 Fairfield hotel `<li>` exactly as authored in the defaults (typo-cleanup pinned)', () => {
+    const doc2024 = defaultContent.conferences.find((c) => c.slug === '/2024');
+    expect(doc2024).toBeDefined();
+    // Project the defaults' 2024 hotels to the en boundary shape `toConference`
+    // emits (`{ name: name.en, note?: note.en }`), so the render is driven by the
+    // authored content, not a hand-copied string.
+    const hotels = (doc2024?.hotels ?? []).map((hotel) => ({
+      name: hotel.name.en,
+      ...(hotel.note === undefined ? {} : { note: hotel.note.en }),
+    }));
+
+    const fairfield = hotels.find((h) => h.name.startsWith('Fairfield'));
+    expect(fairfield?.note).toBeDefined();
+
+    const html = renderConference({ ...fullConference, hotels });
+
+    // The component renders `{name}{note ? ` ${note}` : null}` inside one <li>.
+    // React server-renders the two adjacent text children separated by a comment
+    // marker (`<!-- -->`) and HTML-escapes `&` → `&amp;` and `"` → `&quot;`. Pin
+    // the exact rendered <li> innerHTML: a single space before `Holiday`, the
+    // em-dash separator, and consistent straight quotes — the consciously-cleaned
+    // form, NOT the old fork's `- ` separator + mismatched straight/curly quotes.
+    expect(html).toContain(
+      '<li>Fairfield Inn &amp; Suites Kelowna<!-- --> Holiday Inn Express &amp; Suites Kelowna — &quot;GYC Canada&quot; or Group Code: &quot;GYC&quot; (call 778-484-2999 for discount)</li>',
+    );
+    // And the old typo'd separator/quotes must NOT survive (the curly `”`/`“`
+    // and the `Kelowna - ` separator the pre-branch fork hard-coded).
+    expect(html).not.toContain('Kelowna — &quot;GYC Canada”');
+    expect(html).not.toContain('Kelowna - ');
+    expect(html).not.toContain('“GYC');
   });
 
   it('renders the mobile hero variant at a small breakpoint', () => {

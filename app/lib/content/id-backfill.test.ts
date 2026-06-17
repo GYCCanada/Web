@@ -123,6 +123,30 @@ describe('backfillListItemIds — production read-safety (ADR 0006)', () => {
     }
   });
 
+  test('a present-but-malformed `hotels` is left for the decoder to reject, not silently emptied', () => {
+    // A pre-3.1 document is missing the `hotels` KEY (handled by the test above:
+    // it normalizes to `[]`). This pins the *opposite* hazard: a conference
+    // whose `hotels` key is PRESENT but the wrong shape (a string here; `null`
+    // and `{}` are equivalent) must NOT be overwritten with `[]` — doing so
+    // would silently discard authored content before strict decode. Backfill
+    // leaves it untouched so the decoder is the one to reject it, exactly like
+    // a malformed speakers/seminars/team list.
+    for (const malformed of ['not a list', null, {}] as const) {
+      const doc = stripIds(encodedDefaults());
+      const firstConference = (doc['conferences'] as JsonRecord[])[0];
+      if (firstConference) firstConference['hotels'] = malformed as never;
+
+      const repaired = backfillListItemIds(doc) as JsonRecord;
+      const repairedConference = (repaired['conferences'] as JsonRecord[])[0];
+
+      // The malformed value survives verbatim — it was NOT replaced with `[]`.
+      expect(repairedConference?.['hotels']).toEqual(malformed as never);
+      // …and the decoder rejects the document rather than accepting an
+      // emptied-out conference (the masking this guards against).
+      expect(decodes(repaired)).toBe(false);
+    }
+  });
+
   test('assigns a fresh, distinct id to every id-less list item', () => {
     const idLess = stripIds(encodedDefaults());
     expect(idsOf(idLess)).toHaveLength(0);

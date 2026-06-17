@@ -35,9 +35,13 @@
  * That is the same read-safety hazard as the required `id` itself: a
  * `content/site.json` published BEFORE 3.1 has no `hotels` key, so a required
  * field would FAIL decode on the next read and silently discard the live
- * CMS-authored content. Absence of an *empty-able* list normalizes to `[]`
+ * CMS-authored content. A truly-*absent* `hotels` key normalizes to `[]`
  * (idempotent: a conference already carrying `hotels` keeps it, ids and all),
- * which is the one structural gap a pre-3.1 document leaves. (The sibling URL
+ * which is the one structural gap a pre-3.1 document leaves. A *present* but
+ * malformed `hotels` (e.g. `null`, a string) is left in place so the decoder —
+ * not this normalizer — rejects it, exactly like every other list above; the
+ * `[]` default is reserved for an absent key and never overwrites authored
+ * content. (The sibling URL
  * fields — `registrationUrl` / `scheduleUrl` / `mapEmbedUrl` — are
  * `OptionFromOptionalKey`, so their absence already decodes to `Option.none()`
  * and needs no backfill.)
@@ -84,10 +88,20 @@ export const backfillListItemIds = (document: unknown): unknown => {
       const seminars = backfillItems(conference['seminars']);
       if (seminars !== undefined) conf['seminars'] = seminars;
       // `hotels` is a *required* (Branch 3.1) id-keyed list. A pre-3.1 document
-      // has no key: supply `[]`. A present `hotels` is backfilled like any other
-      // id list (and left as-is when already id-complete) — never overwritten.
-      const hotels = backfillItems(conference['hotels']);
-      conf['hotels'] = hotels !== undefined ? hotels : [];
+      // has no key at all: supply `[]` so the absent required field decodes. A
+      // *present* `hotels` is backfilled like any other id list (and left as-is
+      // when already id-complete). Crucially, only a truly-ABSENT key is
+      // defaulted: a present-but-malformed value (`null`, `"x"`, `{}`) is left
+      // in place for the decoder to reject — exactly like speakers/seminars/team
+      // above. Defaulting it to `[]` would silently discard authored content
+      // BEFORE strict decode, which is precisely the masking this normalizer is
+      // documented (above) NOT to do.
+      if (!('hotels' in conference)) {
+        conf['hotels'] = [];
+      } else {
+        const hotels = backfillItems(conference['hotels']);
+        if (hotels !== undefined) conf['hotels'] = hotels;
+      }
       return conf;
     });
   }
