@@ -67,7 +67,8 @@ export const headers = adminSecurityHeaders;
  */
 
 // `encodeDocument` yields the encoded object the React view renders from the
-// loader's `AdminContent`. It encodes the DRAFT shape (`DraftSiteContent`): a
+// loader's `DraftEditor.load(siteScope)` result. It encodes the DRAFT shape
+// (`DraftSiteContent`): a
 // reopened draft may carry a freshly-added list item holding only its `id`
 // (ADR 0006), so the view must render partial items. The merge/decode/re-encode/
 // store choreography lives in `DraftEditor`; the route only encodes for display.

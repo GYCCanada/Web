@@ -16,7 +16,6 @@ import { SiteContent } from './content/schema';
 import type {
   AssetKey,
   Conference as DocConference,
-  DraftSiteContent as DraftSiteContentType,
   IsoDate,
   Seminar as DocSeminar,
   Speaker as DocSpeaker,
@@ -340,22 +339,6 @@ export const SITE_CONTENT_KEY = 'content/site.json';
  * (`getSiteContent`) never reads the draft.
  */
 export const SITE_CONTENT_DRAFT_KEY = 'content/site.draft.json';
-
-/** Where the editor's content originated, for the admin banner. */
-export type AdminContentSource = 'draft' | 'published' | 'defaults';
-
-export interface AdminContent {
-  /**
-   * The document the `/admin` editor opens. It is the **draft** shape
-   * (`DraftSiteContent`): a published / defaults source is also a valid draft (a
-   * complete document trivially satisfies the laxer draft schema), while a
-   * reopened draft may carry freshly-added list items that hold only their `id`
-   * (ADR 0006, settled #10). Publish re-decodes the strict `SiteContent`, the
-   * single boundary that enforces the both-locales `Text` invariant.
-   */
-  readonly content: DraftSiteContentType;
-  readonly source: AdminContentSource;
-}
 
 /**
  * Cache TTL. Short by design (D3 — runtime read with cache, no redeploy): a
