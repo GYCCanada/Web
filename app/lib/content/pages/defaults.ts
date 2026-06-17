@@ -490,11 +490,153 @@ export const defaultContactForm: FormDefinition = Schema.decodeUnknownSync(
   ],
 });
 
+/**
+ * The volunteer form's field graph (Branch 6.4) — the data-driven equivalent of
+ * the hand-tuned `volunteer.tsx` schema, proven byte-equivalent by
+ * `forms/equivalence.volunteer.test.ts`. Like contact it carries the `method`
+ * discriminator as a `literal` + the pair of `requiredWhenEquals` rules gating
+ * `email`/`phone`; volunteer adds the always-required `age`/`location`/
+ * `background`/`why` free-text fields (the latter two `multiline`). The fields
+ * are listed in their rendered order (`volunteer.tsx` view order: name, method,
+ * email/phone, age, location, background, why) so the migrated `<FormFields>`
+ * draws the identical sequence.
+ *
+ * `email` is `optional: true` (optional-at-key, non-empty-when-present) gated by
+ * a `requiredWhenEquals` rule; `phone` is an `optional: true` `requiredText`
+ * (the oracle's `Schema.optional(Phone)` where `Phone` is a bare non-empty
+ * string with no email/url format check) gated by the second rule — exactly the
+ * contact shape (`derive-dont-sync`: this object IS the volunteer validation
+ * now, no hand-written schema beside it).
+ *
+ * The oracle's vestigial `positions` multi-checkbox is intentionally NOT a field
+ * here: the volunteer route never populated `data.positions` (a hardcoded `[]`),
+ * so its checkbox block never rendered and the field was never submitted — its
+ * options are dynamic loader data, never a closed `OptionList`, so it does not
+ * fit the closed `FieldKind` set (`subtract-before-you-add`,
+ * `make-impossible-states-unrepresentable`). The harness pins this one decoded-
+ * default delta (oracle emits `positions: []`, the engine omits it) and the
+ * migrated `notify` preserves the email's always-empty `Positions:` line.
+ */
 export const defaultVolunteerForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
 )({
   title: { en: 'Volunteer', fr: 'Bénévolat' },
-  fields: [],
+  fields: [
+    {
+      _tag: 'requiredText',
+      name: 'name',
+      label: { en: 'What is your name?', fr: 'Quel est votre nom?' },
+      placeholder: {
+        en: 'Type your full name here',
+        fr: 'Entrez votre nom complet ici',
+      },
+      requiredMessage: 'volunteer.form.name.required',
+    },
+    {
+      _tag: 'literal',
+      name: 'method',
+      label: {
+        en: 'Preferred contact method:',
+        fr: 'Préférez-vous le téléphone ou le courriel?',
+      },
+      options: [
+        { value: 'phone', label: { en: 'Phone', fr: 'Téléphone' } },
+        { value: 'email', label: { en: 'Email', fr: 'Courriel' } },
+        {
+          value: 'both',
+          label: { en: 'Email & Phone', fr: 'Courriel et téléphone' },
+        },
+      ],
+      requiredMessage: 'volunteer.form.method.required',
+    },
+    {
+      _tag: 'email',
+      name: 'email',
+      label: {
+        en: 'What is your email address?',
+        fr: 'Quelle est votre adresse courriel?',
+      },
+      placeholder: { en: 'example@mail.com', fr: 'example@mail.com' },
+      optional: true,
+      requiredMessage: 'volunteer.form.email.required',
+      invalidMessage: 'volunteer.form.email.error',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'phone',
+      label: {
+        en: 'What is your phone number?',
+        fr: 'Quel est votre numéro de téléphone?',
+      },
+      placeholder: { en: '123-456-7890', fr: '123-456-7890' },
+      optional: true,
+      requiredMessage: 'volunteer.form.phone.required',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'age',
+      label: { en: 'What is your age?', fr: 'Quel est votre âge?' },
+      placeholder: { en: 'Enter your age here', fr: 'Entrez votre âge ici' },
+      requiredMessage: 'volunteer.form.age.required',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'location',
+      label: {
+        en: 'Where are you located?',
+        fr: 'Où êtes-vous situé?',
+      },
+      placeholder: {
+        en: 'Enter your location here',
+        fr: 'Entrez votre emplacement ici',
+      },
+      requiredMessage: 'volunteer.form.location.required',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'background',
+      label: {
+        en: 'Please tell us more about yourself and your background.',
+        fr: "S'il-vous-plait, dites-nous en davantage sur vous et votre parcours?",
+      },
+      placeholder: {
+        en: 'Enter your background here',
+        fr: 'Entrez votre parcours ici',
+      },
+      multiline: true,
+      requiredMessage: 'volunteer.form.background.required',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'why',
+      label: {
+        en: 'What motivates you to volunteer with us?',
+        fr: "Qu'est-ce qui vous motive à faire du bénévolat avec nous?",
+      },
+      placeholder: {
+        en: 'Enter your reason here',
+        fr: 'Entrez votre raison ici',
+      },
+      multiline: true,
+      requiredMessage: 'volunteer.form.why.required',
+    },
+  ],
+  rules: [
+    {
+      _tag: 'requiredWhenEquals',
+      when: 'method',
+      equals: ['email', 'both'],
+      target: 'email',
+      message: 'volunteer.form.email.required',
+    },
+    {
+      _tag: 'requiredWhenEquals',
+      when: 'method',
+      equals: ['phone', 'both'],
+      target: 'phone',
+      message: 'volunteer.form.phone.required',
+    },
+  ],
 });
 
 export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
