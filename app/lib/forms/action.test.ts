@@ -2,6 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import { Effect, ManagedRuntime } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
+import { Schema } from 'effect';
+
+import { Content } from '../content.server';
+import { defaultContactForm } from '../content/pages/defaults';
+import { formObjectKey } from '../content/pages/registry';
 import { formValidationError } from '../effect/errors';
 import { makeAppLayer, makeRequestRuntimeFromLayer } from '../effect/runtime';
 import { ReactRouterContext, type RouteArgs } from '../effect/router-context';
@@ -9,6 +14,7 @@ import { Storage } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
 
 import { formAction } from './action';
+import { FormDefinition } from './definition';
 import type { Submission } from './submission';
 
 /**
@@ -254,6 +260,38 @@ describe('formAction', () => {
     );
     expect(listed.length).toBe(1);
     expect(listed[0]?.key).toMatch(/^submissions\/contact\/.+\.json$/);
+  });
+
+  // Single-Storage-instance proof: `makeAppLayer` shares ONE `Storage` between
+  // `Content` and `Submissions`. A CMS-edited `forms/contact.json` seeded into the
+  // injected bucket must be visible to `Content.getForm` (the read `Submissions.
+  // persist` makes), proving Content reads through the SAME injected bucket the
+  // persist path writes to — NOT a separate baked-in `Storage.layerOptional`. If
+  // Content read through a second instance, it would fall back to the bundled
+  // default title and this assertion would fail.
+  it('Content.getForm reads the CMS-edited form from the SAME injected bucket the persist path writes to', async () => {
+    const editedTitle = 'CMS-edited contact form';
+    const edited = FormDefinition.make({
+      ...defaultContactForm,
+      title: { ...defaultContactForm.title, en: editedTitle },
+    });
+    const encodeForm = Schema.encodeUnknownEffect(
+      Schema.fromJsonString(FormDefinition),
+    );
+    const json = await Effect.runPromise(encodeForm(edited));
+
+    const storage = layerTest({ [formObjectKey('contact')]: { body: json } });
+    const runtime = ManagedRuntime.make(makeAppLayer(storage));
+
+    // Resolved through the full app runtime — the same `Content.Service` the
+    // persist path calls `getForm` on. It reads the seeded, CMS-edited object.
+    const form = await runtime.runPromise(
+      Effect.gen(function* () {
+        const content = yield* Content.Service;
+        return yield* content.getForm('contact');
+      }),
+    );
+    expect(form.title.en).toBe(editedTitle);
   });
 
   it('skips the body (no notify) when the honeypot is filled', async () => {

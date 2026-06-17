@@ -42,18 +42,19 @@ export type AppError =
   | StorageError
   | NotFound;
 
-// `Content.defaultLayer` wires the public read path: it is `Content.layer` with
-// its `Storage` dependency pre-provided as `Storage.layerOptional` (the
-// never-fails-to-build storage — bucket-less it reports `NotFound`, which the
-// read path recovers to the bundled defaults, D3), leaving only `Env` open for
-// the merge below to discharge.
+// `storageLayer` is the ONE `Storage` instance the whole app runtime shares. It
+// is provided to `Content.layer` (NOT `Content.defaultLayer`, which would bake
+// in its own separate `Storage.layerOptional`) AND merged into the base, so the
+// public read path's `Content.getForm`/`getPage`, the `/admin` editor's
+// reads/writes (`DraftEditor`), the form-action persist step (`Submissions`),
+// and any route that reads `Storage` directly all resolve the SAME
+// `Storage.Service` over the SAME bucket — there is genuinely no second instance
+// to coordinate. Production passes `Storage.layerOptional` (bucket-less it reports
+// `NotFound`, which the read path recovers to the bundled defaults, D3; writes
+// fail `StorageError` rather than silently dropping). `Content.layer` exposes
+// `Content` with only `Env` left open, discharged by the surrounding merge.
 //
-// `Storage.layerOptional` is ALSO provided standalone here — a legit second
-// consumer (the `/admin` editor's write path: save-draft / publish / image
-// upload, plus any route that reads `Storage` directly). It is a separate
-// instance from the one inside `Content.defaultLayer`; both point at the same
-// bucket via `Env`, so there is no shared in-memory state to coordinate. The
-// admin write surface is only *reachable* when `Auth` is enabled
+// The admin write surface is only *reachable* when `Auth` is enabled
 // (`ADMIN_PASSWORD` + `COOKIE_SECRET` set), independent of the bucket; the
 // editor still surfaces a `StorageError` when an admin is configured without a
 // bucket, rather than silently dropping a save.
@@ -67,8 +68,7 @@ export type AppError =
 // (DraftEditor's `publish` busts the very cache the public read serves from;
 // Submissions reads each form's CMS-editable definition through it) and the SAME
 // exposed `Storage.Service` the editor route reads/writes and the persisted
-// `submissions/<form>/<id>.json` objects land in — no second Content/Storage
-// instance to coordinate.
+// `submissions/<form>/<id>.json` objects land in.
 /**
  * Build the full app layer over a chosen `Storage` layer. Production uses
  * `Storage.layerOptional` (bucket-less it reports `NotFound`/`StorageError`,
@@ -76,8 +76,10 @@ export type AppError =
  * `Map`-backed `layerTest`) so a code path that WRITES — the form-action
  * `Submissions.persist` step — can be exercised end-to-end through the real
  * request runtime, since a bucket-less write would otherwise fail. The single
- * exposed `Storage.Service` is shared by `Content`, `DraftEditor`, and
- * `Submissions` (no second instance to coordinate).
+ * `storageLayer` instance is shared by `Content`, `DraftEditor`, and
+ * `Submissions`: a form seeded into the injected bucket is read back by
+ * `Content.getForm` through that SAME bucket (no second instance to coordinate),
+ * so the write path is faithfully exercisable end-to-end through this seam.
  */
 export const makeAppLayer = (
   storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
@@ -86,10 +88,9 @@ export const makeAppLayer = (
     Mailer.layer,
     Sendgrid.layer,
     Toast.layer,
-    Content.defaultLayer,
-    storageLayer,
+    Content.layer,
     Auth.layer,
-  );
+  ).pipe(Layer.provideMerge(storageLayer));
   return Layer.mergeAll(DraftEditor.layer, Submissions.layer).pipe(
     Layer.provideMerge(baseLayer),
     Layer.provideMerge(Env.layer),
