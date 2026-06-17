@@ -353,6 +353,96 @@ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', ()
     expect(result.addedKey).toBe(result.expectedKey);
   });
 
+  it('add → fill EVERY required field (incl. photo.alt + position) → publish SUCCEEDS', async () => {
+    // The add→fill→publish loop (settled #10): an added item carrying only its
+    // `id` is publish-INVALID, but once the admin fills every field strict
+    // `SiteContent` requires it must publish cleanly and go live. This proves the
+    // admin view renders a fill surface for ALL required fields — `Speaker`'s
+    // bilingual `photo.alt`, and `TeamMember`'s `position` enum + bilingual
+    // `photo.alt` — not just the ones the draft-editor baseline exposed. Without
+    // those surfaces a freshly-added visible item could save forever but never
+    // pass the strict publish gate from the UI.
+    const seed = await seedBody();
+    const speakerId = newListItemId();
+    const memberId = newListItemId();
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
+
+        yield* TestClock.adjust('1 second');
+        // Add a brand-new speaker (to 2024) and a brand-new team member — each an
+        // id-only stub, exactly as the "Add" buttons do.
+        yield* editor.applyListOps(siteScope, [
+          addOp(speakers2024, speakerId),
+          addOp('team', memberId),
+        ]);
+
+        // Upload a photo to each new item by its id (the `…photo.key` rewrite the
+        // ImageUpload control performs), so both items reference a real bucket key.
+        const speakerKeyPath = fieldName(speakers2024, speakerId, 'photo.key');
+        const speakerKey = uploadedImageKey(speakerKeyPath, 'image/png', 1_700_000_000_000);
+        yield* storage.put(speakerKey, png, 'image/png');
+        const memberKeyPath = fieldName('team', memberId, 'photo.key');
+        const memberKey = uploadedImageKey(memberKeyPath, 'image/png', 1_700_000_000_001);
+        yield* storage.put(memberKey, png, 'image/png');
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyImageUpload(siteScope, speakerKeyPath, speakerKey);
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyImageUpload(siteScope, memberKeyPath, memberKey);
+
+        // Fill EVERY remaining required field the admin view now renders —
+        // speaker name/activity/bio + photo.alt (bilingual), team member name +
+        // position (enum) + photo.alt (bilingual). This is exactly the override
+        // `assembleOverrides` builds from the migrated id-keyed form.
+        yield* TestClock.adjust('1 second');
+        const fillExit = yield* Effect.exit(
+          editor.editDocument(
+            siteScope,
+            assembleOverrides([
+              [fieldName(speakers2024, speakerId, 'name.en'), 'New Speaker'],
+              [fieldName(speakers2024, speakerId, 'name.fr'), 'Nouveau conférencier'],
+              [fieldName(speakers2024, speakerId, 'activity.en'), 'Plenary'],
+              [fieldName(speakers2024, speakerId, 'activity.fr'), 'Plénière'],
+              [fieldName(speakers2024, speakerId, 'bio.en'), 'A bio.'],
+              [fieldName(speakers2024, speakerId, 'bio.fr'), 'Une bio.'],
+              [fieldName(speakers2024, speakerId, 'photo.alt.en'), 'New Speaker'],
+              [fieldName(speakers2024, speakerId, 'photo.alt.fr'), 'Nouveau conférencier'],
+              [fieldName('team', memberId, 'name'), 'New Member'],
+              [fieldName('team', memberId, 'position'), 'team.position.secretary'],
+              [fieldName('team', memberId, 'photo.alt.en'), 'New Member'],
+              [fieldName('team', memberId, 'photo.alt.fr'), 'Nouveau membre'],
+            ]) as Json,
+          ),
+        );
+
+        // The now-complete draft publishes cleanly…
+        const publishExit = yield* Effect.exit(editor.publish(siteScope));
+
+        // …and the public read reflects both new items with NO redeploy.
+        const publicConf = yield* content.getConference('en', 2024);
+        const publicTeam = yield* content.getTeam();
+
+        return {
+          fillTag: fillExit._tag,
+          publishTag: publishExit._tag,
+          publicSpeakerNames: publicConf.speakers.map((s) => s.name),
+          publicTeamNames: publicTeam.team.map((m) => m.name),
+        };
+      }),
+      { [SITE_CONTENT_KEY]: { body: seed } },
+    );
+
+    expect(result.fillTag).toBe('Success');
+    expect(result.publishTag).toBe('Success');
+    // Both freshly-added, fully-filled items are now live on the public read.
+    expect(result.publicSpeakerNames).toContain('New Speaker');
+    expect(result.publicTeamNames).toContain('New Member');
+  });
+
   it('remove drops the id; reorder permutes — the draft reopens with the change', async () => {
     const seed = await seedBody();
     const seeded = defaultContent.conferences[conf2024]?.speakers ?? [];

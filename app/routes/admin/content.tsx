@@ -36,6 +36,7 @@ import {
   DraftSiteContent,
   ListItemId,
   newListItemId,
+  TeamPosition,
 } from '~/lib/content/schema';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction, routeHandler } from '~/lib/effect/route';
@@ -266,6 +267,41 @@ function Text({
           className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900/20"
         />
       )}
+    </label>
+  );
+}
+
+/**
+ * The board-position picker for a team member. A `TeamMember.position` is a
+ * required `TeamPosition` literal (`schema.ts`), so a freshly-added member (which
+ * arrives carrying only its `id`) needs a fill surface or it can never reach the
+ * strict-publishable state from the UI. The options are the closed
+ * `TeamPosition.literals` set (`derive-dont-sync` — the picker can never offer a
+ * value the schema rejects); the leading empty option keeps the field unset on a
+ * stub member (draft-valid, publish-invalid until chosen — ADR 0006).
+ */
+function PositionSelect({
+  name,
+  defaultValue,
+}: {
+  readonly name: string;
+  readonly defaultValue: string;
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="block text-xs font-medium text-neutral-600">Position</span>
+      <select
+        name={name}
+        defaultValue={defaultValue}
+        className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900/20"
+      >
+        <option value="">— select a position —</option>
+        {TeamPosition.literals.map((position) => (
+          <option key={position} value={position}>
+            {position}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }
@@ -723,6 +759,11 @@ export default function AdminContentEditor() {
                         keyPath={fieldName(speakersPath, speakerId, 'photo.key')}
                         currentKey={speaker.photo?.key ?? ''}
                       />
+                      <Bilingual
+                        label="Photo alt text"
+                        name={fieldName(speakersPath, speakerId, 'photo.alt')}
+                        value={speaker.photo?.alt ?? emptyText}
+                      />
                     </div>
                   );
                 })}
@@ -748,9 +789,18 @@ export default function AdminContentEditor() {
                   name={fieldName('team', memberId, 'name')}
                   defaultValue={member.name ?? ''}
                 />
+                <PositionSelect
+                  name={fieldName('team', memberId, 'position')}
+                  defaultValue={member.position ?? ''}
+                />
                 <ImageUpload
                   keyPath={fieldName('team', memberId, 'photo.key')}
                   currentKey={member.photo?.key ?? ''}
+                />
+                <Bilingual
+                  label="Photo alt text"
+                  name={fieldName('team', memberId, 'photo.alt')}
+                  value={member.photo?.alt ?? emptyText}
                 />
               </div>
             );
