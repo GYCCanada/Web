@@ -64,7 +64,11 @@ function LeafField({
       return (
         <TextField name={name}>
           <Label>{label}</Label>
-          <TextField.Input placeholder={placeholder} />
+          {field.multiline ? (
+            <TextField.TextArea rows={5} placeholder={placeholder} />
+          ) : (
+            <TextField.Input placeholder={placeholder} />
+          )}
           <FieldErrors />
         </TextField>
       );

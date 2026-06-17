@@ -137,9 +137,14 @@ type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
   | ({
       readonly _tag: 'requiredText';
       readonly optional?: Bool;
+      readonly multiline?: Bool;
       readonly requiredMessage: Msg;
     } & FieldChrome<Name, Txt>)
-  | ({ readonly _tag: 'optionalText'; readonly invalidMessage: Msg } & FieldChrome<Name, Txt>)
+  | ({
+      readonly _tag: 'optionalText';
+      readonly multiline?: Bool;
+      readonly invalidMessage: Msg;
+    } & FieldChrome<Name, Txt>)
   | ({
       readonly _tag: 'email';
       readonly optional?: Bool;
@@ -236,9 +241,14 @@ const fieldChrome = {
  *     PRESENT value is still non-empty (an empty string emits `requiredMessage`):
  *     the cross-field-gated text whose presence a rule governs but which still
  *     rejects a visibly-blank value (contact/volunteer `phone`).
+ *     `multiline: true` is a pure PRESENTATION flag (the renderer draws a
+ *     `<textarea>` instead of an `<input>`); it does NOT change decode — a
+ *     multiline value is the same non-empty string (the contact `message`, the
+ *     volunteer free-text fields).
  *   - `optionalText`    — a present-but-empty-allowed free-text field (the old
  *     zod-permissive "other notes"); a present non-string emits `invalidMessage`,
- *     an empty string and an absent value are both valid.
+ *     an empty string and an absent value are both valid. `multiline` renders a
+ *     `<textarea>` (presentation only, like `requiredText`).
  *   - `email`           — a required email; emptiness/absence emit
  *     `requiredMessage`, a malformed address emits `invalidMessage`. `optional:
  *     true` makes it optional-at-key but NON-EMPTY-when-present (the empty present
@@ -278,9 +288,14 @@ export const FieldKind = Schema.TaggedUnion({
   requiredText: {
     ...fieldChrome,
     optional: Schema.optionalKey(Schema.Boolean),
+    multiline: Schema.optionalKey(Schema.Boolean),
     requiredMessage: MessageKey,
   },
-  optionalText: { ...fieldChrome, invalidMessage: MessageKey },
+  optionalText: {
+    ...fieldChrome,
+    multiline: Schema.optionalKey(Schema.Boolean),
+    invalidMessage: MessageKey,
+  },
   email: {
     ...fieldChrome,
     optional: Schema.optionalKey(Schema.Boolean),

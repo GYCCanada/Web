@@ -198,18 +198,25 @@ const fieldToStructEntry = (
   // oracle, where `Email` itself enforces `isMinLength(1)`): the rule governs
   // presence, the field forbids a blank present value. `Schema.optional` (not
   // `optionalKey`) so an explicit `undefined` is also accepted, matching the
-  // oracle wrapper.
+  // oracle wrapper. The wrapper is annotated with the field's INVALID-TYPE
+  // message (`invalidMessage` for email/url, `requiredMessage` for text) so a
+  // duplicate-name ARRAY value maps to a real key instead of the `optional`
+  // wrapper's default union-mismatch text — exactly the oracle's
+  // `Schema.optional(Email).annotate({ message })`
+  // (`contact.tsx`'s `email`/`phone` wrappers).
   if (
     (field._tag === 'requiredText' ||
       field._tag === 'email' ||
       field._tag === 'url') &&
     field.optional === true
   ) {
+    const invalidTypeMessage =
+      field._tag === 'requiredText' ? field.requiredMessage : field.invalidMessage;
     return [
       field.name,
       Schema.optional(
         fieldToRequiredSchema(field) as Schema.Codec<unknown, unknown>,
-      ),
+      ).annotate({ message: invalidTypeMessage }),
     ];
   }
   return [field.name, fieldToRequiredSchema(field)];

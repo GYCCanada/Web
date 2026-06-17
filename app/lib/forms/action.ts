@@ -11,6 +11,7 @@ import {
 import { formatSchemaResult } from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
 import type { TranslationKey } from '../localization/translations';
+import { Mailer } from '../mailer.server';
 import { Toast } from '../toast.server';
 
 import { decodeForm, type DecodedForm } from './decode';
@@ -58,12 +59,23 @@ export interface SuccessToast {
  * runs the form-specific notification over the decoded payload and fails (with any
  * `AppError`, e.g. a mailer failure mapped to a form-level key) to abort the
  * redirect; `success` is the post-submit toast copy.
+ *
+ * `notify`'s context is the form-notification slice of the request runtime
+ * (`makeRequestRuntime`): `Mailer` (every form notifies by mail today), plus
+ * `ReactRouterContext` / `Content` for a notifier that needs the request or
+ * page/form copy. Branch 7 widens the terminal step to `persist`-then-`notify`
+ * over a durable `Submissions` write; keeping `notify` a caller callback (not a
+ * baked-in mailer) is what lets that land without rewriting this skeleton.
  */
 export interface FormActionConfig<E> {
   readonly form: FormId;
   readonly notify: (
     decoded: DecodedForm,
-  ) => Effect.Effect<void, E, ReactRouterContext | Content.Service>;
+  ) => Effect.Effect<
+    void,
+    E,
+    ReactRouterContext | Content.Service | Mailer.Service
+  >;
   readonly success: SuccessToast;
 }
 

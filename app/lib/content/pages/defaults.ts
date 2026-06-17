@@ -388,18 +388,106 @@ export const defaultHomePage: HomePage = Schema.decodeUnknownSync(HomePage)({
 
 /**
  * The bundled-default `FormDefinition`s. Branch 6.1 lands the structural schema
- * (the closed `FieldKind` set, variants, cross-field rules); these defaults carry
- * the CMS-editable page copy with an EMPTY `fields` graph for now. Each form's
- * actual field graph is authored when that form migrates onto the engine
- * (contact 6.3, volunteer 6.4, registration 6.5) — until then a form falls back
- * to its hand-tuned schema, and `Content.getForm` reads this typed default so the
- * per-form object + read path stay proven (`migrate-callers-then-delete-legacy-apis`).
+ * (the closed `FieldKind` set, variants, cross-field rules); volunteer and
+ * registration carry the CMS-editable page copy with an EMPTY `fields` graph
+ * until they migrate onto the engine (volunteer 6.4, registration 6.5) — until
+ * then each falls back to its hand-tuned schema, and `Content.getForm` reads this
+ * typed default so the per-form object + read path stay proven
+ * (`migrate-callers-then-delete-legacy-apis`).
+ */
+
+/**
+ * The contact form's field graph (Branch 6.3) — the data-driven equivalent of the
+ * hand-tuned `contact.tsx` schema, proven byte-equivalent by
+ * `forms/equivalence.contact.test.ts`. `email`/`phone` are `optional: true`
+ * (optional-at-key, non-empty-when-present) and the `method`-gated requirement is
+ * the pair of `requiredWhenEquals` rules, exactly mirroring the oracle's
+ * `Schema.optional(...)` + struct-level filter (`derive-dont-sync`: this object IS
+ * the contact validation now, no hand-written schema beside it).
  */
 export const defaultContactForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
 )({
   title: { en: 'Contact', fr: 'Contact' },
-  fields: [],
+  fields: [
+    {
+      _tag: 'requiredText',
+      name: 'name',
+      label: { en: 'What is your name?', fr: 'Quel est votre nom?' },
+      placeholder: {
+        en: 'Type your full name here',
+        fr: 'Entrez votre nom complet ici',
+      },
+      requiredMessage: 'contact.form.name.required',
+    },
+    {
+      _tag: 'literal',
+      name: 'method',
+      label: {
+        en: 'Preferred contact method:',
+        fr: 'Méthode de contact préférée: ',
+      },
+      options: [
+        { value: 'email', label: { en: 'Email', fr: 'Courriel' } },
+        { value: 'phone', label: { en: 'Phone', fr: 'Téléphone' } },
+        { value: 'both', label: { en: 'Email & Phone', fr: 'Courriel et téléphone' } },
+      ],
+      requiredMessage: 'contact.form.contact-method.required',
+    },
+    {
+      _tag: 'email',
+      name: 'email',
+      label: {
+        en: 'What is your email address?',
+        fr: 'Quelle est votre adresse courriel?',
+      },
+      placeholder: { en: 'example@mail.com', fr: 'example@mail.com' },
+      optional: true,
+      requiredMessage: 'contact.form.email.required',
+      invalidMessage: 'contact.form.email.error',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'phone',
+      label: {
+        en: 'What is your phone number?',
+        fr: 'Quel est votre numéro de téléphone?',
+      },
+      placeholder: { en: '123-456-7890', fr: '123-456-7890' },
+      optional: true,
+      requiredMessage: 'contact.form.phone.required',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'message',
+      label: {
+        en: 'What can we help you with?',
+        fr: 'Comment pouvons-nous vous aider?',
+      },
+      placeholder: {
+        en: 'Type your message here...',
+        fr: 'Entrez votre message ici...',
+      },
+      multiline: true,
+      requiredMessage: 'contact.form.message.required',
+    },
+  ],
+  rules: [
+    {
+      _tag: 'requiredWhenEquals',
+      when: 'method',
+      equals: ['email', 'both'],
+      target: 'email',
+      message: 'contact.form.email.required',
+    },
+    {
+      _tag: 'requiredWhenEquals',
+      when: 'method',
+      equals: ['phone', 'both'],
+      target: 'phone',
+      message: 'contact.form.phone.required',
+    },
+  ],
 });
 
 export const defaultVolunteerForm: FormDefinition = Schema.decodeUnknownSync(

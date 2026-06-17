@@ -16,8 +16,10 @@ import type { DecodedForm } from './decode';
  * → toast.redirect` pipeline the three form routes triplicate into one wrapped
  * route action. These tests pin the pipeline WIRING (`prove-it-works`) — the
  * per-kind decode semantics are covered exhaustively in `decode.test.ts`, so here
- * the form's `FormDefinition` is the bundled default (empty field graph, so any
- * payload decodes), letting the test isolate the skeleton's own behaviour:
+ * the form's `FormDefinition` is a bundled default with a STILL-EMPTY field graph
+ * (`volunteer`, whose graph migrates in 6.4) — any payload decodes, letting the
+ * test isolate the skeleton's own behaviour. (Contact's graph is now populated
+ * — 6.3 — and is exercised end-to-end by the contact equivalence harness.):
  *   - a valid submission runs `notify` with the decoded payload, then redirects
  *     with the success toast (so a migrated route's success path is unchanged);
  *   - a `notify` failure (e.g. a mailer error mapped to a form-level key) aborts
@@ -54,7 +56,7 @@ describe('formAction', () => {
   it('runs notify with the decoded payload, then redirects with the success toast', async () => {
     let notified: DecodedForm | undefined;
     const action = formAction({
-      form: 'contact',
+      form: 'volunteer',
       notify: (decoded) =>
         Effect.sync(() => {
           notified = decoded;
@@ -86,7 +88,7 @@ describe('formAction', () => {
 
   it('a notify failure aborts the redirect and reports a form-level error', async () => {
     const action = formAction({
-      form: 'contact',
+      form: 'volunteer',
       notify: () =>
         Effect.fail(formValidationError({ formErrors: ['contact.form.error'] })),
       success: {
@@ -104,7 +106,7 @@ describe('formAction', () => {
   it('skips the body (no notify) when the honeypot is filled', async () => {
     let notifyRan = false;
     const action = formAction({
-      form: 'contact',
+      form: 'volunteer',
       notify: () =>
         Effect.sync(() => {
           notifyRan = true;
