@@ -1,4 +1,0 @@
-Reading additional input from stdin...
-2026-06-17T19:19:21.656940Z ERROR codex_core::session::session: failed to load skill /Users/cvr/Developer/personal/dotfiles/skills/bible/SKILL.md: invalid description: exceeds maximum length of 1024 characters
-2026-06-17T19:19:23.897895Z ERROR codex_core_skills::loader: failed to read skills dir /Users/cvr/.codex/.tmp/plugins/plugins/game-studio/skills/sprite-pipeline: No such file or directory (os error 2)
-2026-06-17T19:19:23.897928Z ERROR codex_core_skills::loader: failed to read skills dir /Users/cvr/.codex/.tmp/plugins/plugins/game-studio/skills/phaser-2d-game: No such file or directory (os error 2)
