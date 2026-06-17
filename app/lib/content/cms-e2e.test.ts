@@ -13,7 +13,7 @@ import {
 } from './admin-form';
 import { DraftEditor, siteScope } from './draft-editor.server';
 import { defaultContent } from './defaults';
-import { addOp, removeOp, reorderOp } from './list-edit';
+import { addOp, fieldName, removeOp, reorderOp } from './list-edit';
 import { newListItemId, SiteContent } from './schema';
 
 /**
@@ -76,8 +76,8 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
         // 2. The admin edits the 2026 theme name + accent (simulating the form's
         //    parsed override), then publishes — the route's two-step.
         const override = assembleOverrides([
-          ['conferences.2.themeName.en', 'Speak Boldly'],
-          ['conferences.2.accentColor', '#112233'],
+          ['conferences./2026.themeName.en', 'Speak Boldly'],
+          ['conferences./2026.accentColor', '#112233'],
         ]) as Json;
         // Advance so the saved draft is strictly newer than the epoch seed.
         yield* TestClock.adjust('1 second');
@@ -114,7 +114,7 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
         yield* TestClock.adjust('1 second');
         yield* editor.editDocument(
           siteScope,
-          assembleOverrides([['conferences.2.themeName.en', 'Draft Only']]) as Json,
+          assembleOverrides([['conferences./2026.themeName.en', 'Draft Only']]) as Json,
         );
 
         const publicRead = yield* content.getConference('en', 2026);
@@ -144,7 +144,10 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
         // rewrite the draft's targeted key via the one service.
         const contentType = 'image/png';
         expect(isAcceptedImageType(contentType)).toBe(true);
-        const target = 'team.0.photo.key';
+        // The upload target addresses team member 0 by its `id` (ADR 0006), not
+        // by array position.
+        const member0Id = String(defaultContent.team[0]?.id);
+        const target = `team.${member0Id}.photo.key`;
         const key = uploadedImageKey(target, contentType, 1_700_000_000_000);
         yield* storage.put(key, png, contentType);
         // Advance so the draft the rewrite writes is strictly newer than the
@@ -172,8 +175,10 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
       { [SITE_CONTENT_KEY]: { body: seed } },
     );
 
-    expect(String(result.key)).toBe(
-      'images/uploads/team-0-photo-key-1700000000000.png',
+    // The key is namespaced under images/uploads/ with the id-keyed target
+    // slugified and the millisecond seed appended (collision-free).
+    expect(String(result.key)).toMatch(
+      /^images\/uploads\/team-[A-Za-z0-9-]+-photo-key-1700000000000\.png$/,
     );
     expect(result.servedContentType).toBe('image/png');
     expect([...result.bytes]).toEqual([
@@ -206,7 +211,9 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
  * drops the id; the public read is untouched until publish.
  */
 const conf2024 = defaultContent.conferences.findIndex((c) => c.slug === '/2024');
-const speakers2024 = `conferences.${conf2024}.speakers`;
+// The list path addresses the 2024 conference by its `slug` identity (ADR 0006,
+// sub-commit 2.4), not by array position.
+const speakers2024 = `conferences./2024.speakers`;
 
 describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', () => {
   it('add appends an id-only item the DRAFT reopens, but publish rejects it', async () => {
@@ -270,23 +277,24 @@ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', ()
         yield* TestClock.adjust('1 second');
         // Add a speaker (stub), then the admin hits "Save draft" WITHOUT touching
         // the new item — the form re-submits every rendered field, including the
-        // new item's empty `name`/`activity`/`bio`. This must NOT fail
-        // (regression: empty strings used to be rejected by the strict boundary).
+        // new item's empty `name`/`activity`/`bio`, named by the new speaker's
+        // **id** (ADR 0006, sub-commit 2.4). This must NOT fail (regression: empty
+        // strings used to be rejected by the strict boundary). `assembleOverrides`
+        // + `fieldName` reproduces exactly the override the migrated id-keyed view
+        // submits.
         yield* editor.applyListOps(siteScope, [addOp(speakers2024, newId)]);
-        const ci = conf2024;
         const saveExit = yield* Effect.exit(
-          editor.editDocument(siteScope, {
-            conferences: defaultContent.conferences.map((c, i) =>
-              i === ci
-                ? {
-                    speakers: [
-                      ...defaultContent.conferences[ci]!.speakers.map(() => ({})),
-                      { name: { en: '', fr: '' }, activity: { en: '', fr: '' }, bio: { en: '', fr: '' } },
-                    ],
-                  }
-                : {},
-            ),
-          } as unknown as Json),
+          editor.editDocument(
+            siteScope,
+            assembleOverrides([
+              [fieldName(speakers2024, newId, 'name.en'), ''],
+              [fieldName(speakers2024, newId, 'name.fr'), ''],
+              [fieldName(speakers2024, newId, 'activity.en'), ''],
+              [fieldName(speakers2024, newId, 'activity.fr'), ''],
+              [fieldName(speakers2024, newId, 'bio.en'), ''],
+              [fieldName(speakers2024, newId, 'bio.fr'), ''],
+            ]) as Json,
+          ),
         );
 
         const draft = yield* editor.load(siteScope);
@@ -316,11 +324,10 @@ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', ()
         yield* TestClock.adjust('1 second');
         yield* editor.applyListOps(siteScope, [addOp(speakers2024, newId)]);
 
-        // The new speaker is the last one; upload a photo to its id-less
-        // positional key path (the upload path is positional in 2.3).
-        const ci = conf2024;
-        const newIndex = defaultContent.conferences[ci]!.speakers.length;
-        const target = `conferences.${ci}.speakers.${newIndex}.photo.key`;
+        // Upload a photo to the new speaker by its **id** (ADR 0006, sub-commit
+        // 2.4): the upload target is id-keyed, so `setAtPath` rewrites the key on
+        // the matching item regardless of its current list position.
+        const target = fieldName(speakers2024, newId, 'photo.key');
         const key = uploadedImageKey(target, 'image/png', 1_700_000_000_000);
         yield* storage.put(key, png, 'image/png');
         yield* TestClock.adjust('1 second');

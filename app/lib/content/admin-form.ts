@@ -8,11 +8,15 @@
  * (`make-impossible-states-unrepresentable`, no-bail-outs):
  *
  *   1. the form carries only the fields it renders, named by their dotted JSON
- *      path (`conferences.2.themeName.en`, `team.0.name`, `translations.fr.…`);
- *   2. `assembleOverrides` parses those into a nested partial object;
- *   3. `deepMerge` overlays that partial onto the *encoded current document*, so
- *      every unedited field (long bios, image keys, `Option` registration
- *      windows omitted from the encoded JSON) survives verbatim;
+ *      path — list items and conferences keyed by their stable **identity**
+ *      (`conferences./2026.themeName.en`, `team.<id>.name`, `translations.fr.…`),
+ *      never by array position (ADR 0006);
+ *   2. `assembleOverrides` parses those into a nested partial object tree;
+ *   3. `deepMerge` overlays that partial onto the *encoded current document*,
+ *      reconciling each array by item identity, so every unedited field (long
+ *      bios, image keys, `Option` registration windows omitted from the encoded
+ *      JSON) survives verbatim and an edit can never land on the wrong item after
+ *      a list grew or shrank;
  *   4. the route then Schema-decodes the merged result — the single boundary
  *      where an edit can be rejected (`boundary-discipline`).
  *
@@ -79,8 +83,9 @@ export const extensionForType = (type: string): string =>
 
 /**
  * Recover the dotted key path an image-upload intent targets, or `null` if the
- * intent is not an upload. E.g. `upload:conferences.0.speakers.1.photo.key` →
- * `conferences.0.speakers.1.photo.key`.
+ * intent is not an upload. The path is identity-keyed (ADR 0006), e.g.
+ * `upload:conferences./2024.speakers.<id>.photo.key` →
+ * `conferences./2024.speakers.<id>.photo.key`.
  */
 export const imageUploadTarget = (intent: string): string | null => {
   if (!intent.startsWith(IMAGE_UPLOAD_INTENT_PREFIX)) return null;
@@ -153,37 +158,49 @@ export const collectTranslations = (
   return { en, fr };
 };
 
-const isIndex = (segment: string): boolean => /^\d+$/.test(segment);
+/**
+ * The stable identity of a list / conference item the merge keys on (ADR 0006):
+ * a list item's `id` (a nanoid), or a conference's `slug` (`/2024`). Both are
+ * **content** that round-trips through the schema, so an edit addresses an item
+ * by identity rather than by array position. Returns `undefined` for an item
+ * that carries neither (the index-keyed merge is gone — an identity-less item is
+ * never an override target).
+ */
+const itemIdentity = (item: Json): string | undefined => {
+  if (!isPlainObject(item)) return undefined;
+  if (typeof item['id'] === 'string') return item['id'];
+  if (typeof item['slug'] === 'string') return item['slug'];
+  return undefined;
+};
 
 /**
- * Set `value` at the dotted `path` inside `root`, creating intermediate objects
- * (or arrays, when the next segment is numeric) as needed. Mirrors the
- * paulo-suzanne admin's `setPath` but typed to `Json`.
+ * Set `value` at the dotted `path` inside the fresh override `root`, creating
+ * intermediate **objects** as needed. The override is a pure nested object tree:
+ * every array in the document is addressed by item **identity** (ADR 0006), so a
+ * list-item / conference segment (`/2024`, a nanoid) is an object KEY here, never
+ * an array index — `setPath` therefore never builds arrays, and the identity
+ * reconciliation against the base's real arrays happens in `deepMerge`. (The
+ * index-keyed array construction this used to do is gone — registration-launch
+ * Branch 2 sub-commit 2.4.)
  */
 const setPath = (root: MutableJsonObject, path: string[], value: Json): void => {
   if (path.length === 0) return;
-  let cursor: MutableJsonObject | Json[] = root;
+  let cursor: MutableJsonObject = root;
   for (let i = 0; i < path.length - 1; i += 1) {
     const segment = path[i];
-    const next = path[i + 1];
-    if (segment === undefined || next === undefined) return;
-    const key = Array.isArray(cursor) ? Number(segment) : segment;
-    const existing = (cursor as MutableJsonObject)[key as keyof typeof cursor];
-    if (isPlainObject(existing as Json) || Array.isArray(existing)) {
-      cursor = existing as MutableJsonObject | Json[];
+    if (segment === undefined) return;
+    const existing: Json | undefined = cursor[segment];
+    if (existing !== undefined && isPlainObject(existing)) {
+      cursor = existing as MutableJsonObject;
     } else {
-      const container: MutableJsonObject | Json[] = isIndex(next) ? [] : {};
-      (cursor as MutableJsonObject)[String(key)] = container;
+      const container: MutableJsonObject = {};
+      cursor[segment] = container;
       cursor = container;
     }
   }
   const leaf = path[path.length - 1];
   if (leaf === undefined) return;
-  if (Array.isArray(cursor) && isIndex(leaf)) {
-    cursor[Number(leaf)] = value;
-  } else {
-    (cursor as MutableJsonObject)[leaf] = value;
-  }
+  cursor[leaf] = value;
 };
 
 /**
@@ -191,6 +208,11 @@ const setPath = (root: MutableJsonObject, path: string[], value: Json): void => 
  * name is a dotted path are taken; control fields (`intent`, anything starting
  * with `_`) and non-string values (files) are skipped. A leaf named `chapter` /
  * `verse` is coerced to a number so the `BibleRef` integer fields decode.
+ *
+ * List items and conferences are named by their **identity** segment
+ * (`team.<id>.name`, `conferences./2024.themeName.en` — ADR 0006), so the
+ * assembled override is a pure object tree keyed by identity; `deepMerge`
+ * reconciles it against the base's arrays by matching that identity.
  */
 export const assembleOverrides = (
   entries: Iterable<readonly [string, FormDataEntryValue]>,
@@ -212,13 +234,36 @@ export const assembleOverrides = (
 };
 
 /**
- * Deep-merge `overrides` onto `base`, returning a new value. Objects merge
- * key-by-key; arrays merge element-by-element by index (so editing
- * `conferences.0.themeName.en` overlays only that leaf and leaves
- * `conferences.0.speakers` untouched); every other value (string / number /
- * boolean / null) is replaced. `base` and `overrides` are never mutated.
+ * Deep-merge `overrides` onto `base`, returning a new value. `base` and
+ * `overrides` are never mutated.
+ *
+ * Objects merge key-by-key. An **array** in `base` is merged by item
+ * **identity** (ADR 0006), NOT by position: `overrides` for a list arrives as an
+ * identity-map (`{ <id>: partial }` for `team`/`speakers`, `{ "/2024": partial }`
+ * for `conferences`), and each override key is matched against the base item
+ * whose `id` / `slug` equals it — so editing `conferences./2024.themeName.en`
+ * overlays only that conference's leaf and leaves every other item (and every
+ * unedited deep field) untouched, even if list positions shifted from an
+ * add/remove. A base item no override names survives verbatim; an override key
+ * that matches no base item is ignored (structural add/remove is `applyListEdit`'s
+ * job, never a field merge's). Every scalar (string / number / boolean / null) is
+ * replaced.
+ *
+ * The old index-aligned array branch is gone (registration-launch Branch 2
+ * sub-commit 2.4): position is no longer an identity, so an edit can never land
+ * on the wrong item after a list grew or shrank.
  */
 export const deepMerge = (base: Json, overrides: Json): Json => {
+  // Identity-keyed merge: an object override onto an array base addresses items
+  // by `id` / `slug`, never by index.
+  if (Array.isArray(base) && isPlainObject(overrides)) {
+    return base.map((item) => {
+      const identity = itemIdentity(item);
+      if (identity === undefined) return item;
+      const next = overrides[identity];
+      return next === undefined ? item : deepMerge(item, next);
+    });
+  }
   if (isPlainObject(base) && isPlainObject(overrides)) {
     const result: MutableJsonObject = { ...base };
     for (const key of Object.keys(overrides)) {
@@ -230,21 +275,62 @@ export const deepMerge = (base: Json, overrides: Json): Json => {
     }
     return result;
   }
-  if (Array.isArray(base) && Array.isArray(overrides)) {
-    const result: Json[] = [...base];
-    for (let i = 0; i < overrides.length; i += 1) {
-      const next = overrides[i];
-      if (next === undefined) continue;
-      result[i] = i < base.length ? deepMerge(base[i] as Json, next) : next;
-    }
-    return result;
-  }
   return overrides;
 };
 
-/** Set the leaf at a dotted `path` on a structurally-cloned copy of `doc`. */
+/**
+ * Set the leaf at a dotted `path` on a structurally-cloned copy of `doc`,
+ * resolving each segment by **identity** when it descends into an array (ADR
+ * 0006): a `<slug>` / `<id>` segment selects the array item whose `slug` / `id`
+ * equals it, never an array index. The image-upload rewrite (`applyImageUpload`)
+ * targets a key this way (`team.<id>.photo.key`,
+ * `conferences./2024.speakers.<id>.photo.key`), so a freshly-reordered list never
+ * rewrites the wrong item's image. A segment that resolves to no array item (or a
+ * non-container) leaves `doc` untouched — the strict decode downstream is the gate.
+ */
 export const setAtPath = (doc: Json, path: string, value: Json): Json => {
-  const clone = structuredClone(doc) as MutableJsonObject;
-  setPath(clone, path.split('.'), value);
-  return clone;
+  const clone = structuredClone(doc) as Json;
+  return setByIdentity(clone, path.split('.'), value);
+};
+
+/**
+ * Return a fresh `node` with `value` set at `path`, navigating objects by key
+ * and arrays by item **identity** (`id` / `slug`). Missing **object** keys along
+ * the path are created (so an image upload to a freshly-added stub item — which
+ * carries only its `id`, with no `photo` object yet — still lands its key, just
+ * as the old positional `setPath` created intermediates). An **array** segment is
+ * never fabricated: an identity that matches no item leaves `node` unchanged (a
+ * structural add is `applyListEdit`'s job, never an upload's). Containers along
+ * the path are cloned, so the input is never mutated.
+ */
+const setByIdentity = (
+  node: Json,
+  path: readonly string[],
+  value: Json,
+): Json => {
+  const [head, ...rest] = path;
+  if (head === undefined) return value;
+  if (Array.isArray(node)) {
+    let hit = false;
+    const next = node.map((item) => {
+      if (hit || itemIdentity(item) !== head) return item;
+      hit = true;
+      return setByIdentity(item, rest, value);
+    });
+    return hit ? next : node;
+  }
+  if (isPlainObject(node)) {
+    if (rest.length === 0) return { ...node, [head]: value };
+    const existing: Json | undefined = node[head];
+    // Descend into an existing container; otherwise create a fresh object so the
+    // remaining path can be built (an absent or scalar slot is replaced, never
+    // left to silently drop the write — mirrors the old `setPath`).
+    const child: Json =
+      existing !== undefined &&
+      (isPlainObject(existing) || Array.isArray(existing))
+        ? existing
+        : {};
+    return { ...node, [head]: setByIdentity(child, rest, value) };
+  }
+  return node;
 };

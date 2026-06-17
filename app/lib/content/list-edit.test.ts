@@ -140,7 +140,7 @@ describe('applyListEdit — id-keyed, not positional', () => {
     });
   });
 
-  test('navigates a nested list path (conferences.0.speakers)', () => {
+  test('navigates a nested list path by conference slug, not position (conferences./2024.speakers)', () => {
     const base: Json = {
       conferences: [
         { slug: '/2024', speakers: list({ id: 's1' }, { id: 's2' }) },
@@ -148,7 +148,7 @@ describe('applyListEdit — id-keyed, not positional', () => {
       ],
     };
     const next = applyListEdit(base, [
-      addOp('conferences.0.speakers', id('s9')),
+      addOp('conferences./2024.speakers', id('s9')),
     ]) as {
       conferences: ReadonlyArray<{ speakers: ReadonlyArray<{ id: string }> }>;
     };
@@ -159,6 +159,27 @@ describe('applyListEdit — id-keyed, not positional', () => {
     ]);
     // The sibling conference is untouched.
     expect(next.conferences[1]?.speakers.map((s) => s.id)).toEqual(['s3']);
+  });
+
+  test('a reordered conferences array still resolves the right year by slug', () => {
+    // Position 0 is now /2026, position 1 is /2024 — an index-based navigation
+    // would edit the wrong conference; identity navigation finds /2024.
+    const base: Json = {
+      conferences: [
+        { slug: '/2026', speakers: list({ id: 's3' }) },
+        { slug: '/2024', speakers: list({ id: 's1' }) },
+      ],
+    };
+    const next = applyListEdit(base, [
+      addOp('conferences./2024.speakers', id('s9')),
+    ]) as {
+      conferences: ReadonlyArray<{ slug: string; speakers: ReadonlyArray<{ id: string }> }>;
+    };
+    expect(next.conferences.find((c) => c.slug === '/2024')?.speakers.map((s) => s.id)).toEqual([
+      's1',
+      's9',
+    ]);
+    expect(next.conferences.find((c) => c.slug === '/2026')?.speakers.map((s) => s.id)).toEqual(['s3']);
   });
 
   test('does not mutate its input', () => {
@@ -191,13 +212,14 @@ describe('applyListEdit — round-trips through the real document', () => {
       const base = (yield* encode(defaultContent)) as Json & {
         conferences: ReadonlyArray<{ slug: string; speakers: readonly { id: string }[] }>;
       };
-      const ci = base.conferences.findIndex((c) => c.slug === '/2024');
-      const firstSpeakerId = base.conferences[ci]?.speakers[0]?.id;
+      const conf = base.conferences.find((c) => c.slug === '/2024');
+      const firstSpeakerId = conf?.speakers[0]?.id;
       expect(firstSpeakerId).toBeDefined();
 
-      // Remove the first 2024 speaker — the rest of the document still decodes.
+      // Remove the first 2024 speaker (addressed by slug, ADR 0006) — the rest of
+      // the document still decodes.
       const removed = applyListEdit(base, [
-        removeOp(`conferences.${ci}.speakers`, id(firstSpeakerId!)),
+        removeOp('conferences./2024.speakers', id(firstSpeakerId!)),
       ]);
       const decoded = yield* decode(removed);
       const conf2024 = decoded.conferences.find((c) => c.slug === '/2024');
@@ -218,13 +240,12 @@ describe('applyListEdit — round-trips through the real document', () => {
       const base = (yield* encode(defaultContent)) as Json & {
         conferences: ReadonlyArray<{ slug: string }>;
       };
-      const ci = base.conferences.findIndex((c) => c.slug === '/2024');
 
-      // Add an empty speaker (id only). The list grew, but the item has no
-      // required `name`/`bio`/… — so the publish-time decode FAILS (ADR 0006:
+      // Add an empty speaker (id only) to /2024. The list grew, but the item has
+      // no required `name`/`bio`/… — so the publish-time decode FAILS (ADR 0006:
       // an empty required field blocks publish, not the structural edit).
       const added = applyListEdit(base, [
-        addOp(`conferences.${ci}.speakers`, newListItemId()),
+        addOp('conferences./2024.speakers', newListItemId()),
       ]);
       const exit = yield* Effect.exit(decode(added));
       expect(exit._tag).toBe('Failure');
@@ -237,15 +258,15 @@ describe('collectListOps', () => {
       entries({
         [listOpFieldName('team', 'add')]: 'newid000000000000000A',
         [listOpFieldName('team', 'remove')]: 'oldid000000000000000B',
-        [listOpFieldName('conferences.0.speakers', 'reorder')]: 'idA, idB ,idC',
-        'team.0.name': 'ignored — a field, not a control op',
+        [listOpFieldName('conferences./2024.speakers', 'reorder')]: 'idA, idB ,idC',
+        'team.some-member-id-00000.name': 'ignored — a field, not a control op',
         intent: 'save-draft',
       }),
     );
     expect(ops).toEqual([
       addOp('team', id('newid000000000000000A')),
       removeOp('team', id('oldid000000000000000B')),
-      reorderOp('conferences.0.speakers', [
+      reorderOp('conferences./2024.speakers', [
         'idA',
         'idB',
         'idC',
@@ -265,10 +286,10 @@ describe('collectListOps', () => {
 
   test('keeps a listPath that itself contains dots intact (lastIndexOf split)', () => {
     const ops = collectListOps(
-      entries({ [listOpFieldName('conferences.2.seminars', 'add')]: 'someid0000000000000AB' }),
+      entries({ [listOpFieldName('conferences./2026.seminars', 'add')]: 'someid0000000000000AB' }),
     );
     expect(ops).toEqual([
-      addOp('conferences.2.seminars', id('someid0000000000000AB')),
+      addOp('conferences./2026.seminars', id('someid0000000000000AB')),
     ]);
   });
 });
@@ -276,15 +297,15 @@ describe('collectListOps', () => {
 describe('field-name templates', () => {
   test('listOpFieldName round-trips through collectListOps', () => {
     expect(listOpFieldName('team', 'add')).toBe('list:team:add');
-    expect(listOpFieldName('conferences.0.speakers', 'remove')).toBe(
-      'list:conferences.0.speakers:remove',
+    expect(listOpFieldName('conferences./2024.speakers', 'remove')).toBe(
+      'list:conferences./2024.speakers:remove',
     );
   });
 
   test('fieldName addresses a list-item leaf by id, not position', () => {
     const speaker = id('abcdefghij0123456789X');
-    expect(fieldName('conferences.0.speakers', speaker, 'name.en')).toBe(
-      'conferences.0.speakers.abcdefghij0123456789X.name.en',
+    expect(fieldName('conferences./2024.speakers', speaker, 'name.en')).toBe(
+      'conferences./2024.speakers.abcdefghij0123456789X.name.en',
     );
   });
 });

@@ -27,8 +27,16 @@ import {
   uploadedImageKey,
   type Json,
 } from '~/lib/content/admin-form';
-import { collectListOps, listOpFieldName } from '~/lib/content/list-edit';
-import { DraftSiteContent, newListItemId } from '~/lib/content/schema';
+import {
+  collectListOps,
+  fieldName,
+  listOpFieldName,
+} from '~/lib/content/list-edit';
+import {
+  DraftSiteContent,
+  ListItemId,
+  newListItemId,
+} from '~/lib/content/schema';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction, routeHandler } from '~/lib/effect/route';
 import { Storage } from '~/lib/storage.server';
@@ -538,6 +546,7 @@ export default function AdminContentEditor() {
     photo?: { key: string; alt: { en: string; fr: string } };
   }>;
 
+  const teamIds = team.map((m) => m.id);
   const emptyText = { en: '', fr: '' } as const;
   const translations = (document.translations ?? { en: {}, fr: {} }) as {
     en: Readonly<Record<string, string>>;
@@ -583,154 +592,169 @@ export default function AdminContentEditor() {
       )}
 
       <Form method="post" className="space-y-4">
-        {conferences.map((conference, ci) => (
-          <Section key={conference.slug} title={`Conference ${conference.slug}`}>
-            <Bilingual
-              label="Theme name"
-              name={`conferences.${ci}.themeName`}
-              value={conference.themeName}
-            />
-            <Text
-              label="Accent colour (#rrggbb)"
-              name={`conferences.${ci}.accentColor`}
-              defaultValue={conference.accentColor}
-            />
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Text
-                label="Start date (YYYY-MM-DD)"
-                name={`conferences.${ci}.dates.start`}
-                defaultValue={conference.dates.start}
+        {conferences.map((conference) => {
+          // Conferences are addressed by their stable `slug` identity (ADR 0006),
+          // not by array position — `deepMerge` / `setAtPath` reconcile the
+          // override against the base's `conferences` array by matching `slug`,
+          // so an edit never lands on the wrong year.
+          const conf = `conferences.${conference.slug}`;
+          const speakersPath = `${conf}.speakers`;
+          const speakerIds = conference.speakers.map((s) => s.id);
+          return (
+            <Section key={conference.slug} title={`Conference ${conference.slug}`}>
+              <Bilingual
+                label="Theme name"
+                name={`${conf}.themeName`}
+                value={conference.themeName}
               />
               <Text
-                label="End date (YYYY-MM-DD)"
-                name={`conferences.${ci}.dates.end`}
-                defaultValue={conference.dates.end}
+                label="Accent colour (#rrggbb)"
+                name={`${conf}.accentColor`}
+                defaultValue={conference.accentColor}
               />
-            </div>
-            <Bilingual
-              label="Location"
-              name={`conferences.${ci}.location`}
-              value={conference.location}
-            />
-            <Bilingual
-              label="Tagline"
-              name={`conferences.${ci}.tagline`}
-              value={conference.tagline}
-              multiline
-            />
-            <Bilingual
-              label="Bible book"
-              name={`conferences.${ci}.bible.book`}
-              value={conference.bible.book}
-            />
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Text
-                label="Chapter"
-                name={`conferences.${ci}.bible.chapter`}
-                defaultValue={String(conference.bible.chapter)}
-              />
-              <Text
-                label="Verse"
-                name={`conferences.${ci}.bible.verse`}
-                defaultValue={String(conference.bible.verse)}
-              />
-            </div>
-            <fieldset className="space-y-3">
-              <legend className="text-sm font-medium text-neutral-800">
-                Hero artwork
-              </legend>
-              {(['desktop', 'mobile'] as const).map((crop) => (
-                <div key={crop} className="space-y-2 rounded-md bg-neutral-50 p-3">
-                  <p className="text-xs font-semibold uppercase text-neutral-500">
-                    {crop}
-                  </p>
-                  <Bilingual
-                    label="Alt text"
-                    name={`conferences.${ci}.hero.${crop}.alt`}
-                    value={conference.hero[crop].alt}
-                  />
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {(['en', 'fr'] as const).map((locale) => (
-                      <ImageUpload
-                        key={locale}
-                        keyPath={`conferences.${ci}.hero.${crop}.key.${locale}`}
-                        currentKey={conference.hero[crop].key[locale]}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </fieldset>
-            <fieldset className="space-y-3">
-              <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
-                <span>Speakers</span>
-                <AddItemButton
-                  listPath={`conferences.${ci}.speakers`}
-                  label="+ Add speaker"
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Text
+                  label="Start date (YYYY-MM-DD)"
+                  name={`${conf}.dates.start`}
+                  defaultValue={conference.dates.start}
                 />
-              </legend>
-              {conference.speakers.map((speaker, si) => (
-                <div
-                  key={speaker.id}
-                  className="space-y-2 rounded-md bg-neutral-50 p-3"
-                >
-                  <div className="flex items-center justify-end">
-                    <ItemControls
-                      listPath={`conferences.${ci}.speakers`}
-                      ids={conference.speakers.map((s) => s.id)}
-                      index={si}
+                <Text
+                  label="End date (YYYY-MM-DD)"
+                  name={`${conf}.dates.end`}
+                  defaultValue={conference.dates.end}
+                />
+              </div>
+              <Bilingual
+                label="Location"
+                name={`${conf}.location`}
+                value={conference.location}
+              />
+              <Bilingual
+                label="Tagline"
+                name={`${conf}.tagline`}
+                value={conference.tagline}
+                multiline
+              />
+              <Bilingual
+                label="Bible book"
+                name={`${conf}.bible.book`}
+                value={conference.bible.book}
+              />
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Text
+                  label="Chapter"
+                  name={`${conf}.bible.chapter`}
+                  defaultValue={String(conference.bible.chapter)}
+                />
+                <Text
+                  label="Verse"
+                  name={`${conf}.bible.verse`}
+                  defaultValue={String(conference.bible.verse)}
+                />
+              </div>
+              <fieldset className="space-y-3">
+                <legend className="text-sm font-medium text-neutral-800">
+                  Hero artwork
+                </legend>
+                {(['desktop', 'mobile'] as const).map((crop) => (
+                  <div key={crop} className="space-y-2 rounded-md bg-neutral-50 p-3">
+                    <p className="text-xs font-semibold uppercase text-neutral-500">
+                      {crop}
+                    </p>
+                    <Bilingual
+                      label="Alt text"
+                      name={`${conf}.hero.${crop}.alt`}
+                      value={conference.hero[crop].alt}
                     />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {(['en', 'fr'] as const).map((locale) => (
+                        <ImageUpload
+                          key={locale}
+                          keyPath={`${conf}.hero.${crop}.key.${locale}`}
+                          currentKey={conference.hero[crop].key[locale]}
+                        />
+                      ))}
+                    </div>
                   </div>
-                  <Bilingual
-                    label="Name"
-                    name={`conferences.${ci}.speakers.${si}.name`}
-                    value={speaker.name ?? emptyText}
-                  />
-                  <Bilingual
-                    label="Activity"
-                    name={`conferences.${ci}.speakers.${si}.activity`}
-                    value={speaker.activity ?? emptyText}
-                  />
-                  <Bilingual
-                    label="Bio"
-                    name={`conferences.${ci}.speakers.${si}.bio`}
-                    value={speaker.bio ?? emptyText}
-                    multiline
-                  />
-                  <ImageUpload
-                    keyPath={`conferences.${ci}.speakers.${si}.photo.key`}
-                    currentKey={speaker.photo?.key ?? ''}
-                  />
-                </div>
-              ))}
-            </fieldset>
-          </Section>
-        ))}
+                ))}
+              </fieldset>
+              <fieldset className="space-y-3">
+                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
+                  <span>Speakers</span>
+                  <AddItemButton listPath={speakersPath} label="+ Add speaker" />
+                </legend>
+                {conference.speakers.map((speaker, si) => {
+                  // Re-assert the `ListItemId` brand at this view boundary: the
+                  // encoded document carries the id as a bare `string` (encode
+                  // drops the brand), but it decoded through `ListItemId`, so it
+                  // matches the nanoid pattern — `make` validates rather than
+                  // casts, keeping `fieldName`'s "no `.`-bearing id" guarantee
+                  // load-bearing (`boundary-discipline`).
+                  const speakerId = ListItemId.make(speaker.id);
+                  return (
+                    <div
+                      key={speaker.id}
+                      className="space-y-2 rounded-md bg-neutral-50 p-3"
+                    >
+                      <div className="flex items-center justify-end">
+                        <ItemControls
+                          listPath={speakersPath}
+                          ids={speakerIds}
+                          index={si}
+                        />
+                      </div>
+                      <Bilingual
+                        label="Name"
+                        name={fieldName(speakersPath, speakerId, 'name')}
+                        value={speaker.name ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Activity"
+                        name={fieldName(speakersPath, speakerId, 'activity')}
+                        value={speaker.activity ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Bio"
+                        name={fieldName(speakersPath, speakerId, 'bio')}
+                        value={speaker.bio ?? emptyText}
+                        multiline
+                      />
+                      <ImageUpload
+                        keyPath={fieldName(speakersPath, speakerId, 'photo.key')}
+                        currentKey={speaker.photo?.key ?? ''}
+                      />
+                    </div>
+                  );
+                })}
+              </fieldset>
+            </Section>
+          );
+        })}
 
         <Section title="Team">
           <div className="flex items-center justify-end">
             <AddItemButton listPath="team" label="+ Add team member" />
           </div>
-          {team.map((member, ti) => (
-            <div key={member.id} className="space-y-2 rounded-md bg-neutral-50 p-3">
-              <div className="flex items-center justify-end">
-                <ItemControls
-                  listPath="team"
-                  ids={team.map((m) => m.id)}
-                  index={ti}
+          {team.map((member, ti) => {
+            // Re-assert the brand at this boundary (see the speakers note).
+            const memberId = ListItemId.make(member.id);
+            return (
+              <div key={member.id} className="space-y-2 rounded-md bg-neutral-50 p-3">
+                <div className="flex items-center justify-end">
+                  <ItemControls listPath="team" ids={teamIds} index={ti} />
+                </div>
+                <Text
+                  label="Name"
+                  name={fieldName('team', memberId, 'name')}
+                  defaultValue={member.name ?? ''}
+                />
+                <ImageUpload
+                  keyPath={fieldName('team', memberId, 'photo.key')}
+                  currentKey={member.photo?.key ?? ''}
                 />
               </div>
-              <Text
-                label="Name"
-                name={`team.${ti}.name`}
-                defaultValue={member.name ?? ''}
-              />
-              <ImageUpload
-                keyPath={`team.${ti}.photo.key`}
-                currentKey={member.photo?.key ?? ''}
-              />
-            </div>
-          ))}
+            );
+          })}
         </Section>
 
         <Section title={`Translations (${translationKeys.length} keys)`}>

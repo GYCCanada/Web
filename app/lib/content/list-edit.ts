@@ -30,9 +30,11 @@ const isPlainObject = (value: Json): value is { readonly [k: string]: Json } =>
 
 /**
  * A dotted path to a list (array) inside the encoded document — e.g. `team`, or
- * `conferences.0.speakers`. Numeric segments index into an array (the document's
- * `conferences`), string segments key into an object. The path addresses the
- * **array**, not an item; the item is addressed by its `id` inside the `ListOp`.
+ * `conferences./2024.speakers`. A segment that descends THROUGH an array selects
+ * the item by its **identity** (a conference's `slug`, a list item's `id` — ADR
+ * 0006), never by position; string segments key into an object. The path
+ * addresses the **array**, not an item; the item to add / remove / reorder is
+ * addressed by its `id` inside the `ListOp`.
  */
 export type ListPath = string;
 
@@ -77,6 +79,19 @@ const itemId = (item: Json): string | undefined =>
   isPlainObject(item) && typeof item['id'] === 'string' ? item['id'] : undefined;
 
 /**
+ * The stable identity a *path segment* matches an array item by (ADR 0006): a
+ * list item's `id`, or a conference's `slug`. Used to navigate THROUGH an array
+ * (e.g. `conferences./2024.speakers`) to a nested list — positional indexing is
+ * gone, so a reordered `conferences` array still resolves the right year.
+ */
+const navIdentity = (item: Json): string | undefined => {
+  if (!isPlainObject(item)) return undefined;
+  if (typeof item['id'] === 'string') return item['id'];
+  if (typeof item['slug'] === 'string') return item['slug'];
+  return undefined;
+};
+
+/**
  * Apply one op to the array `list`, returning a fresh array (never mutating). The
  * op kinds are exhaustive over the `ListOp` union, so adding a kind without
  * handling it is a type error (`make-impossible-states-unrepresentable`).
@@ -119,10 +134,13 @@ const applyOp = (list: readonly Json[], op: ListOp): readonly Json[] => {
 
 /**
  * Navigate to the array at `path` inside `root`, replace it via `update`, and
- * return a fresh document. Intermediate containers are cloned along the path so
- * the input is never mutated; a path that does not resolve to an array is left
- * untouched (the caller's listPath always names a real list, but a malformed
- * control field must not throw — the strict decode downstream is the gate).
+ * return a fresh document. When the path descends THROUGH an array (e.g.
+ * `conferences./2024.speakers`), the next segment selects the array item by its
+ * **identity** (`slug` / `id`), never by position (ADR 0006, sub-commit 2.4) — so
+ * a reordered `conferences` still resolves the right year. Intermediate
+ * containers are cloned along the path so the input is never mutated; a path that
+ * does not resolve to an array (an unknown identity, a malformed control field)
+ * is left untouched — the strict decode downstream is the gate.
  */
 const updateListAtPath = (
   root: Json,
@@ -134,10 +152,8 @@ const updateListAtPath = (
     return Array.isArray(root) ? update(root) : root;
   }
   if (Array.isArray(root)) {
-    const index = Number(head);
-    if (!Number.isInteger(index) || index < 0 || index >= root.length) {
-      return root;
-    }
+    const index = root.findIndex((item) => navIdentity(item) === head);
+    if (index < 0) return root;
     const next = [...root];
     next[index] = updateListAtPath(root[index] as Json, rest, update);
     return next;
@@ -226,11 +242,12 @@ export const collectListOps = (
 
 /**
  * The id-keyed form field-name for a leaf of a list item — e.g.
- * `fieldName('conferences.0.speakers', id, 'name.en')` →
- * `conferences.0.speakers.<id>.name.en`. This replaces the positional templates
- * (`conferences.0.speakers.1.name.en`) the index merge relied on (ADR 0006); the
- * id segment is a validated `ListItemId`, so it can never smuggle a `.`-bearing
- * path that would re-split into the wrong shape (`boundary-discipline`).
+ * `fieldName('conferences./2024.speakers', id, 'name.en')` →
+ * `conferences./2024.speakers.<id>.name.en`. This replaces the positional
+ * templates (`conferences.0.speakers.1.name.en`) the index merge relied on (ADR
+ * 0006); the id segment is a validated `ListItemId`, so it can never smuggle a
+ * `.`-bearing path that would re-split into the wrong shape
+ * (`boundary-discipline`).
  */
 export const fieldName = (
   listPath: ListPath,
