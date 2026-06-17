@@ -256,6 +256,88 @@ export type HomePage = typeof HomePage.Type;
 // FormDefinition — placeholder (Branch 6 replaces with the structural field graph)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Draft page variants — the laxer admin-draft schemas (ADR 0006, Branch 5.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * The DRAFT variants of the Pages that carry editable lists (registration-launch
+ * Branch 5.5, ADR 0006). "Add item" on a page list (a FAQ entry, a give-direction,
+ * an About paragraph/quote, an Archive entry) appends an item carrying ONLY its
+ * `id` (settled #10) and auto-saves the draft; the admin then fills the bilingual
+ * fields incrementally. The strict page schemas above would reject every such
+ * intermediate state (`Text` both-locales-non-empty, a required `ExternalHttpsUrl`
+ * on an Archive entry), but ADR 0006 is explicit: an incomplete required field
+ * blocks **publish, not draft save**.
+ *
+ * The tolerance mirrors the site draft (`schema.ts`): a list item's per-locale
+ * **content text** relaxes to optional plain strings (`DraftText`) so a half-typed
+ * (or untouched-empty) value is draft-valid, while the **identity** (`id`) and any
+ * present **branded leaf** (an `ExternalHttpsUrl`) stay strict — the draft tolerates
+ * an *absent* value, never a *malformed* one. A `RichText` answer relaxes to
+ * `optionalKey` (a freshly-added FAQ item carries no answer until edited); a present
+ * answer still decodes through the strict closed-token model.
+ *
+ * Pages WITHOUT editable lists (`ContactPage`, `VolunteerPage`, `HomePage`) have no
+ * add-item flow, so their draft schema IS the strict schema — the registry wires
+ * them with `draftSchema === schema` and `DraftEditor` never forks
+ * (`make-impossible-states-unrepresentable`: there is no laxer state to represent).
+ */
+const DraftText = Schema.Struct({
+  en: Schema.optionalKey(Schema.String),
+  fr: Schema.optionalKey(Schema.String),
+});
+
+export const DraftAboutPage = Schema.Struct({
+  title: Text,
+  paragraphs: IdListArray(
+    Schema.Struct({ id: ListItemId, text: Schema.optionalKey(DraftText) }),
+  ),
+  disclaimer: Text,
+  quotes: IdListArray(
+    Schema.Struct({
+      id: ListItemId,
+      text: Schema.optionalKey(DraftText),
+      attribution: Schema.optionalKey(DraftText),
+    }),
+  ),
+});
+export type DraftAboutPage = typeof DraftAboutPage.Type;
+
+export const DraftFaqPage = Schema.Struct({
+  title: Text,
+  items: IdListArray(
+    Schema.Struct({
+      id: ListItemId,
+      question: Schema.optionalKey(DraftText),
+      answer: Schema.optionalKey(RichText),
+    }),
+  ),
+});
+export type DraftFaqPage = typeof DraftFaqPage.Type;
+
+export const DraftGivePage = Schema.Struct({
+  title: Text,
+  reason: Text,
+  directions: IdListArray(
+    Schema.Struct({ id: ListItemId, text: Schema.optionalKey(DraftText) }),
+  ),
+  donateUrl: ExternalHttpsUrl,
+});
+export type DraftGivePage = typeof DraftGivePage.Type;
+
+export const DraftArchivePage = Schema.Struct({
+  title: Text,
+  entries: IdListArray(
+    Schema.Struct({
+      id: ListItemId,
+      label: Schema.optionalKey(DraftText),
+      url: Schema.optionalKey(ExternalHttpsUrl),
+    }),
+  ),
+});
+export type DraftArchivePage = typeof DraftArchivePage.Type;
+
 /**
  * A PLACEHOLDER `FormDefinition` schema (registration-launch Branch 5.1). ADR 0007 /
  * Branch 6 build the full structural field-graph (a closed set of ~8 `FieldKind`s,

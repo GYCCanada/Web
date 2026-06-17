@@ -331,32 +331,45 @@ const siteCodec: ScopeCodec = {
 
 /**
  * Build a codec bundle for a Page/Form object from its registry `ObjectSpec`.
- * Draft and publish share the schema (no lax draft variant yet), and there is no
- * id-backfill: these objects are brand-new storage (ADR 0008), so no pre-existing
- * id-less document needs repairing. When Branch 5.5 gives pages the add-item flow
- * it introduces a page draft variant and wires it here, exactly as the site scope
- * already is — the draft/publish split lives in this bundle, so the
- * reconciliation never forks.
+ *
+ * Branch 5.5 gives the list-bearing pages (FAQ, give, about, archive) an add-item
+ * flow, so their draft boundary is the LAXER `spec.draftSchema` (a freshly-added
+ * id-only item is draft-valid) and the publish boundary the STRICT `spec.schema`
+ * (re-enforcing the both-locales `Text` invariant) — exactly the site scope's
+ * `DraftSiteContent`/`SiteContent` split. A page/form with no add-item flow wires
+ * `draftSchema === schema` in the registry, so this same code path keeps draft and
+ * publish identical for it without a special case (`derive-dont-sync`). There is
+ * still no id-backfill: these objects are brand-new storage (ADR 0008), so no
+ * pre-existing id-less document needs repairing.
+ *
+ * The DRAFT codecs (`fromBucket`, `decodeDraft`, `encodeObject`, `encodeDraftJson`)
+ * move the object between bucket-JSON / decoded-draft / view-object through
+ * `draftSchema`; the PUBLISH codecs (`decodePublish`, `encodePublishJson`) gate the
+ * promotion through `schema`.
  */
 const objectCodec = (
   spec: ObjectSpec<unknown, unknown>,
   keys: ScopeKeys,
 ): ScopeCodec => {
-  const decode = Schema.decodeUnknownEffect(spec.schema);
-  const encodeObject = Schema.encodeUnknownEffect(spec.schema);
-  const encodeJson = Schema.encodeUnknownEffect(
+  const decodeDraft = Schema.decodeUnknownEffect(spec.draftSchema);
+  const decodePublish = Schema.decodeUnknownEffect(spec.schema);
+  const encodeObject = Schema.encodeUnknownEffect(spec.draftSchema);
+  const encodeDraftJson = Schema.encodeUnknownEffect(
+    Schema.fromJsonString(spec.draftSchema),
+  );
+  const encodePublishJson = Schema.encodeUnknownEffect(
     Schema.fromJsonString(spec.schema),
   );
   return {
     keys,
     default: spec.default,
-    fromBucket: (json) => parseJson(json).pipe(Effect.flatMap(decode)),
-    decodeDraft: decode,
-    decodePublish: decode,
+    fromBucket: (json) => parseJson(json).pipe(Effect.flatMap(decodeDraft)),
+    decodeDraft,
+    decodePublish,
     encodeObject: (value) =>
       encodeObject(value) as Effect.Effect<Json, Schema.SchemaError>,
-    encodeDraftJson: encodeJson,
-    encodePublishJson: encodeJson,
+    encodeDraftJson,
+    encodePublishJson,
   };
 };
 

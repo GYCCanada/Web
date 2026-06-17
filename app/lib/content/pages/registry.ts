@@ -16,6 +16,10 @@ import {
   AboutPage,
   ArchivePage,
   ContactPage,
+  DraftAboutPage,
+  DraftArchivePage,
+  DraftFaqPage,
+  DraftGivePage,
   FaqPage,
   FormDefinition,
   GivePage,
@@ -114,16 +118,48 @@ export const formDraftKey = (form: FormId): string =>
  * through, and the bundled default to fall back to (and seed on first publish).
  * `default` is the *decoded* value (its type is the schema's `Type`), so the
  * record is total over `PageId` with no `unknown` escape hatch.
+ *
+ * `draftSchema` is the LAXER admin-draft boundary (ADR 0006, Branch 5.5): a page
+ * whose `/admin` "Add item" appends an id-only stub (FAQ items, give-directions,
+ * About paragraphs/quotes, Archive entries) decodes the *draft* through this — its
+ * list items' content fields are optional — while `schema` is the STRICT publish
+ * boundary that re-enforces the both-locales `Text` invariant. A page with no
+ * add-item flow wires `draftSchema === schema` (there is no laxer state), so
+ * `DraftEditor`'s reconciliation never forks: it always reads `draftSchema` for the
+ * draft and `schema` for publish (`derive-dont-sync`).
  */
 export interface ObjectSpec<A, I> {
   readonly schema: Schema.Codec<A, I>;
+  readonly draftSchema: Schema.Codec<unknown, unknown>;
   readonly default: A;
 }
 
+/**
+ * Build a spec whose draft and publish boundaries DIFFER — the page carries an
+ * editable list, so a freshly-added id-only item must be draft-valid (decoded
+ * through `draftSchema`) yet publish-invalid until filled (re-decoded through the
+ * strict `schema`).
+ */
+const draftPageSpec = <A, I>(
+  schema: Schema.Codec<A, I>,
+  draftSchema: Schema.Codec<unknown, unknown>,
+  defaultValue: A,
+): ObjectSpec<A, I> => ({ schema, draftSchema, default: defaultValue });
+
+/**
+ * Build a spec with NO laxer draft variant: the draft boundary IS the strict
+ * schema. Used by pages/forms without an add-item flow (contact, volunteer, home,
+ * and the placeholder forms) — there is no id-only intermediate state, so the draft
+ * and publish boundaries coincide.
+ */
 const pageSpec = <A, I>(
   schema: Schema.Codec<A, I>,
   defaultValue: A,
-): ObjectSpec<A, I> => ({ schema, default: defaultValue });
+): ObjectSpec<A, I> => ({
+  schema,
+  draftSchema: schema as Schema.Codec<unknown, unknown>,
+  default: defaultValue,
+});
 
 /**
  * The Page registry — one entry per `PageId`. The mapped type ties each id to its
@@ -131,12 +167,12 @@ const pageSpec = <A, I>(
  * lookup is statically the right typed object, not a widened union.
  */
 export const PAGE_SPECS = {
-  about: pageSpec(AboutPage, defaultAboutPage),
-  faq: pageSpec(FaqPage, defaultFaqPage),
-  give: pageSpec(GivePage, defaultGivePage),
+  about: draftPageSpec(AboutPage, DraftAboutPage, defaultAboutPage),
+  faq: draftPageSpec(FaqPage, DraftFaqPage, defaultFaqPage),
+  give: draftPageSpec(GivePage, DraftGivePage, defaultGivePage),
   contact: pageSpec(ContactPage, defaultContactPage),
   volunteer: pageSpec(VolunteerPage, defaultVolunteerPage),
-  archive: pageSpec(ArchivePage, defaultArchivePage),
+  archive: draftPageSpec(ArchivePage, DraftArchivePage, defaultArchivePage),
   home: pageSpec(HomePage, defaultHomePage),
 } as const satisfies { readonly [P in PageId]: ObjectSpec<unknown, unknown> };
 

@@ -17,6 +17,10 @@ import {
   AboutPage,
   ArchivePage,
   ContactPage,
+  DraftAboutPage,
+  DraftArchivePage,
+  DraftFaqPage,
+  DraftGivePage,
   FaqPage,
   FormDefinition,
   GivePage,
@@ -202,5 +206,80 @@ describe('present-but-empty content is a hard decode error (skip != tolerance)',
       quotes: [],
     });
     expect(result._tag).toBe('Failure');
+  });
+});
+
+/**
+ * The DRAFT page variants (Branch 5.5, ADR 0006) tolerate an id-only added list
+ * item (settled #10) so "Add item" → auto-save works, while the STRICT page schema
+ * still rejects the same incomplete item on publish. This proves the add-then-fill
+ * loop: a freshly-added FAQ item / give-direction / About paragraph-or-quote /
+ * Archive entry is draft-valid yet publish-invalid until its bilingual fields are
+ * filled — section-skip is for *absence*, never half-filled content
+ * (CONTEXT §Section skip).
+ */
+describe('draft page variants tolerate id-only adds; strict schema blocks publish', () => {
+  const ID = 'd'.repeat(21);
+
+  test('an id-only FAQ item is draft-valid but publish-invalid', () => {
+    const base = { title: { en: 'FAQ', fr: 'FAQ' }, items: [{ id: ID }] };
+    expect(Schema.decodeUnknownResult(DraftFaqPage)(base)._tag).toBe('Success');
+    expect(Schema.decodeUnknownResult(FaqPage)(base)._tag).toBe('Failure');
+  });
+
+  test('an id-only give-direction is draft-valid but publish-invalid', () => {
+    const base = {
+      title: { en: 'Give', fr: 'Donner' },
+      reason: { en: 'r', fr: 'r' },
+      directions: [{ id: ID }],
+      donateUrl: 'https://example.org/donate',
+    };
+    expect(Schema.decodeUnknownResult(DraftGivePage)(base)._tag).toBe('Success');
+    expect(Schema.decodeUnknownResult(GivePage)(base)._tag).toBe('Failure');
+  });
+
+  test('an id-only About paragraph AND quote are draft-valid but publish-invalid', () => {
+    const base = {
+      title: { en: 'About', fr: 'À propos' },
+      paragraphs: [{ id: ID }],
+      disclaimer: { en: 'd', fr: 'd' },
+      quotes: [{ id: 'e'.repeat(21) }],
+    };
+    expect(Schema.decodeUnknownResult(DraftAboutPage)(base)._tag).toBe('Success');
+    expect(Schema.decodeUnknownResult(AboutPage)(base)._tag).toBe('Failure');
+  });
+
+  test('an id-only Archive entry is draft-valid but publish-invalid', () => {
+    const base = { title: { en: 'Archive', fr: 'Archives' }, entries: [{ id: ID }] };
+    expect(Schema.decodeUnknownResult(DraftArchivePage)(base)._tag).toBe('Success');
+    expect(Schema.decodeUnknownResult(ArchivePage)(base)._tag).toBe('Failure');
+  });
+
+  test('the draft still rejects a MALFORMED present value (not merely absent)', () => {
+    // A present donateUrl that is not https crosses the strict `ExternalHttpsUrl`
+    // boundary even in the draft — the draft tolerates ABSENCE, never a malformed
+    // value (`make-impossible-states-unrepresentable` still holds for what is set).
+    const result = Schema.decodeUnknownResult(DraftGivePage)({
+      title: { en: 'Give', fr: 'Donner' },
+      reason: { en: 'r', fr: 'r' },
+      directions: [],
+      donateUrl: 'javascript:alert(1)',
+    });
+    expect(result._tag).toBe('Failure');
+  });
+
+  test('a fully-filled draft FAQ item publishes cleanly through the strict schema', () => {
+    const filled = {
+      title: { en: 'FAQ', fr: 'FAQ' },
+      items: [
+        {
+          id: ID,
+          question: { en: 'Q?', fr: 'Q ?' },
+          answer: [{ _tag: 'text', value: { en: 'A.', fr: 'R.' } }],
+        },
+      ],
+    };
+    expect(Schema.decodeUnknownResult(DraftFaqPage)(filled)._tag).toBe('Success');
+    expect(Schema.decodeUnknownResult(FaqPage)(filled)._tag).toBe('Success');
   });
 });
