@@ -640,10 +640,12 @@ export const defaultVolunteerForm: FormDefinition = Schema.decodeUnknownSync(
 });
 
 /**
- * The registration form's PER-REGISTRANT field graph (Branch 6.5) — the
- * data-driven equivalent of the hand-tuned `registration-schema.ts` `Registrant`
- * struct, proven byte-equivalent by `forms/equivalence.registration.test.tsx`
- * against the oracle (kept as `registration-schema.oracle.ts` until 6.6). See
+ * The registration form's PER-REGISTRANT field graph (Branch 6) — the data-driven
+ * equivalent of the former hand-tuned `Registrant` struct, proven byte-equivalent
+ * by the registration equivalence harness against the hand-tuned oracle before both
+ * were retired in Branch 6.6 (ADR 0007: "the oracle is removed once registration is
+ * fully migrated"). The live form's field-name contract is now pinned by the
+ * render-parity tests in `forms/registration-form.test.tsx`. See
  * `docs/forms/registration-spec.md` for the field-for-field transcription.
  *
  * SCOPE: this `FormDefinition` describes ONE registrant. The registration form is
@@ -846,12 +848,13 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
                 _tag: 'optionalText',
                 name: 'other',
                 label: { en: 'Other', fr: 'Autre' },
-                // Mirrors the oracle's `OptionalText` (`registration-schema.oracle
-                // .ts` `other`): key-must-be-present, empty-string-allowed — the
-                // always-rendered `extra` block POSTs an empty `other`, so an absent
-                // `other` inside a present `extra` is an out-of-form payload the
-                // oracle rejects. `church`/`instrument`/`dietaryRestrictions` are
-                // genuinely-optional (oracle `OptionalString`) and omit this flag.
+                // Realizes the former hand-tuned `OptionalText` (the registration
+                // oracle's `other`, retired in 6.6): key-must-be-present,
+                // empty-string-allowed — the always-rendered `extra` block POSTs an
+                // empty `other`, so an absent `other` inside a present `extra` is an
+                // out-of-form payload that schema rejects.
+                // `church`/`instrument`/`dietaryRestrictions` are genuinely-optional
+                // (the former `OptionalString`) and omit this flag.
                 requirePresent: true,
                 invalidMessage: 'registration.form.other.required',
               },

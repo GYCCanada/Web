@@ -76,21 +76,22 @@ const requiredString = (message: MessageKey) =>
 
 /**
  * Genuinely-optional free-text: an empty string, an ABSENT key, and an explicit
- * `undefined` are all valid; a present non-string emits `message`. Mirrors
- * `registration-schema.oracle.ts` `OptionalString` (`Schema.optional(Schema
- * .String…)`) — registration's `church` / `instrument` / `dietaryRestrictions`.
+ * `undefined` are all valid; a present non-string emits `message`. Realizes the
+ * former hand-tuned `OptionalString` (`Schema.optional(Schema.String…)`, the
+ * registration oracle retired in Branch 6.6) — registration's `church` /
+ * `instrument` / `dietaryRestrictions`.
  *
  * `Schema.optional` (not `optionalKey`) so an explicit `undefined` is accepted too,
- * matching the oracle's `OptionalString` exactly on the values the form actually
- * submits (absent / valid string). The wrapper is `.annotate({ message })` so a
- * present non-string (a duplicate-name ARRAY — an out-of-form payload) maps to the
- * field's real `MessageKey` instead of `Schema.optional`'s default
+ * matching that `OptionalString` exactly on the values the form actually submits
+ * (absent / valid string). The wrapper is `.annotate({ message })` so a present
+ * non-string (a duplicate-name ARRAY — an out-of-form payload) maps to the field's
+ * real `MessageKey` instead of `Schema.optional`'s default
  * `"Expected string | undefined, got …"` union-mismatch text (which would render
- * BLANK in `FieldErrors`). The oracle leaves this edge un-annotated; relabeling it
- * is strictly safer and never observed in the equivalence corpus (the form submits
- * absent or a string for a single text field). The same wrapper-annotation idiom as
- * the `optional: true` text/email/url path below. This is the `requirePresent`
- * absent/false branch.
+ * BLANK in `FieldErrors`). The former oracle left this edge un-annotated; relabeling
+ * it is strictly safer and was never observed in the equivalence corpus (the form
+ * submits absent or a string for a single text field). The same wrapper-annotation
+ * idiom as the `optional: true` text/email/url path below. This is the
+ * `requirePresent` absent/false branch.
  */
 const optionalText = (message: MessageKey) =>
   Schema.optional(Schema.String.annotate({ message })).annotate({ message });
@@ -98,12 +99,13 @@ const optionalText = (message: MessageKey) =>
 /**
  * Key-must-be-present, empty-string-allowed free-text: a present non-string emits
  * `message`; an empty string is valid; an ABSENT key emits `message` (via
- * `messageMissingKey`). Mirrors `registration-schema.oracle.ts` `OptionalText`
- * (`Schema.String…annotateKey({ messageMissingKey })`, NOT optional) —
- * registration's `extra.other`. The two oracle behaviours must NOT collapse onto
- * one engine kind (the always-rendered `extra` block POSTs an empty `other`, so an
- * absent `other` inside a present `extra` is the out-of-form payload the oracle
- * rejects). Selected by the `optionalText` kind's `requirePresent: true` flag.
+ * `messageMissingKey`). Realizes the former hand-tuned `OptionalText`
+ * (`Schema.String…annotateKey({ messageMissingKey })`, NOT optional; the
+ * registration oracle retired in Branch 6.6) — registration's `extra.other`. The
+ * two former behaviours must NOT collapse onto one engine kind (the always-rendered
+ * `extra` block POSTs an empty `other`, so an absent `other` inside a present
+ * `extra` is the out-of-form payload that schema rejects). Selected by the
+ * `optionalText` kind's `requirePresent: true` flag.
  */
 const presentEmptyAllowedText = (message: MessageKey) =>
   Schema.String.annotate({ message }).annotateKey({ messageMissingKey: message });
