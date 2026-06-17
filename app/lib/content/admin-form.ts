@@ -20,6 +20,8 @@
  * without a runtime (`small-interface-deep-implementation`).
  */
 
+import { AssetKey } from './schema';
+
 /**
  * A JSON-shaped value the merge/assemble helpers move around. Arrays / objects
  * are `readonly` so an encoded Effect-Schema value (whose fields are deeply
@@ -92,14 +94,24 @@ export const imageUploadTarget = (intent: string): string | null => {
  * obviously an editor upload. `seed` (a millisecond timestamp) keeps successive
  * uploads to the same field distinct so a stale cached image is never served
  * for a new upload (`make-operations-idempotent` — each upload is its own key).
+ *
+ * Returns a branded `AssetKey`, not a raw `string`: the construction
+ * (`images/uploads/` namespace + a `[a-zA-Z0-9-]` slug) is valid by
+ * construction, and `AssetKey.make` *validates* that invariant at the producer
+ * boundary (`boundary-discipline`, `make-impossible-states-unrepresentable`) so
+ * a non-`AssetKey` can never reach `DraftEditor.applyImageUpload`. A failure
+ * here would be a slug-construction bug, surfaced as a throw — not a silent
+ * widening.
  */
 export const uploadedImageKey = (
   targetPath: string,
   contentType: string,
   seed: number,
-): string => {
+): AssetKey => {
   const slug = targetPath.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  return `images/uploads/${slug}-${seed}.${extensionForType(contentType)}`;
+  return AssetKey.make(
+    `images/uploads/${slug}-${seed}.${extensionForType(contentType)}`,
+  );
 };
 
 /**

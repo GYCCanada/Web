@@ -152,7 +152,7 @@ describe('image upload helpers', () => {
 
   test('builds a namespaced, extension-correct, collision-free upload key', () => {
     const key = uploadedImageKey('team.0.photo.key', 'image/png', 1_700_000_000_000);
-    expect(key).toBe('images/uploads/team-0-photo-key-1700000000000.png');
+    expect(String(key)).toBe('images/uploads/team-0-photo-key-1700000000000.png');
     expect(extensionForType('image/webp')).toBe('webp');
     // A second upload at a later instant gets a distinct key.
     const later = uploadedImageKey('team.0.photo.key', 'image/png', 1_700_000_000_001);

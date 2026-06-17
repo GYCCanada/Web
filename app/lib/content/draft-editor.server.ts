@@ -10,7 +10,7 @@ import {
 } from '../content.server';
 import { deepMerge, setAtPath, type Json } from './admin-form';
 import { defaultContent } from './defaults';
-import { SiteContent } from './schema';
+import { SiteContent, type AssetKey } from './schema';
 import type { SiteContent as SiteContentType } from './schema';
 import { Storage } from '../storage.server';
 import type { ObjectHead } from '../storage.server';
@@ -163,7 +163,7 @@ export class Service extends Context.Service<
     readonly applyImageUpload: (
       scope: ContentScope,
       targetPath: string,
-      key: string,
+      key: AssetKey,
     ) => Effect.Effect<EncodedDoc, IssueError>;
     /**
      * Promote the scope's current edit source (the draft if newer, else the
@@ -299,7 +299,7 @@ export const layer = Layer.effect(
     });
 
     const applyImageUpload = Effect.fn('DraftEditor.applyImageUpload')(
-      function* (scope: ContentScope, targetPath: string, key: string) {
+      function* (scope: ContentScope, targetPath: string, key: AssetKey) {
         const { draftKey } = scopeKeys(scope);
         const { content: current } = yield* load(scope);
         const encoded = (yield* encodeDocument(current).pipe(

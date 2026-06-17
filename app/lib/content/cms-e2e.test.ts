@@ -171,7 +171,9 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
       { [SITE_CONTENT_KEY]: { body: seed } },
     );
 
-    expect(result.key).toBe('images/uploads/team-0-photo-key-1700000000000.png');
+    expect(String(result.key)).toBe(
+      'images/uploads/team-0-photo-key-1700000000000.png',
+    );
     expect(result.servedContentType).toBe('image/png');
     expect([...result.bytes]).toEqual([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
