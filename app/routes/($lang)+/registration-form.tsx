@@ -1,8 +1,11 @@
 import type { SubmissionResult } from '@conform-to/react/future';
+import { Schema } from 'effect';
 import { Form } from 'react-router';
 import dayjs from 'dayjs';
 
 import { FormProvider, useForm, useFormData } from '~/lib/conform';
+import { defaultRegistrationForm } from '~/lib/content/pages/defaults';
+import { definitionToSchema } from '~/lib/forms/decode';
 import { useTranslate } from '~/lib/localization/context';
 import { Button } from '~/ui/button';
 import { Checkbox, Checkboxes, CheckboxGroup } from '~/ui/checkbox';
@@ -12,10 +15,82 @@ import { Main } from '~/ui/main';
 import { Radio, RadioGroup, Radios } from '~/ui/radio';
 import { TextField } from '~/ui/text-field';
 
-import {
-  makeDefaultRegistrant,
-  RegistrationStandardSchema,
-} from './registration-schema';
+import type { RegistrationStandardSchema as OracleStandardSchema } from './registration-schema.oracle';
+
+/**
+ * Registration's client validation schema, DERIVED from the structural Form
+ * engine's `defaultRegistrationForm` definition (`derive-dont-sync`,
+ * registration-launch Branch 6.5). The engine definition validates ONE registrant
+ * (the attendee/exhibitor discriminator + nested groups + boolean codecs — the
+ * riskiest graph, proven byte-equivalent to the hand-tuned oracle by
+ * `app/lib/forms/equivalence.registration.test.tsx`); this form keeps the
+ * repeating-`registrants` SHELL (a repeating-array-of-variant-items is not in the
+ * closed `FieldKind` set), so it wraps the per-registrant codec in
+ * `{ registrants: Array(...) }`. Editing the stored `forms/registration.json` now
+ * changes what the form accepts with no code change.
+ *
+ * The engine codec's OUTPUT is a generic `Record<string, unknown>` (the data-driven
+ * decoder is field-name-agnostic), so conform's field metadata is re-typed at the
+ * seam to the oracle standard schema's precise registrant shape — the SAME shape
+ * the equivalence harness proves the engine decodes to. This is a TYPE-only
+ * annotation over an unchanged engine RUNTIME (the `configureForms` "cast at the
+ * seam" idiom this codebase already uses), NOT a re-declaration of the validation:
+ * `OracleStandardSchema` contributes only its `.Type` here; every issue the form
+ * shows is computed by the engine codec.
+ */
+const RegistrationSchema = Schema.Struct({
+  registrants: Schema.mutable(
+    Schema.Array(definitionToSchema(defaultRegistrationForm)),
+  ).annotateKey({ messageMissingKey: 'registration.form.type.required' }),
+});
+
+const RegistrationStandardSchema = Schema.toStandardSchemaV1(
+  RegistrationSchema,
+) as unknown as typeof OracleStandardSchema;
+
+/**
+ * The form's initial / appended registrant value — the raw string/absent
+ * (form-input) values the browser submits, NOT decoded booleans, so conform's
+ * `defaultValue` consumes it directly. Keyed exactly by the engine definition's
+ * registrant field names (asserted in the equivalence harness's render-parity
+ * half), so an "Add Registrant" appends a blank attendee.
+ */
+export const makeDefaultRegistrant = () => ({
+  name: '',
+  email: '',
+  phone: '',
+  dateOfBirth: '',
+  parent: undefined,
+  gender: undefined,
+  dietaryRestrictions: undefined,
+  meals: undefined,
+  extra: {
+    firstTimeAttending: undefined,
+    howDidYouHear: '',
+    whyAreYouAttending: '',
+    whatAreYouExcitedAbout: '',
+    church: undefined,
+    merch: [],
+    other: '',
+    tos: undefined,
+  },
+  outreach: [],
+  volunteer: {
+    songLeader: undefined,
+    musician: undefined,
+    instrument: undefined,
+    specialMusic: undefined,
+    hospitality: undefined,
+    registrationStation: undefined,
+    usher: undefined,
+    outreachLeader: undefined,
+    smallGroupLeader: undefined,
+    seminarRoomHost: undefined,
+    cameraOperator: undefined,
+    photographer: undefined,
+    roamingMic: undefined,
+  },
+});
 
 /**
  * Shared registration form, parameterized by conference `year`. The three
@@ -474,10 +549,10 @@ export function RegistrationForm({
                       <Checkbox name={volunteer.seminarRoomHost.name}>
                         {translate('registration.form.seminar-room-host.label')}
                       </Checkbox>
-                      <Checkbox name={volunteer.photographer.name}>
+                      <Checkbox name={volunteer.cameraOperator.name}>
                         {translate('registration.form.camera-operator.label')}
                       </Checkbox>
-                      <Checkbox>
+                      <Checkbox name={volunteer.photographer.name}>
                         {translate('registration.form.photographer.label')}
                       </Checkbox>
                       <Checkbox name={volunteer.roamingMic.name}>

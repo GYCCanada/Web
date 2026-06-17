@@ -75,13 +75,38 @@ const requiredString = (message: MessageKey) =>
     .annotateKey({ messageMissingKey: message });
 
 /**
- * Present-but-empty-allowed free-text (the "other notes" field): a present
- * non-string emits `message`; an empty string and an absent value are valid
- * (the field is `optionalKey`, so absence never reports). Mirrors
- * `registration-schema.ts` `OptionalText` + the contact/volunteer optional text.
+ * Genuinely-optional free-text: an empty string, an ABSENT key, and an explicit
+ * `undefined` are all valid; a present non-string emits `message`. Mirrors
+ * `registration-schema.oracle.ts` `OptionalString` (`Schema.optional(Schema
+ * .String…)`) — registration's `church` / `instrument` / `dietaryRestrictions`.
+ *
+ * `Schema.optional` (not `optionalKey`) so an explicit `undefined` is accepted too,
+ * matching the oracle's `OptionalString` exactly on the values the form actually
+ * submits (absent / valid string). The wrapper is `.annotate({ message })` so a
+ * present non-string (a duplicate-name ARRAY — an out-of-form payload) maps to the
+ * field's real `MessageKey` instead of `Schema.optional`'s default
+ * `"Expected string | undefined, got …"` union-mismatch text (which would render
+ * BLANK in `FieldErrors`). The oracle leaves this edge un-annotated; relabeling it
+ * is strictly safer and never observed in the equivalence corpus (the form submits
+ * absent or a string for a single text field). The same wrapper-annotation idiom as
+ * the `optional: true` text/email/url path below. This is the `requirePresent`
+ * absent/false branch.
  */
 const optionalText = (message: MessageKey) =>
-  Schema.optionalKey(Schema.String.annotate({ message }));
+  Schema.optional(Schema.String.annotate({ message })).annotate({ message });
+
+/**
+ * Key-must-be-present, empty-string-allowed free-text: a present non-string emits
+ * `message`; an empty string is valid; an ABSENT key emits `message` (via
+ * `messageMissingKey`). Mirrors `registration-schema.oracle.ts` `OptionalText`
+ * (`Schema.String…annotateKey({ messageMissingKey })`, NOT optional) —
+ * registration's `extra.other`. The two oracle behaviours must NOT collapse onto
+ * one engine kind (the always-rendered `extra` block POSTs an empty `other`, so an
+ * absent `other` inside a present `extra` is the out-of-form payload the oracle
+ * rejects). Selected by the `optionalText` kind's `requirePresent: true` flag.
+ */
+const presentEmptyAllowedText = (message: MessageKey) =>
+  Schema.String.annotate({ message }).annotateKey({ messageMissingKey: message });
 
 /** Required email: empty/absent emit `requiredMessage`, malformed emits `invalidMessage`. */
 const email = (requiredMessage: MessageKey, invalidMessage: MessageKey) =>
@@ -186,7 +211,12 @@ const fieldToStructEntry = (
   field: FieldKind,
 ): readonly [string, Schema.Top] => {
   if (field._tag === 'optionalText') {
-    return [field.name, optionalText(field.invalidMessage)];
+    return [
+      field.name,
+      field.requirePresent === true
+        ? presentEmptyAllowedText(field.invalidMessage)
+        : optionalText(field.invalidMessage),
+    ];
   }
   if (field._tag === 'checkboxBoolean' && field.optional === true) {
     return [field.name, Schema.optionalKey(stringToBoolean(field.requiredMessage))];
@@ -340,7 +370,12 @@ const variantPresenceIssues = (
   const issues: Array<PresenceIssue> = [];
   for (const field of branch.fields) {
     if (field._tag === 'nestedGroup') {
-      if (value[field.name] === undefined) {
+      // An `optional: true` group (registration's minors-only `parent`, the
+      // opt-in `volunteer`) is legitimately absent — the variant never demands
+      // it; a PRESENT one still runs its inner checks (the struct codec). A
+      // non-optional group (the always-rendered `extra`) absent inside the
+      // selected variant is an error anchored at its first inner required field.
+      if (field.optional !== true && value[field.name] === undefined) {
         const issue = groupPresenceIssue(field);
         if (issue) issues.push(issue);
       }

@@ -639,9 +639,303 @@ export const defaultVolunteerForm: FormDefinition = Schema.decodeUnknownSync(
   ],
 });
 
+/**
+ * The registration form's PER-REGISTRANT field graph (Branch 6.5) — the
+ * data-driven equivalent of the hand-tuned `registration-schema.ts` `Registrant`
+ * struct, proven byte-equivalent by `forms/equivalence.registration.test.tsx`
+ * against the oracle (kept as `registration-schema.oracle.ts` until 6.6). See
+ * `docs/forms/registration-spec.md` for the field-for-field transcription.
+ *
+ * SCOPE: this `FormDefinition` describes ONE registrant. The registration form is
+ * `{ registrants: Registrant[] }` — a repeating array of these, which is NOT in
+ * the closed `FieldKind` set (the brief's non-goal: the kind-set is closed, not an
+ * arbitrary builder). So the engine owns the registrant VALIDATION GRAPH (the
+ * attendee/exhibitor discriminator, the per-type requirements, the nested groups,
+ * the boolean codecs — the riskiest part the harness pins); the registration route
+ * keeps the multi-registrant SHELL (the `registrants` array, the
+ * `registrants[n].` field prefix, the minors-only `parent` client gating, the
+ * boolean-RADIO rendering of `meals` / `firstTimeAttending`) and derives its
+ * validation from `Schema.Array(definitionToSchema(this))`
+ * (`derive-dont-sync`).
+ *
+ * Two oracle subtleties faithfully transcribed:
+ *   - `parent.email` is a bare `requiredText`, NOT an `email` kind — the oracle's
+ *     `Parent.email` is a `RequiredString` with no `/@/` pattern check, so the
+ *     engine must not tighten it (the harness would flag a divergence).
+ *   - `parent` / `volunteer` are `optional: true` `nestedGroup`s — the oracle's
+ *     attendee filter never REQUIRES them (they are conditionally rendered:
+ *     `parent` only for minors, `volunteer` opt-in). The always-rendered `extra`
+ *     group is a non-optional `nestedGroup`, so an attendee that omits it is an
+ *     error anchored at `extra.tos` (the oracle's `['extra','tos']` anchor).
+ */
 export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
 )({
   title: { en: 'Registration', fr: 'Inscription' },
-  fields: [],
+  fields: [
+    {
+      _tag: 'requiredText',
+      name: 'name',
+      label: { en: 'Name', fr: 'Nom' },
+      placeholder: { en: 'Your full name', fr: 'Votre nom complet' },
+      requiredMessage: 'registration.form.name.required',
+    },
+    {
+      _tag: 'email',
+      name: 'email',
+      label: { en: 'Email', fr: 'Courriel' },
+      placeholder: { en: 'example@mail.com', fr: 'example@mail.com' },
+      requiredMessage: 'registration.form.email.required',
+      invalidMessage: 'registration.form.email.error',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'phone',
+      label: { en: 'Phone', fr: 'Téléphone' },
+      placeholder: { en: '123-456-7890', fr: '123-456-7890' },
+      requiredMessage: 'registration.form.phone.required',
+    },
+  ],
+  variant: {
+    discriminator: 'type',
+    requiredMessage: 'registration.form.type.required',
+    options: [
+      { value: 'attendee', label: { en: 'Attendee', fr: 'Participant' } },
+      { value: 'exhibitor', label: { en: 'Exhibitor', fr: 'Exposant' } },
+    ],
+    variants: [
+      {
+        value: 'attendee',
+        label: { en: 'Attendee', fr: 'Participant' },
+        fields: [
+          {
+            _tag: 'literal',
+            name: 'gender',
+            label: { en: 'Gender', fr: 'Genre' },
+            options: [
+              { value: 'male', label: { en: 'Male', fr: 'Homme' } },
+              { value: 'female', label: { en: 'Female', fr: 'Femme' } },
+            ],
+            requiredMessage: 'registration.form.gender.required',
+          },
+          {
+            _tag: 'requiredText',
+            name: 'dateOfBirth',
+            label: { en: 'Date of birth', fr: 'Date de naissance' },
+            requiredMessage: 'registration.form.date-of-birth.required',
+          },
+          {
+            _tag: 'nestedGroup',
+            name: 'parent',
+            label: { en: 'Parent / guardian', fr: 'Parent / tuteur' },
+            optional: true,
+            fields: [
+              {
+                _tag: 'requiredText',
+                name: 'name',
+                label: { en: 'Parent name', fr: 'Nom du parent' },
+                requiredMessage: 'registration.form.parent.required',
+              },
+              {
+                _tag: 'requiredText',
+                name: 'email',
+                label: { en: 'Parent email', fr: 'Courriel du parent' },
+                requiredMessage: 'registration.form.parent-email.required',
+              },
+              {
+                _tag: 'requiredText',
+                name: 'phone',
+                label: { en: 'Parent phone', fr: 'Téléphone du parent' },
+                requiredMessage: 'registration.form.parent-phone.required',
+              },
+            ],
+          },
+          {
+            _tag: 'checkboxBoolean',
+            name: 'meals',
+            label: { en: 'Meals', fr: 'Repas' },
+            requiredMessage: 'registration.form.meals.required',
+          },
+          {
+            _tag: 'optionalText',
+            name: 'dietaryRestrictions',
+            label: {
+              en: 'Dietary restrictions',
+              fr: 'Restrictions alimentaires',
+            },
+            invalidMessage: 'registration.form.dietary-restrictions.required',
+          },
+          {
+            _tag: 'arrayOfLiteral',
+            name: 'outreach',
+            label: { en: 'Outreach', fr: 'Sensibilisation' },
+            options: [
+              {
+                value: 'laws-of-health',
+                label: { en: 'Laws of Health', fr: 'Lois de la santé' },
+              },
+              {
+                value: 'homeless-carepacks',
+                label: {
+                  en: 'Homeless Care Packs',
+                  fr: 'Trousses pour sans-abri',
+                },
+              },
+              {
+                value: 'back-to-school',
+                label: { en: 'Back to School', fr: 'Rentrée scolaire' },
+              },
+              {
+                value: 'not-sure',
+                label: { en: 'Not sure', fr: 'Pas sûr' },
+              },
+            ],
+            requiredMessage: 'registration.form.outreach.required',
+          },
+          {
+            _tag: 'nestedGroup',
+            name: 'extra',
+            label: { en: 'Extra information', fr: 'Informations supplémentaires' },
+            fields: [
+              {
+                _tag: 'requiredText',
+                name: 'howDidYouHear',
+                label: { en: 'How did you hear about us?', fr: 'Comment avez-vous entendu parler de nous?' },
+                requiredMessage: 'registration.form.how-did-you-hear.required',
+              },
+              {
+                _tag: 'requiredText',
+                name: 'whyAreYouAttending',
+                label: { en: 'Why are you attending?', fr: 'Pourquoi participez-vous?' },
+                requiredMessage:
+                  'registration.form.why-are-you-attending.required',
+              },
+              {
+                _tag: 'requiredText',
+                name: 'whatAreYouExcitedAbout',
+                label: { en: 'What are you excited about?', fr: 'Qu’est-ce qui vous enthousiasme?' },
+                requiredMessage:
+                  'registration.form.what-are-you-excited-about.required',
+              },
+              {
+                _tag: 'checkboxBoolean',
+                name: 'firstTimeAttending',
+                label: { en: 'First time attending?', fr: 'Première participation?' },
+                requiredMessage:
+                  'registration.form.first-time-attending.required',
+              },
+              {
+                _tag: 'optionalText',
+                name: 'church',
+                label: { en: 'Church', fr: 'Église' },
+                invalidMessage: 'registration.form.church.required',
+              },
+              {
+                _tag: 'arrayOfLiteral',
+                name: 'merch',
+                label: { en: 'Merch', fr: 'Articles' },
+                options: [
+                  { value: 't-shirt', label: { en: 'T-shirt', fr: 'T-shirt' } },
+                  { value: 'hoodie', label: { en: 'Hoodie', fr: 'Pull' } },
+                  { value: 'shirt', label: { en: 'Shirt', fr: 'Chemise' } },
+                  { value: 'none', label: { en: 'None', fr: 'Aucun' } },
+                ],
+                requiredMessage: 'registration.form.merch.required',
+              },
+              {
+                _tag: 'optionalText',
+                name: 'other',
+                label: { en: 'Other', fr: 'Autre' },
+                // Mirrors the oracle's `OptionalText` (`registration-schema.oracle
+                // .ts` `other`): key-must-be-present, empty-string-allowed — the
+                // always-rendered `extra` block POSTs an empty `other`, so an absent
+                // `other` inside a present `extra` is an out-of-form payload the
+                // oracle rejects. `church`/`instrument`/`dietaryRestrictions` are
+                // genuinely-optional (oracle `OptionalString`) and omit this flag.
+                requirePresent: true,
+                invalidMessage: 'registration.form.other.required',
+              },
+              {
+                _tag: 'checkboxBoolean',
+                name: 'tos',
+                label: { en: 'I agree to the terms', fr: 'J’accepte les conditions' },
+                requiredMessage: 'registration.form.tos.required',
+              },
+            ],
+          },
+          {
+            _tag: 'nestedGroup',
+            name: 'volunteer',
+            label: { en: 'Volunteer', fr: 'Bénévolat' },
+            optional: true,
+            fields: [
+              ...(
+                [
+                  'songLeader',
+                  'musician',
+                ] as const
+              ).map((name) => ({
+                _tag: 'checkboxBoolean' as const,
+                name,
+                label: { en: name, fr: name },
+                optional: true,
+                requiredMessage: 'registration.form.volunteer.required' as const,
+              })),
+              {
+                _tag: 'optionalText' as const,
+                name: 'instrument',
+                label: { en: 'Instrument', fr: 'Instrument' },
+                invalidMessage: 'registration.form.instrument.required' as const,
+              },
+              ...(
+                [
+                  'specialMusic',
+                  'hospitality',
+                  'registrationStation',
+                  'usher',
+                  'outreachLeader',
+                  'smallGroupLeader',
+                  'seminarRoomHost',
+                  'cameraOperator',
+                  'photographer',
+                  'roamingMic',
+                ] as const
+              ).map((name) => ({
+                _tag: 'checkboxBoolean' as const,
+                name,
+                label: { en: name, fr: name },
+                optional: true,
+                requiredMessage: 'registration.form.volunteer.required' as const,
+              })),
+            ],
+          },
+        ],
+      },
+      {
+        value: 'exhibitor',
+        label: { en: 'Exhibitor', fr: 'Exposant' },
+        fields: [
+          {
+            _tag: 'requiredText',
+            name: 'synopsis',
+            label: { en: 'Synopsis', fr: 'Synopsis' },
+            requiredMessage: 'registration.form.synopsis.required',
+          },
+          {
+            _tag: 'url',
+            name: 'website',
+            label: { en: 'Website', fr: 'Site web' },
+            requiredMessage: 'registration.form.website.required',
+            invalidMessage: 'registration.form.website.required',
+          },
+          {
+            _tag: 'requiredText',
+            name: 'company',
+            label: { en: 'Company', fr: 'Entreprise' },
+            requiredMessage: 'registration.form.company.required',
+          },
+        ],
+      },
+    ],
+  },
 });

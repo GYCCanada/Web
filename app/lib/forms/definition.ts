@@ -143,6 +143,7 @@ type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
   | ({
       readonly _tag: 'optionalText';
       readonly multiline?: Bool;
+      readonly requirePresent?: Bool;
       readonly invalidMessage: Msg;
     } & FieldChrome<Name, Txt>)
   | ({
@@ -176,6 +177,7 @@ type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
       readonly _tag: 'nestedGroup';
       readonly name: Name;
       readonly label: Txt;
+      readonly optional?: Bool;
       readonly fields: ReadonlyArray<FieldKindShape<Name, Txt, Msg, Opt, Bool>>;
     };
 
@@ -247,8 +249,21 @@ const fieldChrome = {
  *     volunteer free-text fields).
  *   - `optionalText`    — a present-but-empty-allowed free-text field (the old
  *     zod-permissive "other notes"); a present non-string emits `invalidMessage`,
- *     an empty string and an absent value are both valid. `multiline` renders a
- *     `<textarea>` (presentation only, like `requiredText`).
+ *     an empty string is always valid. `multiline` renders a `<textarea>`
+ *     (presentation only, like `requiredText`). The `requirePresent` flag selects
+ *     between the TWO distinct oracle behaviours the kind must reproduce, never
+ *     collapse:
+ *       - `requirePresent` absent/false → genuinely OPTIONAL-at-key (an absent key
+ *         is valid, emits nothing). Mirrors the oracle's `OptionalString`
+ *         (`Schema.optional(Schema.String…)`) — registration's `church`,
+ *         `instrument`, `dietaryRestrictions`.
+ *       - `requirePresent: true` → KEY-MUST-BE-PRESENT, empty-string-allowed: an
+ *         absent key emits `invalidMessage`, a present empty string is valid.
+ *         Mirrors the oracle's `OptionalText`
+ *         (`Schema.String…annotateKey({ messageMissingKey })`, NOT optional) —
+ *         registration's `extra.other`, where the always-rendered `extra` block
+ *         POSTs an empty `other`, so an ABSENT `other` inside a present `extra` is
+ *         an out-of-form payload the oracle (and now the engine) reject.
  *   - `email`           — a required email; emptiness/absence emit
  *     `requiredMessage`, a malformed address emits `invalidMessage`. `optional:
  *     true` makes it optional-at-key but NON-EMPTY-when-present (the empty present
@@ -266,7 +281,13 @@ const fieldChrome = {
  *     element or absent array emits `requiredMessage`.
  *   - `nestedGroup`     — a sub-struct of further `FieldKind`s (the `parent`,
  *     `extra`, and `volunteer` groups registration nests). Recursive via
- *     `Schema.suspend`.
+ *     `Schema.suspend`. `optional: true` makes the WHOLE group present-validate /
+ *     absent-ok: a conditionally-rendered group (registration's minors-only
+ *     `parent`, the opt-in `volunteer`) the enclosing variant must NOT demand when
+ *     absent, but whose inner fields still run their full checks WHEN the group is
+ *     present (`Schema.optional(Parent)` / `Schema.optional(Volunteer)` in the
+ *     oracle). An absent non-optional group inside a selected variant is an error
+ *     (the always-rendered `extra` group); an absent `optional` group is valid.
  *
  * Two ORTHOGONAL optionality axes, never conflated:
  *   - WHICH FIELDS APPEAR for a registrant (an exhibitor-only field on an
@@ -294,6 +315,7 @@ export const FieldKind = Schema.TaggedUnion({
   optionalText: {
     ...fieldChrome,
     multiline: Schema.optionalKey(Schema.Boolean),
+    requirePresent: Schema.optionalKey(Schema.Boolean),
     invalidMessage: MessageKey,
   },
   email: {
@@ -322,6 +344,7 @@ export const FieldKind = Schema.TaggedUnion({
   nestedGroup: {
     name: FieldName,
     label: Text,
+    optional: Schema.optionalKey(Schema.Boolean),
     fields: Schema.Array(
       Schema.suspend(
         (): Schema.Codec<FieldKind, FieldKindEncoded> => FieldKind,

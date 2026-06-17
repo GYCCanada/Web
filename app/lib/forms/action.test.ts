@@ -16,10 +16,11 @@ import type { DecodedForm } from './decode';
  * → toast.redirect` pipeline the three form routes triplicate into one wrapped
  * route action. These tests pin the pipeline WIRING (`prove-it-works`) — the
  * per-kind decode semantics are covered exhaustively in `decode.test.ts`, so here
- * the form's `FormDefinition` is a bundled default with a STILL-EMPTY field graph
- * (`registration`, whose graph migrates in 6.5) — any payload decodes, letting the
- * test isolate the skeleton's own behaviour. (Contact's graph is populated — 6.3 —
- * and volunteer's — 6.4 — each exercised end-to-end by its equivalence harness.):
+ * the form is `contact` (its graph populated in 6.3) driven by a minimal VALID
+ * contact payload. Every form now carries a populated graph (registration's
+ * migrated in 6.5), so the skeleton is isolated with a payload that decodes rather
+ * than the old empty-graph fixture. Each form is exercised end-to-end by its own
+ * equivalence harness; here we pin only the skeleton's own wiring:
  *   - a valid submission runs `notify` with the decoded payload, then redirects
  *     with the success toast (so a migrated route's success path is unchanged);
  *   - a `notify` failure (e.g. a mailer error mapped to a form-level key) aborts
@@ -56,7 +57,7 @@ describe('formAction', () => {
   it('runs notify with the decoded payload, then redirects with the success toast', async () => {
     let notified: DecodedForm | undefined;
     const action = formAction({
-      form: 'registration',
+      form: 'contact',
       notify: (decoded) =>
         Effect.sync(() => {
           notified = decoded;
@@ -69,7 +70,14 @@ describe('formAction', () => {
 
     let thrown: unknown;
     try {
-      await action(makeFormArgs({ name: 'Ada' }));
+      await action(
+        makeFormArgs({
+          method: 'email',
+          name: 'Ada',
+          email: 'ada@example.com',
+          message: 'hi',
+        }),
+      );
     } catch (error) {
       thrown = error;
     }
@@ -83,12 +91,17 @@ describe('formAction', () => {
     // The success toast was flashed (the set-cookie carries the toast session).
     expect(response.headers.get('set-cookie')).toContain('toast');
     // notify ran with the decoded payload.
-    expect(notified).toEqual({ name: 'Ada' });
+    expect(notified).toEqual({
+      method: 'email',
+      name: 'Ada',
+      email: 'ada@example.com',
+      message: 'hi',
+    });
   });
 
   it('a notify failure aborts the redirect and reports a form-level error', async () => {
     const action = formAction({
-      form: 'registration',
+      form: 'contact',
       notify: () =>
         Effect.fail(formValidationError({ formErrors: ['contact.form.error'] })),
       success: {
@@ -97,7 +110,14 @@ describe('formAction', () => {
       },
     });
 
-    const result = await action(makeFormArgs({ name: 'Ada' }));
+    const result = await action(
+      makeFormArgs({
+        method: 'email',
+        name: 'Ada',
+        email: 'ada@example.com',
+        message: 'hi',
+      }),
+    );
 
     expect(result.status).toBe('error');
     expect(result.result.error?.formErrors).toEqual(['contact.form.error']);
@@ -106,7 +126,7 @@ describe('formAction', () => {
   it('skips the body (no notify) when the honeypot is filled', async () => {
     let notifyRan = false;
     const action = formAction({
-      form: 'registration',
+      form: 'contact',
       notify: () =>
         Effect.sync(() => {
           notifyRan = true;

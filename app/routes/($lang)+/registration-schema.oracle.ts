@@ -3,8 +3,18 @@ import { Schema, SchemaGetter } from 'effect';
 import type { TranslationKey } from '~/lib/localization/translations';
 
 /**
- * Registration form schema — the Effect Schema port of the former zod
- * `RegistrationSchema` (one per `{2024,2025,2026}/form` route, now shared).
+ * Registration form schema — the equivalence ORACLE (registration-launch Branch
+ * 6.5, ADR 0007). This is the verbatim pre-migration hand-tuned schema, KEPT in
+ * the tree (renamed `…/registration-schema.oracle.ts`) only as the behavioural
+ * spec the structural Form engine's `defaultRegistrationForm` definition is proven
+ * against by `app/lib/forms/equivalence.registration.test.tsx` (valid + every
+ * invalid variant: identical decoded output + identical emitted `TranslationKey`
+ * sets). The live registration form derives its validation from the engine
+ * definition now (`derive-dont-sync`); this oracle is deleted once every form
+ * migration is green (6.6). See `docs/forms/registration-spec.md`.
+ *
+ * The Effect Schema port of the former zod `RegistrationSchema` (one per
+ * `{2024,2025,2026}/form` route, now shared).
  *
  * It is a **form-data codec**: every leaf decodes from the string (or absent)
  * value the browser actually submits. The registration `action` is a no-op
