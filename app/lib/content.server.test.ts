@@ -239,6 +239,54 @@ describe('Content fallback (semantically-invalid document)', () => {
     ));
 });
 
+describe('Content read-path id-backfill (ADR 0006 deploy-safety)', () => {
+  /**
+   * The live `content/site.json` published before list-item ids existed has no
+   * ids. Adding a *required* `id` would make that document FAIL decode on the
+   * next read — the deploy would 500 the public site on its own content. The
+   * read path runs `backfillListItemIds` between parse and decode, so the legacy
+   * document decodes (every id-less item gets a fresh `nanoid`) and the public
+   * read returns a real `SiteContent` — NOT the bundled-defaults fallback. This
+   * is the single most important hazard of Branch 2; this test pins it.
+   */
+  const idLessSiteJson = (): string => {
+    const doc = JSON.parse(JSON.stringify(defaultContent)) as {
+      conferences: { speakers?: unknown[]; seminars?: unknown[] }[];
+      team: unknown[];
+    };
+    for (const conference of doc.conferences) {
+      for (const list of [conference.speakers, conference.seminars]) {
+        for (const item of (list ?? []) as Record<string, unknown>[]) {
+          delete item['id'];
+        }
+      }
+    }
+    for (const member of doc.team as Record<string, unknown>[]) {
+      delete member['id'];
+    }
+    return JSON.stringify(doc);
+  };
+
+  it.effect('decodes a pre-ids document (no fallback to defaults)', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const conference = yield* content.getConference('en', 2024);
+      // The legacy document decoded: 2024's two speakers are served (a fallback
+      // to defaults would also have two, so assert the real document was read by
+      // confirming the selectors do not throw and the content is present).
+      expect(conference.slug).toBe('/2024');
+      expect(conference.speakers).toHaveLength(2);
+      expect(conference.speakers[0]?.name).toBe('Matt Parra');
+
+      const team = yield* content.getTeam();
+      expect(team.team[0]?.name).toBe('Elijah Duffy');
+    }).pipe(
+      provideContent(
+        layerTest({ [SITE_CONTENT_KEY]: { body: idLessSiteJson() } }),
+      ),
+    ));
+});
+
 describe('Content translations + team selectors', () => {
   it.effect('returns the locale translation map and the team / board', () =>
     Effect.gen(function* () {

@@ -11,10 +11,12 @@ import {
 } from 'effect';
 
 import { defaultContent } from './content/defaults';
+import { backfillListItemIds } from './content/id-backfill';
 import { SiteContent } from './content/schema';
 import type {
   AssetKey,
   Conference as DocConference,
+  DraftSiteContent as DraftSiteContentType,
   IsoDate,
   Seminar as DocSeminar,
   Speaker as DocSpeaker,
@@ -299,7 +301,15 @@ export const SITE_CONTENT_DRAFT_KEY = 'content/site.draft.json';
 export type AdminContentSource = 'draft' | 'published' | 'defaults';
 
 export interface AdminContent {
-  readonly content: SiteContentType;
+  /**
+   * The document the `/admin` editor opens. It is the **draft** shape
+   * (`DraftSiteContent`): a published / defaults source is also a valid draft (a
+   * complete document trivially satisfies the laxer draft schema), while a
+   * reopened draft may carry freshly-added list items that hold only their `id`
+   * (ADR 0006, settled #10). Publish re-decodes the strict `SiteContent`, the
+   * single boundary that enforces the both-locales `Text` invariant.
+   */
+  readonly content: DraftSiteContentType;
   readonly source: AdminContentSource;
 }
 
@@ -311,7 +321,23 @@ export interface AdminContent {
  */
 const CACHE_TTL_MS = 30_000;
 
-const decodeDocument = Schema.decodeUnknownEffect(Schema.fromJsonString(SiteContent));
+/**
+ * Parse a `content/site.json` string and decode it to a `SiteContent`, running
+ * the id-backfill normalization between parse and decode so a document
+ * published before list-item ids existed (ADR 0006) still decodes — every id-less
+ * list item gets a fresh `nanoid` before the required `id` field is checked. The
+ * two-step (parse → backfill → decode), rather than a single `fromJsonString`,
+ * is what lets the normalization see the parsed value before validation.
+ */
+const parseJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Unknown),
+);
+const decodeSiteContent = Schema.decodeUnknownEffect(SiteContent);
+const decodeDocument = (json: string) =>
+  parseJson(json).pipe(
+    Effect.map(backfillListItemIds),
+    Effect.flatMap(decodeSiteContent),
+  );
 
 export class Service extends Context.Service<
   Service,

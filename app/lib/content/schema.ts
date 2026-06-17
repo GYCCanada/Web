@@ -1,4 +1,5 @@
 import { Schema } from 'effect';
+import { nanoid } from 'nanoid';
 
 /**
  * The CMS content model (CMS plan §"Content schema", decisions D2 / D5).
@@ -116,6 +117,61 @@ export const HexColour = Schema.NonEmptyString.check(
 export type HexColour = typeof HexColour.Type;
 
 /**
+ * The stable identity of a CMS list item (a speaker, seminar, team member, and
+ * the hotel / FAQ / give items that follow) — a `nanoid` (ADR 0006). Identity is
+ * **content, not derived**: an id is authored once, round-trips through the
+ * schema, and persists in the bucket document, so an edit can address a list
+ * item by id rather than by array position. The index-aligned merge it replaces
+ * could only edit existing positions; id-keyed merge can add, remove, and
+ * reorder (ADR 0006, registration-launch Branch 2).
+ *
+ * Validated to nanoid's URL-safe default alphabet (`A-Za-z0-9_-`, length 21) so
+ * a hand-edited document cannot smuggle a non-id string (whitespace, a dotted
+ * path, a `/`) into a position the editor later interpolates into a form
+ * field-name (`speakers.<id>.name`) — `boundary-discipline`,
+ * `make-impossible-states-unrepresentable`. The brand keeps the guarantee
+ * load-bearing past the decoder: a raw `string` is not a `ListItemId` until it
+ * has crossed the schema.
+ */
+export const ListItemId = Schema.NonEmptyString.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]{21}$/, { title: 'ListItemId' }),
+).pipe(Schema.brand('ListItemId'));
+export type ListItemId = typeof ListItemId.Type;
+
+/** Mint a fresh, schema-valid `ListItemId`. */
+export const newListItemId = (): ListItemId => ListItemId.make(nanoid());
+
+/**
+ * An editable list whose items are addressed by their `id` (ADR 0006). The
+ * struct-level filter enforces that the `id`s are **unique**: identity is the
+ * key the id-keyed merge / reorder relies on
+ * (`make-impossible-states-unrepresentable`). Two items sharing an id would make
+ * a remove/reorder ambiguous (and could silently drop one), so a document —
+ * hand-edited, badly backfilled, or otherwise — that carries a duplicate id is
+ * rejected at the boundary rather than mis-edited downstream. Applied to BOTH
+ * the strict `SiteContent` and the draft variant, so the invariant holds at save
+ * and at publish.
+ */
+const uniqueListItemIds = Schema.makeFilter<ReadonlyArray<{ readonly id: string }>>(
+  (items) => {
+    const seen = new Set<string>();
+    for (const item of items) {
+      if (seen.has(item.id)) {
+        return `list items must have unique ids; duplicate "${item.id}"`;
+      }
+      seen.add(item.id);
+    }
+    return undefined;
+  },
+  { title: 'uniqueListItemIds' },
+);
+
+/** A `Schema.Array` of id-bearing list items carrying the unique-id invariant. */
+const IdListArray = <S extends Schema.Codec<{ readonly id: string }, unknown>>(
+  item: S,
+) => Schema.Array(item).check(uniqueListItemIds);
+
+/**
  * An ISO-8601 calendar date (`YYYY-MM-DD`). The conference data is day-granular,
  * so the document stores plain dates; the `Content` boundary (C3) widens each to
  * the existing end-of-day-UTC millisecond used by the route code (`use-the-platform`).
@@ -203,6 +259,7 @@ export type BibleRef = typeof BibleRef.Type;
 
 /** A plenary speaker: a main-session presenter listed under `speakers`. */
 export const Speaker = Schema.Struct({
+  id: ListItemId,
   name: Text,
   activity: Text,
   photo: ImageRef,
@@ -212,6 +269,7 @@ export type Speaker = typeof Speaker.Type;
 
 /** A breakout seminar and the speaker who leads it. */
 export const Seminar = Schema.Struct({
+  id: ListItemId,
   title: Text,
   speaker: Schema.Struct({
     name: Text,
@@ -274,8 +332,8 @@ export const Conference = Schema.Struct({
   location: Text,
   tagline: Text,
   bible: BibleRef,
-  speakers: Schema.Array(Speaker),
-  seminars: Schema.Array(Seminar),
+  speakers: IdListArray(Speaker),
+  seminars: IdListArray(Seminar),
   promos: Schema.Array(Schema.NonEmptyString),
 });
 export type Conference = typeof Conference.Type;
@@ -303,6 +361,7 @@ export type TeamPosition = typeof TeamPosition.Type;
 
 /** A member of the executive team (name + position + photo). */
 export const TeamMember = Schema.Struct({
+  id: ListItemId,
   name: Schema.NonEmptyString,
   position: TeamPosition,
   photo: ImageRef,
@@ -383,8 +442,100 @@ const requiredConferencesFilter = Schema.makeFilter<{
 export const SiteContent = Schema.Struct({
   meta: Meta,
   conferences: Schema.Array(Conference),
-  team: Schema.Array(TeamMember),
+  team: IdListArray(TeamMember),
   board: Schema.Array(Schema.NonEmptyString),
   translations: Translations,
 }).check(requiredConferencesFilter);
 export type SiteContent = typeof SiteContent.Type;
+
+// ---------------------------------------------------------------------------
+// Draft document (the laxer admin-draft variant of SiteContent)
+// ---------------------------------------------------------------------------
+
+/**
+ * The DRAFT variant of the content primitives + list items (registration-launch
+ * Branch 2, ADR 0006).
+ *
+ * "Add item" appends an item carrying ONLY its `id` (settled #10) and auto-saves
+ * the draft, then the admin fills the fields in incrementally (typing a name,
+ * uploading a photo) and saves again. The strict `SiteContent` invariants
+ * (`Text` both-locales-non-empty, a present `ImageRef` requires both `key` AND
+ * `alt`, a `TeamMember` requires a `position`) would reject every intermediate
+ * state, but ADR 0006 is explicit: an incomplete required field blocks
+ * **publish, not draft save**. So the draft tolerates absent / still-empty
+ * content *down to the leaf*, while publish (strict `SiteContent`) enforces the
+ * full invariant.
+ *
+ * The tolerance is DEEP and PRECISE, not a blanket "everything optional":
+ *   - **Content text** relaxes to per-locale optional plain strings (`DraftText`):
+ *     a half-typed name (`{ en: 'Jane' }`, or `{ en: '', fr: '' }` from an
+ *     untouched form field) is draft-valid.
+ *   - **Identity / asset / enum leaves stay strict WHEN PRESENT**: a present `id`
+ *     is a valid `ListItemId`, a present image `key` is a valid `AssetKey` (an
+ *     upload always produces one), an `accentColor` is a valid `HexColour`. The
+ *     draft never tolerates a *malformed* value — only an *absent* / not-yet-typed
+ *     one (`make-impossible-states-unrepresentable` still holds for what is set).
+ */
+const DraftText = Schema.Struct({
+  en: Schema.optionalKey(Schema.String),
+  fr: Schema.optionalKey(Schema.String),
+});
+
+/** A draft image reference: a present `key` is still a strict `AssetKey`; `alt` may be unfilled. */
+const DraftImageRef = Schema.Struct({
+  key: Schema.optionalKey(AssetKey),
+  alt: Schema.optionalKey(DraftText),
+});
+
+const DraftSpeaker = Schema.Struct({
+  id: ListItemId,
+  name: Schema.optionalKey(DraftText),
+  activity: Schema.optionalKey(DraftText),
+  photo: Schema.optionalKey(DraftImageRef),
+  bio: Schema.optionalKey(DraftText),
+});
+
+const DraftSeminar = Schema.Struct({
+  id: ListItemId,
+  title: Schema.optionalKey(DraftText),
+  speaker: Schema.optionalKey(
+    Schema.Struct({
+      name: Schema.optionalKey(DraftText),
+      photo: Schema.optionalKey(DraftImageRef),
+      bio: Schema.optionalKey(DraftText),
+    }),
+  ),
+  description: Schema.optionalKey(DraftText),
+});
+
+const DraftTeamMember = Schema.Struct({
+  id: ListItemId,
+  name: Schema.optionalKey(Schema.String),
+  position: Schema.optionalKey(TeamPosition),
+  photo: Schema.optionalKey(DraftImageRef),
+});
+
+/** The draft variant of `Conference`: only its list items are draft-lax. */
+const DraftConference = Schema.Struct({
+  ...Conference.fields,
+  speakers: IdListArray(DraftSpeaker),
+  seminars: IdListArray(DraftSeminar),
+});
+
+/**
+ * The draft document the `/admin` editor saves and reopens — `SiteContent` with
+ * its list items relaxed to the draft variants above. Publish re-decodes the
+ * strict `SiteContent`, which is where the both-locales `Text` invariant (and so
+ * the "no half-filled published content" rule) is enforced. The
+ * required-conferences filter still applies: a draft must still carry every
+ * served `/YYYY` slug (an add/remove never drops a whole conference — those are
+ * not list-editable).
+ */
+export const DraftSiteContent = Schema.Struct({
+  meta: Meta,
+  conferences: Schema.Array(DraftConference),
+  team: IdListArray(DraftTeamMember),
+  board: Schema.Array(Schema.NonEmptyString),
+  translations: Translations,
+}).check(requiredConferencesFilter);
+export type DraftSiteContent = typeof DraftSiteContent.Type;

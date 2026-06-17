@@ -101,6 +101,7 @@ export const defaultContent: SiteContent = Schema.decodeUnknownSync(
       },
       speakers: [
         {
+          id: "-3YbWuMRYEEr5Pd-MLdvP",
           name: { en: "Matt Parra", fr: "Matt Para" },
           activity: { en: "Morning Plenary", fr: "Plénière du matin" },
           photo: {
@@ -123,6 +124,7 @@ family, getting old, and teaching scripture.`,
           },
         },
         {
+          id: "fk_vA5xNiXblPj040_K4v",
           name: { en: "Alex Niculaescu", fr: "Alex Niculaescu" },
           activity: { en: "Evening Plenary", fr: "Plénière du soir" },
           photo: {
@@ -148,6 +150,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       ],
       seminars: [
         {
+          id: "Vyux3xtt444D6rmd65zv_",
           title: {
             en: "Apologetics Seminar",
             fr: "Séminaire d’apologétique",
@@ -169,6 +172,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
           },
         },
         {
+          id: "SJO06kN7EWW3xhyCZM6kZ",
           title: {
             en: "Personal Study Workshop",
             fr: "Atelier d’étude personnelle",
@@ -190,6 +194,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
           },
         },
         {
+          id: "UAfLB3DIVvkqs1iLyG7Qo",
           title: {
             en: "Medical Missionary Seminar",
             fr: "Séminaire de mission médicale",
@@ -321,6 +326,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
 
   team: [
     {
+      id: "YOQ7GeACwaTCKjY6y3HAV",
       name: "Elijah Duffy",
       position: "team.position.president",
       photo: {
@@ -329,6 +335,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       },
     },
     {
+      id: "kBrwceJ7qpdDAueUZIAl1",
       name: "Sebastian Elias",
       position: "team.position.vice-president",
       photo: {
@@ -337,6 +344,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       },
     },
     {
+      id: "P8lC3_E_SOswzdr0Lt5ES",
       name: "Lillian Wheeler",
       position: "team.position.secretary",
       photo: {

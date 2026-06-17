@@ -10,13 +10,20 @@ import {
 } from '../content.server';
 import { deepMerge, setAtPath, type Json } from './admin-form';
 import { defaultContent } from './defaults';
-import { SiteContent, type AssetKey } from './schema';
-import type { SiteContent as SiteContentType } from './schema';
+import { backfillListItemIds } from './id-backfill';
+import { applyListEdit, type ListOp } from './list-edit';
+import { DraftSiteContent, SiteContent, type AssetKey } from './schema';
+import type { DraftSiteContent as DraftSiteContentType } from './schema';
 import { Storage } from '../storage.server';
 import type { ObjectHead } from '../storage.server';
 
-/** The document encoded to its on-bucket object shape, returned to the view. */
-export type EncodedDoc = typeof SiteContent.Encoded;
+/**
+ * The DRAFT document encoded to its on-bucket object shape, returned to the
+ * view. It is the laxer `DraftSiteContent` (a freshly-added list item may carry
+ * only its `id`); the route encodes it for the editor form. Publish re-decodes
+ * the strict `SiteContent`, so the published object is always the strict shape.
+ */
+export type EncodedDoc = typeof DraftSiteContent.Encoded;
 
 /**
  * `DraftEditor` is the deep module the `/admin` editor write path talks to
@@ -113,18 +120,43 @@ const issueMessages = (issue: SchemaIssue.Issue): readonly string[] =>
 // Codecs (the document's on-bucket JSON ↔ decoded value)
 // ---------------------------------------------------------------------------
 
-const decodeDocumentJson = Schema.decodeUnknownEffect(
+// The DRAFT path is laxer than the PUBLISH path (ADR 0006, registration-launch
+// Branch 2): a freshly-added list item may carry only its `id` until its
+// bilingual content is filled in, so a draft is decoded/encoded with
+// `DraftSiteContent` (content fields tolerated absent) while publish promotes
+// through the strict `SiteContent` (both-locales `Text` invariant enforced).
+//
+// `decodeDraftJson` reads a DRAFT (or published, also a valid draft) document
+// FROM the bucket: parse → id-backfill → decode-lax, so a document published
+// before list-item ids existed still decodes (every id-less item gets a fresh
+// `nanoid` before the required `id` field is checked). `encodeDraft` yields the
+// encoded OBJECT (handed back to the view); `encodeDraftJson` yields the JSON
+// STRING stored in the draft bucket object (Effect Schema's JSON codec, not
+// `JSON.stringify`, per the project lint rule); `decodeDraft` decodes an
+// already-id-complete merged/edited object at the single draft boundary — no
+// backfill, so a genuinely missing id is rejected rather than masked.
+//
+// `decodePublish` is the STRICT decode used only by `publish`: it promotes the
+// draft through `SiteContent`, where an incomplete item (a half-filled or
+// id-only add) is rejected so the live document never carries half-filled
+// content. `encodePublishJson` yields the strict published JSON STRING.
+const parseJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Unknown),
+);
+const decodeDraft = Schema.decodeUnknownEffect(DraftSiteContent);
+const decodePublish = Schema.decodeUnknownEffect(SiteContent);
+const decodeDraftJson = (json: string) =>
+  parseJson(json).pipe(
+    Effect.map(backfillListItemIds),
+    Effect.flatMap(decodeDraft),
+  );
+const encodeDraft = Schema.encodeUnknownEffect(DraftSiteContent);
+const encodeDraftJson = Schema.encodeUnknownEffect(
+  Schema.fromJsonString(DraftSiteContent),
+);
+const encodePublishJson = Schema.encodeUnknownEffect(
   Schema.fromJsonString(SiteContent),
 );
-// `encodeDocument` yields the encoded OBJECT (handed back to the view);
-// `encodeDocumentJson` yields the JSON STRING stored in the bucket (Effect
-// Schema's JSON codec, not `JSON.stringify`, per the project lint rule);
-// `decodeDocument` decodes a merged object at the single boundary.
-const encodeDocument = Schema.encodeUnknownEffect(SiteContent);
-const encodeDocumentJson = Schema.encodeUnknownEffect(
-  Schema.fromJsonString(SiteContent),
-);
-const decodeDocument = Schema.decodeUnknownEffect(SiteContent);
 
 // ---------------------------------------------------------------------------
 // Service
@@ -166,6 +198,20 @@ export class Service extends Context.Service<
       key: AssetKey,
     ) => Effect.Effect<EncodedDoc, IssueError>;
     /**
+     * Apply a sequence of id-keyed list ops (add / remove / reorder, ADR 0006)
+     * to the current draft and persist it. The current document is encoded,
+     * `applyListEdit` performs the structural edit by item id (NOT array index),
+     * the result is decoded at the laxer DRAFT boundary (an *added* item carries
+     * only its `id` — publish-invalid but draft-valid, ADR 0006), re-encoded, and
+     * stored at the scope's draft key. Mirrors `applyImageUpload`: the route owns
+     * FormData → `ListOp[]` parsing; this owns the load → edit → decode → store
+     * pipeline, so the bucket-key choreography never leaks back to the route.
+     */
+    readonly applyListOps: (
+      scope: ContentScope,
+      ops: readonly ListOp[],
+    ) => Effect.Effect<EncodedDoc, IssueError>;
+    /**
      * Promote the scope's pending edit to the published key, delete the draft
      * best-effort, and bust the public read cache so the change is live on the
      * next read with no redeploy. When a draft exists it is promoted *directly*
@@ -196,7 +242,7 @@ export const layer = Layer.effect(
         const json = yield* Effect.promise(() =>
           new Response(object.stream).text(),
         );
-        return Option.some(yield* decodeDocumentJson(json));
+        return Option.some(yield* decodeDraftJson(json));
       },
       (effect, key) =>
         effect.pipe(
@@ -204,7 +250,7 @@ export const layer = Layer.effect(
             Effect.logWarning(
               `DraftEditor: could not read ${key}`,
               cause,
-            ).pipe(Effect.as(Option.none<SiteContentType>())),
+            ).pipe(Effect.as(Option.none<DraftSiteContentType>())),
           ),
         ),
     );
@@ -244,14 +290,17 @@ export const layer = Layer.effect(
     });
 
     /**
-     * Decode a merged candidate document, rejecting with a 400 `IssueError`
-     * carrying its dotted field issues. Shared by `editDocument` (form merge)
-     * and `applyImageUpload` (key rewrite) — the single decode boundary.
+     * Decode a merged/edited candidate document at the laxer DRAFT boundary,
+     * rejecting with a 400 `IssueError` carrying its dotted field issues. Shared
+     * by `editDocument` (form merge), `applyImageUpload` (key rewrite), and
+     * `applyListOps` (structural edit) — the single draft decode boundary. A
+     * *present* field still decodes strictly (a malformed value is rejected); an
+     * *absent* list-item content field is tolerated until publish (ADR 0006).
      */
     const decodeOrReject = (
       candidate: Json,
-    ): Effect.Effect<SiteContentType, IssueError> =>
-      decodeDocument(candidate).pipe(
+    ): Effect.Effect<DraftSiteContentType, IssueError> =>
+      decodeDraft(candidate).pipe(
         Effect.mapError(
           (error) =>
             new IssueError({
@@ -263,19 +312,19 @@ export const layer = Layer.effect(
       );
 
     /**
-     * Re-encode a decoded document to its canonical JSON and store it at
+     * Re-encode a decoded DRAFT document to its canonical JSON and store it at
      * `draftKey`, rejecting with a 502 `IssueError` on a storage failure.
      * Returns the encoded object so callers can hand it back to the view.
      */
     const storeDraft = (
       draftKey: string,
-      decoded: SiteContentType,
+      decoded: DraftSiteContentType,
     ): Effect.Effect<EncodedDoc, IssueError> =>
       Effect.gen(function* () {
-        // A decoded `SiteContent` always re-encodes — a failure here is a bug,
-        // not a user error, so it dies rather than masquerading as an
+        // A decoded `DraftSiteContent` always re-encodes — a failure here is a
+        // bug, not a user error, so it dies rather than masquerading as an
         // `IssueError`.
-        const json = yield* encodeDocumentJson(decoded).pipe(Effect.orDie);
+        const json = yield* encodeDraftJson(decoded).pipe(Effect.orDie);
         yield* storage.put(draftKey, json, 'application/json').pipe(
           Effect.mapError(
             (cause) =>
@@ -286,7 +335,7 @@ export const layer = Layer.effect(
               }),
           ),
         );
-        return (yield* encodeDocument(decoded).pipe(Effect.orDie)) as EncodedDoc;
+        return (yield* encodeDraft(decoded).pipe(Effect.orDie)) as EncodedDoc;
       });
 
     const editDocument = Effect.fn('DraftEditor.editDocument')(function* (
@@ -295,7 +344,7 @@ export const layer = Layer.effect(
     ) {
       const { draftKey } = scopeKeys(scope);
       const { content: current } = yield* load(scope);
-      const base = (yield* encodeDocument(current).pipe(Effect.orDie)) as Json;
+      const base = (yield* encodeDraft(current).pipe(Effect.orDie)) as Json;
       const merged = deepMerge(base, override);
       const decoded = yield* decodeOrReject(merged);
       return yield* storeDraft(draftKey, decoded);
@@ -305,14 +354,27 @@ export const layer = Layer.effect(
       function* (scope: ContentScope, targetPath: string, key: AssetKey) {
         const { draftKey } = scopeKeys(scope);
         const { content: current } = yield* load(scope);
-        const encoded = (yield* encodeDocument(current).pipe(
-          Effect.orDie,
-        )) as Json;
+        const encoded = (yield* encodeDraft(current).pipe(Effect.orDie)) as Json;
         const next = setAtPath(encoded, targetPath, key);
         const decoded = yield* decodeOrReject(next);
         return yield* storeDraft(draftKey, decoded);
       },
     );
+
+    const applyListOps = Effect.fn('DraftEditor.applyListOps')(function* (
+      scope: ContentScope,
+      ops: readonly ListOp[],
+    ) {
+      const { draftKey } = scopeKeys(scope);
+      const { content: current } = yield* load(scope);
+      const encoded = (yield* encodeDraft(current).pipe(Effect.orDie)) as Json;
+      // Structural edit by item id, NOT array index: an added item carries only
+      // its `id` (draft-valid, publish-invalid per ADR 0006), a removed id drops,
+      // a reorder permutes. The result decodes at the laxer draft boundary.
+      const edited = applyListEdit(encoded, ops);
+      const decoded = yield* decodeOrReject(edited);
+      return yield* storeDraft(draftKey, decoded);
+    });
 
     const publish = Effect.fn('DraftEditor.publish')(function* (
       scope: ContentScope,
@@ -336,7 +398,28 @@ export const layer = Layer.effect(
         : Option.isSome(published)
           ? published.value
           : defaultContent;
-      const json = yield* encodeDocumentJson(source).pipe(Effect.orDie);
+      // Enforce the STRICT `SiteContent` invariant before the document goes
+      // live: re-encode the draft to its JSON shape, then strict-decode it. A
+      // freshly-added (or half-filled) list item that is draft-valid but
+      // publish-INVALID (an empty required `Text`) is rejected here with a 400
+      // `IssueError` carrying the offending field paths — section-skip is for
+      // *absence* (an empty list), never a tolerance for half-filled content
+      // (ADR 0006, CONTEXT §Section skip). Only after this gate passes does the
+      // published object get written.
+      const draftJson = yield* encodeDraftJson(source).pipe(Effect.orDie);
+      const strict = yield* parseJson(draftJson).pipe(
+        Effect.flatMap(decodePublish),
+        Effect.mapError(
+          (error) =>
+            new IssueError({
+              message:
+                'Cannot publish — finish the fields below (added or empty items must be complete) and resubmit.',
+              issues: issueMessages(error.issue),
+              status: 400,
+            }),
+        ),
+      );
+      const json = yield* encodePublishJson(strict).pipe(Effect.orDie);
       yield* storage.put(publishedKey, json, 'application/json').pipe(
         Effect.mapError(
           (cause) =>
@@ -357,6 +440,12 @@ export const layer = Layer.effect(
       yield* content.bust();
     });
 
-    return Service.of({ load, editDocument, applyImageUpload, publish });
+    return Service.of({
+      load,
+      editDocument,
+      applyImageUpload,
+      applyListOps,
+      publish,
+    });
   }),
 );

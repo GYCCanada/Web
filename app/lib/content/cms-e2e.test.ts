@@ -13,7 +13,8 @@ import {
 } from './admin-form';
 import { DraftEditor, siteScope } from './draft-editor.server';
 import { defaultContent } from './defaults';
-import { SiteContent } from './schema';
+import { addOp, fieldName, removeOp, reorderOp } from './list-edit';
+import { newListItemId, SiteContent } from './schema';
 
 /**
  * End-to-end-ish proof of the C5 publish + image paths against the in-memory
@@ -75,8 +76,8 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
         // 2. The admin edits the 2026 theme name + accent (simulating the form's
         //    parsed override), then publishes — the route's two-step.
         const override = assembleOverrides([
-          ['conferences.2.themeName.en', 'Speak Boldly'],
-          ['conferences.2.accentColor', '#112233'],
+          ['conferences./2026.themeName.en', 'Speak Boldly'],
+          ['conferences./2026.accentColor', '#112233'],
         ]) as Json;
         // Advance so the saved draft is strictly newer than the epoch seed.
         yield* TestClock.adjust('1 second');
@@ -113,7 +114,7 @@ describe('CMS publish → cache-bust → public read (in-memory bucket, D3)', ()
         yield* TestClock.adjust('1 second');
         yield* editor.editDocument(
           siteScope,
-          assembleOverrides([['conferences.2.themeName.en', 'Draft Only']]) as Json,
+          assembleOverrides([['conferences./2026.themeName.en', 'Draft Only']]) as Json,
         );
 
         const publicRead = yield* content.getConference('en', 2026);
@@ -143,7 +144,10 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
         // rewrite the draft's targeted key via the one service.
         const contentType = 'image/png';
         expect(isAcceptedImageType(contentType)).toBe(true);
-        const target = 'team.0.photo.key';
+        // The upload target addresses team member 0 by its `id` (ADR 0006), not
+        // by array position.
+        const member0Id = String(defaultContent.team[0]?.id);
+        const target = `team.${member0Id}.photo.key`;
         const key = uploadedImageKey(target, contentType, 1_700_000_000_000);
         yield* storage.put(key, png, contentType);
         // Advance so the draft the rewrite writes is strictly newer than the
@@ -165,14 +169,16 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
           key,
           servedContentType: served.contentType,
           bytes,
-          draftKey: String(draft.content.team[0]?.photo.key),
+          draftKey: String(draft.content.team[0]?.photo?.key),
         };
       }),
       { [SITE_CONTENT_KEY]: { body: seed } },
     );
 
-    expect(String(result.key)).toBe(
-      'images/uploads/team-0-photo-key-1700000000000.png',
+    // The key is namespaced under images/uploads/ with the id-keyed target
+    // slugified and the millisecond seed appended (collision-free).
+    expect(String(result.key)).toMatch(
+      /^images\/uploads\/team-[A-Za-z0-9-]+-photo-key-1700000000000\.png$/,
     );
     expect(result.servedContentType).toBe('image/png');
     expect([...result.bytes]).toEqual([
@@ -191,5 +197,294 @@ describe('CMS image upload → /images/<key> retrieval (in-memory bucket)', () =
       { [SITE_CONTENT_KEY]: { body: seed } },
     );
     expect(team.team[0]?.image).toBe('/images/team/elijah.jpg');
+  });
+});
+
+/**
+ * `DraftEditor.applyListOps` is the route's `list-op` intent target (ADR 0006,
+ * registration-launch Branch 2 sub-commit 2.3). It performs an id-keyed
+ * add/remove/reorder on the draft and auto-saves it (settled #10), through the
+ * same in-memory bucket the public read path uses. These prove the full chain:
+ * an "Add" appends an item carrying only its `id` and the DRAFT decodes (so a
+ * reload reopens it + a later upload has a target); the SAME draft is
+ * publish-INVALID (an empty required field blocks publish, not save); a remove
+ * drops the id; the public read is untouched until publish.
+ */
+const conf2024 = defaultContent.conferences.findIndex((c) => c.slug === '/2024');
+// The list path addresses the 2024 conference by its `slug` identity (ADR 0006,
+// sub-commit 2.4), not by array position.
+const speakers2024 = `conferences./2024.speakers`;
+
+describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', () => {
+  it('add appends an id-only item the DRAFT reopens, but publish rejects it', async () => {
+    const seed = await seedBody();
+    const newId = newListItemId();
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+
+        // Advance so the saved draft is strictly newer than the epoch seed.
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyListOps(siteScope, [addOp(speakers2024, newId)]);
+
+        // The reopened draft carries the appended stub speaker (id only).
+        const draft = yield* editor.load(siteScope);
+        const conf = draft.content.conferences.find((c) => c.slug === '/2024');
+        const appended = conf?.speakers.at(-1);
+
+        // Publishing the incomplete draft is rejected (ADR 0006): an added item
+        // with no bilingual content blocks publish, not the structural save.
+        const publishExit = yield* Effect.exit(editor.publish(siteScope));
+
+        // The public read is still the seeded document (no publish went through).
+        const publicConf = yield* content.getConference('en', 2024);
+
+        return {
+          source: draft.source,
+          appendedId: appended === undefined ? undefined : String(appended.id),
+          appendedKeys: Object.keys(appended ?? {}),
+          publishTag: publishExit._tag,
+          publishStatus:
+            publishExit._tag === 'Failure'
+              ? publishExit.cause.reasons.find((r) => r._tag === 'Fail')
+              : undefined,
+          publicSpeakerCount: publicConf.speakers.length,
+        };
+      }),
+      { [SITE_CONTENT_KEY]: { body: seed } },
+    );
+
+    expect(result.source).toBe('draft');
+    expect(result.appendedId).toBe(String(newId));
+    expect(result.appendedKeys).toEqual(['id']);
+    expect(result.publishTag).toBe('Failure');
+    // The public read is unchanged: the seeded 2024 speakers, no extra item.
+    expect(result.publicSpeakerCount).toBe(
+      defaultContent.conferences[conf2024]?.speakers.length ?? 0,
+    );
+  });
+
+  it('add → untouched Save draft succeeds (an incomplete item blocks publish, not save)', async () => {
+    const seed = await seedBody();
+    const newId = newListItemId();
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+
+        yield* TestClock.adjust('1 second');
+        // Add a speaker (stub), then the admin hits "Save draft" WITHOUT touching
+        // the new item — the form re-submits every rendered field, including the
+        // new item's empty `name`/`activity`/`bio`, named by the new speaker's
+        // **id** (ADR 0006, sub-commit 2.4). This must NOT fail (regression: empty
+        // strings used to be rejected by the strict boundary). `assembleOverrides`
+        // + `fieldName` reproduces exactly the override the migrated id-keyed view
+        // submits.
+        yield* editor.applyListOps(siteScope, [addOp(speakers2024, newId)]);
+        const saveExit = yield* Effect.exit(
+          editor.editDocument(
+            siteScope,
+            assembleOverrides([
+              [fieldName(speakers2024, newId, 'name.en'), ''],
+              [fieldName(speakers2024, newId, 'name.fr'), ''],
+              [fieldName(speakers2024, newId, 'activity.en'), ''],
+              [fieldName(speakers2024, newId, 'activity.fr'), ''],
+              [fieldName(speakers2024, newId, 'bio.en'), ''],
+              [fieldName(speakers2024, newId, 'bio.fr'), ''],
+            ]) as Json,
+          ),
+        );
+
+        const draft = yield* editor.load(siteScope);
+        const conf = draft.content.conferences.find((c) => c.slug === '/2024');
+        return {
+          saveTag: saveExit._tag,
+          hasStub: conf?.speakers.some((s) => String(s.id) === String(newId)),
+        };
+      }),
+      { [SITE_CONTENT_KEY]: { body: seed } },
+    );
+
+    expect(result.saveTag).toBe('Success');
+    expect(result.hasStub).toBe(true);
+  });
+
+  it('add → image upload to the new id succeeds (a present key without alt is draft-valid)', async () => {
+    const seed = await seedBody();
+    const newId = newListItemId();
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const storage = yield* Storage.Service;
+
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyListOps(siteScope, [addOp(speakers2024, newId)]);
+
+        // Upload a photo to the new speaker by its **id** (ADR 0006, sub-commit
+        // 2.4): the upload target is id-keyed, so `setAtPath` rewrites the key on
+        // the matching item regardless of its current list position.
+        const target = fieldName(speakers2024, newId, 'photo.key');
+        const key = uploadedImageKey(target, 'image/png', 1_700_000_000_000);
+        yield* storage.put(key, png, 'image/png');
+        yield* TestClock.adjust('1 second');
+        const uploadExit = yield* Effect.exit(
+          editor.applyImageUpload(siteScope, target, key),
+        );
+
+        const draft = yield* editor.load(siteScope);
+        const conf = draft.content.conferences.find((c) => c.slug === '/2024');
+        const added = conf?.speakers.at(-1);
+        return {
+          uploadTag: uploadExit._tag,
+          expectedKey: String(key),
+          addedKey: added?.photo?.key === undefined ? undefined : String(added.photo.key),
+        };
+      }),
+      { [SITE_CONTENT_KEY]: { body: seed } },
+    );
+
+    // The upload to a stub speaker (no alt yet) is accepted by the draft, and the
+    // freshly-added speaker now references the uploaded key.
+    expect(result.uploadTag).toBe('Success');
+    expect(result.addedKey).toBe(result.expectedKey);
+  });
+
+  it('add → fill EVERY required field (incl. photo.alt + position) → publish SUCCEEDS', async () => {
+    // The add→fill→publish loop (settled #10): an added item carrying only its
+    // `id` is publish-INVALID, but once the admin fills every field strict
+    // `SiteContent` requires it must publish cleanly and go live. This proves the
+    // admin view renders a fill surface for ALL required fields — `Speaker`'s
+    // bilingual `photo.alt`, and `TeamMember`'s `position` enum + bilingual
+    // `photo.alt` — not just the ones the draft-editor baseline exposed. Without
+    // those surfaces a freshly-added visible item could save forever but never
+    // pass the strict publish gate from the UI.
+    const seed = await seedBody();
+    const speakerId = newListItemId();
+    const memberId = newListItemId();
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
+
+        yield* TestClock.adjust('1 second');
+        // Add a brand-new speaker (to 2024) and a brand-new team member — each an
+        // id-only stub, exactly as the "Add" buttons do.
+        yield* editor.applyListOps(siteScope, [
+          addOp(speakers2024, speakerId),
+          addOp('team', memberId),
+        ]);
+
+        // Upload a photo to each new item by its id (the `…photo.key` rewrite the
+        // ImageUpload control performs), so both items reference a real bucket key.
+        const speakerKeyPath = fieldName(speakers2024, speakerId, 'photo.key');
+        const speakerKey = uploadedImageKey(speakerKeyPath, 'image/png', 1_700_000_000_000);
+        yield* storage.put(speakerKey, png, 'image/png');
+        const memberKeyPath = fieldName('team', memberId, 'photo.key');
+        const memberKey = uploadedImageKey(memberKeyPath, 'image/png', 1_700_000_000_001);
+        yield* storage.put(memberKey, png, 'image/png');
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyImageUpload(siteScope, speakerKeyPath, speakerKey);
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyImageUpload(siteScope, memberKeyPath, memberKey);
+
+        // Fill EVERY remaining required field the admin view now renders —
+        // speaker name/activity/bio + photo.alt (bilingual), team member name +
+        // position (enum) + photo.alt (bilingual). This is exactly the override
+        // `assembleOverrides` builds from the migrated id-keyed form.
+        yield* TestClock.adjust('1 second');
+        const fillExit = yield* Effect.exit(
+          editor.editDocument(
+            siteScope,
+            assembleOverrides([
+              [fieldName(speakers2024, speakerId, 'name.en'), 'New Speaker'],
+              [fieldName(speakers2024, speakerId, 'name.fr'), 'Nouveau conférencier'],
+              [fieldName(speakers2024, speakerId, 'activity.en'), 'Plenary'],
+              [fieldName(speakers2024, speakerId, 'activity.fr'), 'Plénière'],
+              [fieldName(speakers2024, speakerId, 'bio.en'), 'A bio.'],
+              [fieldName(speakers2024, speakerId, 'bio.fr'), 'Une bio.'],
+              [fieldName(speakers2024, speakerId, 'photo.alt.en'), 'New Speaker'],
+              [fieldName(speakers2024, speakerId, 'photo.alt.fr'), 'Nouveau conférencier'],
+              [fieldName('team', memberId, 'name'), 'New Member'],
+              [fieldName('team', memberId, 'position'), 'team.position.secretary'],
+              [fieldName('team', memberId, 'photo.alt.en'), 'New Member'],
+              [fieldName('team', memberId, 'photo.alt.fr'), 'Nouveau membre'],
+            ]) as Json,
+          ),
+        );
+
+        // The now-complete draft publishes cleanly…
+        const publishExit = yield* Effect.exit(editor.publish(siteScope));
+
+        // …and the public read reflects both new items with NO redeploy.
+        const publicConf = yield* content.getConference('en', 2024);
+        const publicTeam = yield* content.getTeam();
+
+        return {
+          fillTag: fillExit._tag,
+          publishTag: publishExit._tag,
+          publicSpeakerNames: publicConf.speakers.map((s) => s.name),
+          publicTeamNames: publicTeam.team.map((m) => m.name),
+        };
+      }),
+      { [SITE_CONTENT_KEY]: { body: seed } },
+    );
+
+    expect(result.fillTag).toBe('Success');
+    expect(result.publishTag).toBe('Success');
+    // Both freshly-added, fully-filled items are now live on the public read.
+    expect(result.publicSpeakerNames).toContain('New Speaker');
+    expect(result.publicTeamNames).toContain('New Member');
+  });
+
+  it('remove drops the id; reorder permutes — the draft reopens with the change', async () => {
+    const seed = await seedBody();
+    const seeded = defaultContent.conferences[conf2024]?.speakers ?? [];
+    const firstId = String(seeded[0]?.id);
+    const secondId = String(seeded[1]?.id);
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+
+        yield* TestClock.adjust('1 second');
+        // Remove the first speaker, then reorder the remaining so the (formerly
+        // second) speaker is explicitly first — a permutation by id.
+        yield* editor.applyListOps(siteScope, [
+          removeOp(speakers2024, seeded[0]!.id),
+        ]);
+        yield* TestClock.adjust('1 second');
+        const remainingIds = seeded.slice(1).map((s) => s.id);
+        yield* editor.applyListOps(siteScope, [
+          reorderOp(speakers2024, [...remainingIds].reverse()),
+        ]);
+
+        const draft = yield* editor.load(siteScope);
+        const conf = draft.content.conferences.find((c) => c.slug === '/2024');
+        return {
+          ids: (conf?.speakers ?? []).map((s) => String(s.id)),
+        };
+      }),
+      { [SITE_CONTENT_KEY]: { body: seed } },
+    );
+
+    // The removed id is gone…
+    expect(result.ids).not.toContain(firstId);
+    // …the surviving speakers are reordered to the reversed permutation, so the
+    // formerly-second speaker (the first survivor) is now LAST.
+    expect(result.ids).toContain(secondId);
+    expect(result.ids.at(-1)).toBe(secondId);
+    expect(result.ids).toEqual(
+      [...(defaultContent.conferences[conf2024]?.speakers ?? [])]
+        .slice(1)
+        .map((s) => String(s.id))
+        .reverse(),
+    );
   });
 });

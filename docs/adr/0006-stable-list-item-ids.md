@@ -32,3 +32,12 @@ migrated once to assign ids to their existing list items.
   an empty *required* field blocks publish, not draft save).
 - Ids are content, not derived — they must round-trip through the schema and persist in the
   bucket document.
+- The `id` field is **required**, so a `content/site.json` published before ids existed would
+  fail decode on the next read and break the live site on deploy. To prevent this, the read
+  path runs a one-shot **id-backfill normalization** between parse and decode
+  (`app/lib/content/id-backfill.ts`): any id-less list item is assigned a fresh `nanoid`
+  before the required `id` is checked. It is idempotent (an item that already has an `id` key
+  is untouched — even a bad id is left for the decoder to reject; backfill is for absence, not
+  repair) and runs on both the public read path (`content.server.ts`) and the admin
+  draft/published read path (`draft-editor.server.ts`). The first admin publish persists the
+  backfilled ids, after which the normalization is a no-op.

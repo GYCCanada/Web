@@ -20,7 +20,10 @@ import {
 import { DraftEditor, scopeKeys, siteScope } from './draft-editor.server';
 import { defaultContent } from './defaults';
 import { SiteContent } from './schema';
-import type { SiteContent as SiteContentType } from './schema';
+import type {
+  DraftSiteContent as DraftSiteContentType,
+  SiteContent as SiteContentType,
+} from './schema';
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(SiteContent));
 // Decode the encoded OBJECT a DraftEditor write returns (not a JSON string).
@@ -193,8 +196,14 @@ const readStoredText = (key: string) =>
     return yield* Effect.promise(() => new Response(object.stream).text());
   });
 
-/** The 2026 conference's theme name (EN) on a decoded document. */
-const themeName2026 = (doc: SiteContentType): string | undefined =>
+/**
+ * The 2026 conference's theme name (EN) on a decoded document — accepts the
+ * laxer draft document too (a `DraftEditor.load` now returns `DraftSiteContent`);
+ * `themeName` is a strict `Text` in both, so the read is total.
+ */
+const themeName2026 = (
+  doc: SiteContentType | DraftSiteContentType,
+): string | undefined =>
   doc.conferences.find((c) => c.slug === '/2026')?.themeName.en;
 
 const seededPublished = (doc: SiteContentType) =>
@@ -210,10 +219,11 @@ describe('DraftEditor.editDocument (encode → merge → decode → store draft)
     () =>
       Effect.gen(function* () {
         const editor = yield* DraftEditor.Service;
-        // The route's parsed override: rename the 2026 theme. `assembleOverrides`
-        // is the exact parse the old inline action used.
+        // The route's parsed override: rename the 2026 theme, addressed by the
+        // conference's `slug` identity (ADR 0006). `assembleOverrides` is the
+        // exact parse the migrated route action uses.
         const override = assembleOverrides([
-          ['conferences.2.themeName.en', 'Speak Boldly'],
+          ['conferences./2026.themeName.en', 'Speak Boldly'],
         ]) as Json;
         // The published doc is seeded at epoch; advance the clock so the draft
         // the edit writes is strictly newer and `load` reopens it.
@@ -250,7 +260,7 @@ describe('DraftEditor.editDocument (encode → merge → decode → store draft)
         // Blank the 2026 EN theme name — `Text`'s both-locales-non-empty
         // invariant must reject this at the decode boundary.
         const override = assembleOverrides([
-          ['conferences.2.themeName.en', ''],
+          ['conferences./2026.themeName.en', ''],
         ]) as Json;
         const result = yield* Effect.exit(
           editor.editDocument(siteScope, override),
@@ -280,7 +290,10 @@ describe('DraftEditor.applyImageUpload (rewrite a key on the draft)', () => {
   it.effect('points the targeted key at the uploaded object on the draft', () =>
     Effect.gen(function* () {
       const editor = yield* DraftEditor.Service;
-      const target = 'team.0.photo.key';
+      // The upload target addresses the team member by its `id` (ADR 0006), not
+      // by array position — `setAtPath` rewrites the key on the matching item.
+      const member0Id = String(defaultContent.team[0]?.id);
+      const target = `team.${member0Id}.photo.key`;
       const key = uploadedImageKey(target, 'image/png', 1_700_000_000_000);
       const encoded = yield* editor.applyImageUpload(siteScope, target, key);
 
@@ -354,10 +367,15 @@ interface CorpusCase {
   readonly expected: unknown;
 }
 
+// The first team member's id — list items and conferences are addressed by
+// stable identity (`team.<id>.…`, `conferences.<slug>.…`), not by array
+// position (ADR 0006, sub-commit 2.4).
+const member0Id = String(defaultContent.team[0]?.id);
+
 const corpus: readonly CorpusCase[] = [
   {
-    name: 'dotted-path leaf — rename the 2026 theme (EN)',
-    entries: [['conferences.2.themeName.en', 'Speak Boldly']],
+    name: 'identity-keyed leaf — rename the 2026 theme (EN) by slug',
+    entries: [['conferences./2026.themeName.en', 'Speak Boldly']],
     proof: themeName2026,
     expected: 'Speak Boldly',
   },
@@ -379,8 +397,8 @@ const corpus: readonly CorpusCase[] = [
   {
     name: 'numeric coercion — bible.chapter/verse parse to Int',
     entries: [
-      ['conferences.2.bible.chapter', '3'],
-      ['conferences.2.bible.verse', '16'],
+      ['conferences./2026.bible.chapter', '3'],
+      ['conferences./2026.bible.verse', '16'],
     ],
     proof: (doc) => {
       const c = doc.conferences.find((x) => x.slug === '/2026');
@@ -389,23 +407,23 @@ const corpus: readonly CorpusCase[] = [
     expected: '3/16',
   },
   {
-    name: 'nested hero key — alt text on a deep hero crop',
-    entries: [['conferences.0.hero.desktop.alt.en', 'A brand new alt']],
+    name: 'nested hero key — alt text on a deep hero crop (by slug)',
+    entries: [['conferences./2024.hero.desktop.alt.en', 'A brand new alt']],
     proof: (doc) =>
       doc.conferences.find((x) => x.slug === '/2024')?.hero.desktop.alt.en,
     expected: 'A brand new alt',
   },
   {
-    name: 'team field — rename a board member',
-    entries: [['team.0.name', 'Renamed Member']],
+    name: 'team field — rename a board member by id',
+    entries: [[`team.${member0Id}.name`, 'Renamed Member']],
     proof: (doc) => doc.team[0]?.name,
     expected: 'Renamed Member',
   },
   {
-    name: 'mixed override — dotted + translation + numeric in one submit',
+    name: 'mixed override — identity-keyed + translation + numeric in one submit',
     entries: [
-      ['conferences.2.themeName.en', 'Combined Edit'],
-      ['conferences.2.bible.verse', '7'],
+      ['conferences./2026.themeName.en', 'Combined Edit'],
+      ['conferences./2026.bible.verse', '7'],
       [translationFieldName('fr', 'main.reserve'), 'Réservez'],
     ],
     proof: (doc) => {
@@ -475,7 +493,7 @@ describe('DraftEditor.publish (promote draft → published, drop draft, bust)', 
         // strictly newer than the epoch-seeded published doc and `publish`
         // promotes IT (not the stale published doc).
         const override = assembleOverrides([
-          ['conferences.2.themeName.en', 'Speak Now'],
+          ['conferences./2026.themeName.en', 'Speak Now'],
         ]) as Json;
         yield* TestClock.adjust('1 second');
         yield* editor.editDocument(siteScope, override);
@@ -521,7 +539,7 @@ describe('DraftEditor.publish (promote draft → published, drop draft, bust)', 
         // NO TestClock.adjust — edit and publish land in the same second as the
         // epoch-seeded published document.
         const override = assembleOverrides([
-          ['conferences.2.themeName.en', 'Same Second Edit'],
+          ['conferences./2026.themeName.en', 'Same Second Edit'],
         ]) as Json;
         yield* editor.editDocument(siteScope, override);
         yield* editor.publish(siteScope);

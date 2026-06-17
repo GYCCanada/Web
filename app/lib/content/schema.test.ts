@@ -6,8 +6,11 @@ import {
   AssetKey,
   ConferenceSlug,
   DateRange,
+  DraftSiteContent,
   HexColour,
   IsoDate,
+  ListItemId,
+  newListItemId,
   SiteContent,
 } from './schema';
 import type {
@@ -15,6 +18,7 @@ import type {
   ConferenceSlug as ConferenceSlugType,
   HexColour as HexColourType,
   IsoDate as IsoDateType,
+  ListItemId as ListItemIdType,
 } from './schema';
 
 /**
@@ -184,6 +188,46 @@ describe('ConferenceSlug validation', () => {
   });
 });
 
+const isValidListItemId = (value: string): boolean =>
+  Schema.decodeUnknownResult(ListItemId)(value)._tag === 'Success';
+
+describe('ListItemId validation', () => {
+  test('accepts a nanoid (21 chars from the URL-safe alphabet)', () => {
+    for (const value of [
+      '-3YbWuMRYEEr5Pd-MLdvP',
+      'fk_vA5xNiXblPj040_K4v',
+      'YOQ7GeACwaTCKjY6y3HAV',
+      'aaaaaaaaaaaaaaaaaaaaa', // 21 plain chars
+      '___-------___---___--', // 21 underscore/hyphen chars (URL-safe)
+    ]) {
+      expect(isValidListItemId(value)).toBe(true);
+    }
+  });
+
+  test('rejects wrong length, the wrong alphabet, and non-id smuggle attempts', () => {
+    for (const value of [
+      '', // empty
+      'tooshort', // < 21
+      'aaaaaaaaaaaaaaaaaaaaaa', // 22 chars
+      'aaaaaaaaaaaaaaaaaaaa.', // a dot (would break a `speakers.<id>.name` path)
+      'aaaaaaaaaaaaaaaaaaaa/', // a slash
+      'aaaaaaaaaaaaaaaaaaaa ', // trailing space
+      'aaaaaaaaaaaaaaaaaaaa!', // punctuation outside the alphabet
+      'aaaaaaaaaa aaaaaaaaaa', // embedded space
+    ]) {
+      expect(isValidListItemId(value)).toBe(false);
+    }
+  });
+
+  test('newListItemId mints a fresh, schema-valid, unique id each call', () => {
+    const a = newListItemId();
+    const b = newListItemId();
+    expect(isValidListItemId(String(a))).toBe(true);
+    expect(isValidListItemId(String(b))).toBe(true);
+    expect(String(a)).not.toBe(String(b));
+  });
+});
+
 /**
  * Branding is encode/decode-transparent — the round-trip above proves the values
  * still pass through losslessly — but it makes the validation guarantee
@@ -203,12 +247,14 @@ describe('branded primitives carry their nominal brand', () => {
     const date: IsoDateType = IsoDate.make('2026-06-10');
     const colour: HexColourType = HexColour.make('#D4A24E');
     const slug: ConferenceSlugType = ConferenceSlug.make('/2026');
+    const itemId: ListItemIdType = ListItemId.make('YOQ7GeACwaTCKjY6y3HAV');
 
     // …and erase to their base string at runtime (brands are type-only).
     expect(String(key)).toBe('2026/en/hero.png');
     expect(String(date)).toBe('2026-06-10');
     expect(String(colour)).toBe('#D4A24E');
     expect(String(slug)).toBe('/2026');
+    expect(String(itemId)).toBe('YOQ7GeACwaTCKjY6y3HAV');
 
     // A raw `string` must NOT be assignable where a brand is required: each line
     // is a deliberate type error guarded by `@ts-expect-error`, so the typecheck
@@ -221,15 +267,111 @@ describe('branded primitives carry their nominal brand', () => {
     const notColour: HexColourType = '#D4A24E';
     // @ts-expect-error a raw string is not a ConferenceSlug until it crosses the decoder
     const notSlug: ConferenceSlugType = '/2026';
+    // @ts-expect-error a raw string is not a ListItemId until it crosses the decoder
+    const notItemId: ListItemIdType = 'YOQ7GeACwaTCKjY6y3HAV';
 
     // Reference the locals so they are not flagged as unused; their string
     // values are intentionally identical to the branded ones above (widen to
     // base string so the matcher compares plain strings).
-    expect([notKey, notDate, notColour, notSlug].map(String)).toEqual([
+    expect([notKey, notDate, notColour, notSlug, notItemId].map(String)).toEqual([
       '2026/en/hero.png',
       '2026-06-10',
       '#D4A24E',
       '/2026',
+      'YOQ7GeACwaTCKjY6y3HAV',
     ]);
   });
+});
+
+/**
+ * `DraftSiteContent` (ADR 0006, registration-launch Branch 2) is the laxer
+ * variant the `/admin` editor saves and reopens: a freshly-added list item is
+ * draft-valid carrying only its `id`, while publish enforces the strict
+ * `SiteContent`. These pin the two halves of that contract — a stub item decodes
+ * as a draft but NOT as a publish, and a *present* malformed value (half a
+ * bilingual locale) is rejected even by the draft (only *absence* is tolerated).
+ */
+const encodeStrict = Schema.encodeUnknownEffect(SiteContent);
+const decodeDraft = Schema.decodeUnknownResult(DraftSiteContent);
+const decodeStrict = Schema.decodeUnknownResult(SiteContent);
+
+/**
+ * The encoded defaults as a plain JSON object, with `extraSpeaker` appended to
+ * the /2024 speakers. Typed `unknown`→record so a deliberately-partial /
+ * malformed speaker (the cases under test) can be constructed without satisfying
+ * the strict encoded `Speaker` shape.
+ */
+const withExtraSpeaker = (
+  encoded: typeof SiteContent.Encoded,
+  extraSpeaker: Record<string, unknown>,
+): unknown => {
+  const doc = encoded as unknown as {
+    conferences: ReadonlyArray<{
+      slug: string;
+      speakers: readonly unknown[];
+    }>;
+  };
+  return {
+    ...doc,
+    conferences: doc.conferences.map((c) =>
+      c.slug === '/2024'
+        ? { ...c, speakers: [...c.speakers, extraSpeaker] }
+        : c,
+    ),
+  };
+};
+
+describe('DraftSiteContent (draft-lax / publish-strict)', () => {
+  it.effect('a freshly-added stub item (id only) decodes as a DRAFT', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeStrict(defaultContent);
+      const draft = withExtraSpeaker(encoded, { id: String(newListItemId()) });
+      expect(decodeDraft(draft)._tag).toBe('Success');
+    }));
+
+  it.effect('the same stub item is REJECTED by the strict publish schema', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeStrict(defaultContent);
+      const draft = withExtraSpeaker(encoded, { id: String(newListItemId()) });
+      // The added speaker has no required `name`/`activity`/`bio`/`photo` —
+      // publish (strict `SiteContent`) rejects it (ADR 0006: an empty required
+      // field blocks publish, not draft save).
+      expect(decodeStrict(draft)._tag).toBe('Failure');
+    }));
+
+  it.effect('a complete document satisfies BOTH the draft and the strict schema', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeStrict(defaultContent);
+      expect(decodeDraft(encoded)._tag).toBe('Success');
+      expect(decodeStrict(encoded)._tag).toBe('Success');
+    }));
+
+  it.effect('a half-filled bilingual field IS draft-valid (in-progress edit), but publish-invalid', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeStrict(defaultContent);
+      // A present `name` with an empty FR locale is an *in-progress* edit — the
+      // admin typed EN, not yet FR. The draft tolerates it (ADR 0006: an
+      // incomplete field blocks publish, not save) but publish (strict `Text`,
+      // both locales non-empty) rejects it.
+      const inProgress = withExtraSpeaker(encoded, {
+        id: String(newListItemId()),
+        name: { en: 'Jane', fr: '' },
+      });
+      expect(decodeDraft(inProgress)._tag).toBe('Success');
+      expect(decodeStrict(inProgress)._tag).toBe('Failure');
+    }));
+
+  it.effect('a present but MALFORMED leaf (a non-AssetKey image key) is rejected even as a draft', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeStrict(defaultContent);
+      // The draft tolerates *absence*, never a malformed *typed* value: a present
+      // image `key` must still be a valid `AssetKey` (an upload always produces
+      // one). A path-traversal key is rejected even in a draft
+      // (`make-impossible-states-unrepresentable` holds for what IS set).
+      const malformed = withExtraSpeaker(encoded, {
+        id: String(newListItemId()),
+        photo: { key: '../../etc/passwd' },
+      });
+      expect(decodeDraft(malformed)._tag).toBe('Failure');
+    }));
 });
