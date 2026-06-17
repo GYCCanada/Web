@@ -180,6 +180,79 @@ describe('Content boundary conversion (decode → legacy shape)', () => {
   });
 });
 
+describe('Content optional detail-page projection (Option → string|undefined)', () => {
+  /**
+   * The Conference document models its detail-page fields as `Option`
+   * (`OptionFromOptionalKey` for the URLs, an empty-able list for `hotels`,
+   * registration-launch Branch 3.1). `toConference` projects each to the boundary
+   * shape React renders: `string | undefined` for the URLs, a plain `{name,
+   * note?}[]` for hotels — so a component never sees an `Option<string>` and
+   * Branch 4's section-skip gates on `undefined` / `[]` (`boundary-discipline`).
+   * These tests pin that projection against the defaults: 2024 carries every
+   * field, 2026 only `registrationUrl` (the RegFox live channel, settled #9),
+   * 2025 (cancelled) none.
+   */
+  it.effect('projects 2024 — every optional field present', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const conference = yield* content.getConference('en', 2024);
+
+      // The brand-validated https strings cross the boundary verbatim (no Option).
+      expect(conference.registrationUrl).toBe(
+        'https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day',
+      );
+      expect(conference.scheduleUrl).toBe(
+        'https://docs.google.com/document/d/1gNAOfdW2Yhgg7FABjUqQt2k2mXV_AdhARWUOyiVL9dA/pub',
+      );
+      expect(conference.mapEmbedUrl).toBeDefined();
+      expect(conference.mapEmbedUrl?.startsWith('https://www.google.com/maps/embed')).toBe(
+        true,
+      );
+
+      // Hotels project to this locale's strings; the optional `note` is present
+      // only on the items that carry one.
+      expect(conference.hotels).toHaveLength(5);
+      expect(conference.hotels[0]?.name).toBe('Super 8 by Wyndham Kelowna BC');
+      expect(conference.hotels[0]?.note).toBeUndefined();
+      expect(conference.hotels[1]?.name).toBe('Fairfield Inn & Suites Kelowna');
+      expect(conference.hotels[1]?.note).toContain('Holiday Inn Express');
+    }).pipe(provideSeeded(defaultContent)));
+
+  it.effect('projects 2024 hotel notes per-locale (fr)', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const conference = yield* content.getConference('fr', 2024);
+      // The bilingual `note` `Text` collapses to the requested locale.
+      expect(conference.hotels[1]?.note).toContain('code de groupe');
+    }).pipe(provideSeeded(defaultContent)));
+
+  it.effect('projects 2026 — only registrationUrl present, the rest skippable', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const conference = yield* content.getConference('en', 2026);
+      // 2026 carries ONLY its RegFox registration URL (settled #9).
+      expect(conference.registrationUrl).toBe(
+        'https://gyccanada.regfox.com/gyc-canada-2026-speak',
+      );
+      // Schedule / map / hotels are TBD → the section-skip discriminators.
+      expect(conference.scheduleUrl).toBeUndefined();
+      expect(conference.mapEmbedUrl).toBeUndefined();
+      expect(conference.hotels).toEqual([]);
+    }).pipe(provideSeeded(defaultContent)));
+
+  it.effect('projects 2025 — cancelled year, every optional field absent', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const conference = yield* content.getConference('en', 2025);
+      // Cancelled year: no registration channel, no schedule/map, no hotels —
+      // Branch 4 renders it as hero + FAQ only.
+      expect(conference.registrationUrl).toBeUndefined();
+      expect(conference.scheduleUrl).toBeUndefined();
+      expect(conference.mapEmbedUrl).toBeUndefined();
+      expect(conference.hotels).toEqual([]);
+    }).pipe(provideSeeded(defaultContent)));
+});
+
 describe('Content fallback (semantically-invalid document)', () => {
   /**
    * A document whose `conferences` array decodes cleanly but is empty, or omits

@@ -117,6 +117,88 @@ export const HexColour = Schema.NonEmptyString.check(
 export type HexColour = typeof HexColour.Type;
 
 /**
+ * An external `https://` URL safe to interpolate into an `href` or an iframe
+ * `src` from hand-edited document content (registration-launch Branch 3, settled
+ * #4). The `registrationUrl` / `scheduleUrl` / map-embed fields are author-set
+ * strings that the rendered detail page feeds straight into a link/iframe, so the
+ * brand must be a watertight XSS boundary — modelled per-component on
+ * `assetKeyFilter` above, **parsing the URL and inspecting its components**, NOT
+ * a substring or `origin` test (an `origin` check excludes the path, so it would
+ * admit `https://www.google.com/anything`).
+ *
+ * The filter rejects, by parsing:
+ *   - a value that is not a parseable absolute URL (relative refs, garbage);
+ *   - any protocol other than `https:` (so `javascript:`, `data:`, `http:`,
+ *     `file:` etc. can never reach an `href`/`src`);
+ *   - embedded credentials (`username` / `password` non-empty), so a smuggled
+ *     `https://user:pass@evil/` cannot ride along.
+ * The brand keeps the guarantee load-bearing past the decoder: a raw `string` is
+ * not an `ExternalHttpsUrl` until it has crossed the schema
+ * (`boundary-discipline`, `make-impossible-states-unrepresentable`).
+ */
+const parseUrl = (value: string): URL | undefined => {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+};
+
+const externalHttpsUrlFilter = Schema.makeFilter<string>(
+  (value) => {
+    const url = parseUrl(value);
+    if (url === undefined) return 'ExternalHttpsUrl must be a valid absolute URL';
+    if (url.protocol !== 'https:') {
+      return 'ExternalHttpsUrl must use the https: protocol';
+    }
+    if (url.username !== '' || url.password !== '') {
+      return 'ExternalHttpsUrl must not contain embedded credentials';
+    }
+    return undefined;
+  },
+  { title: 'ExternalHttpsUrl' },
+);
+
+export const ExternalHttpsUrl = Schema.NonEmptyString.check(
+  externalHttpsUrlFilter,
+).pipe(Schema.brand('ExternalHttpsUrl'));
+export type ExternalHttpsUrl = typeof ExternalHttpsUrl.Type;
+
+/**
+ * A Google Maps **embed** URL safe to use as an iframe `src` (registration-launch
+ * Branch 3). It is an `ExternalHttpsUrl` (https-only, no credentials) PLUS a
+ * per-component check that the URL **parses** to the Google Maps embed endpoint:
+ * `host === 'www.google.com'` AND `pathname.startsWith('/maps/embed')`. This is
+ * deliberately a host+path check, **not** an `origin` check: `origin` excludes
+ * the path, so an origin test would admit `https://www.google.com/anything`,
+ * which is not an embed and could be an arbitrary Google page. Constraining the
+ * iframe source to the embed endpoint prevents an arbitrary-iframe XSS through a
+ * hand-edited `mapEmbedUrl` (settled #4, modelled on `assetKeyFilter`).
+ */
+const googleMapsEmbedUrlFilter = Schema.makeFilter<string>(
+  (value) => {
+    const url = parseUrl(value);
+    if (url === undefined) {
+      return 'GoogleMapsEmbedUrl must be a valid absolute URL';
+    }
+    if (url.host !== 'www.google.com') {
+      return 'GoogleMapsEmbedUrl host must be www.google.com';
+    }
+    if (!url.pathname.startsWith('/maps/embed')) {
+      return 'GoogleMapsEmbedUrl path must start with /maps/embed';
+    }
+    return undefined;
+  },
+  { title: 'GoogleMapsEmbedUrl' },
+);
+
+export const GoogleMapsEmbedUrl = Schema.NonEmptyString.check(
+  externalHttpsUrlFilter,
+  googleMapsEmbedUrlFilter,
+).pipe(Schema.brand('GoogleMapsEmbedUrl'));
+export type GoogleMapsEmbedUrl = typeof GoogleMapsEmbedUrl.Type;
+
+/**
  * The stable identity of a CMS list item (a speaker, seminar, team member, and
  * the hotel / FAQ / give items that follow) — a `nanoid` (ADR 0006). Identity is
  * **content, not derived**: an id is authored once, round-trips through the
@@ -301,6 +383,23 @@ export const Hero = Schema.Struct({
 export type Hero = typeof Hero.Type;
 
 /**
+ * A recommended hotel for a conference (registration-launch Branch 3, settled
+ * #4) — replaces the hard-coded `<li>` list in the forked detail pages with
+ * editable data. A list item, so it carries a stable `ListItemId` (ADR 0006) and
+ * lives in an `IdListArray`. `name` is a bilingual `Text` (both locales required
+ * and non-empty, like every other content string); `note` is an optional
+ * bilingual line for booking detail (a discount code, a phone number). The
+ * `hotels` array is empty-able and the whole `MapSection` is section-skippable
+ * (Branch 4): a year with no hotels simply omits them.
+ */
+export const Hotel = Schema.Struct({
+  id: ListItemId,
+  name: Text,
+  note: Schema.optionalKey(Text),
+});
+export type Hotel = typeof Hotel.Type;
+
+/**
  * A single annual conference.
  *
  * `themeName` (the conference title / motto) and `accentColor` (the per-year
@@ -335,6 +434,24 @@ export const Conference = Schema.Struct({
   speakers: IdListArray(Speaker),
   seminars: IdListArray(Seminar),
   promos: Schema.Array(Schema.NonEmptyString),
+  /**
+   * The conference's optional detail-page data (registration-launch Branch 3,
+   * settled #4). Each is modelled as `OptionFromOptionalKey` at the document
+   * layer so an *absent* field is `Option.none()` (never an empty string), which
+   * gives Branch 4's section-skip a real `Option.some`/`Option.none`
+   * discriminator (`make-impossible-states-unrepresentable`): an empty-string URL
+   * is not representable as "present". `hotels` is an empty-able id-keyed list
+   * (absence = `[]`, skipped). The `Content` boundary (Branch 3.2) projects each
+   * to `string | undefined` / `[]` so React never sees an `Option`.
+   *   - `registrationUrl` — the external registrar (RegFox) Register button.
+   *   - `scheduleUrl` — the published schedule link (was a hard-coded Google Docs URL).
+   *   - `mapEmbedUrl` — the venue map iframe (constrained to the Google Maps embed endpoint).
+   *   - `hotels` — recommended-hotel list (was a hard-coded `<li>` list).
+   */
+  registrationUrl: Schema.OptionFromOptionalKey(ExternalHttpsUrl),
+  scheduleUrl: Schema.OptionFromOptionalKey(ExternalHttpsUrl),
+  mapEmbedUrl: Schema.OptionFromOptionalKey(GoogleMapsEmbedUrl),
+  hotels: IdListArray(Hotel),
 });
 export type Conference = typeof Conference.Type;
 
@@ -515,11 +632,23 @@ const DraftTeamMember = Schema.Struct({
   photo: Schema.optionalKey(DraftImageRef),
 });
 
+/**
+ * A draft hotel: a freshly-added item carries only its `id` (settled #10), with
+ * `name`/`note` filled in incrementally. Both relax to optional `DraftText`
+ * (publish re-enforces the strict bilingual `Text`).
+ */
+const DraftHotel = Schema.Struct({
+  id: ListItemId,
+  name: Schema.optionalKey(DraftText),
+  note: Schema.optionalKey(DraftText),
+});
+
 /** The draft variant of `Conference`: only its list items are draft-lax. */
 const DraftConference = Schema.Struct({
   ...Conference.fields,
   speakers: IdListArray(DraftSpeaker),
   seminars: IdListArray(DraftSeminar),
+  hotels: IdListArray(DraftHotel),
 });
 
 /**

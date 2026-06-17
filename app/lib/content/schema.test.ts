@@ -7,6 +7,8 @@ import {
   ConferenceSlug,
   DateRange,
   DraftSiteContent,
+  ExternalHttpsUrl,
+  GoogleMapsEmbedUrl,
   HexColour,
   IsoDate,
   ListItemId,
@@ -184,6 +186,83 @@ describe('ConferenceSlug validation', () => {
       'speak', // not a slug at all
     ]) {
       expect(isValidSlug(value)).toBe(false);
+    }
+  });
+});
+
+const isValidExternalHttpsUrl = (value: string): boolean =>
+  Schema.decodeUnknownResult(ExternalHttpsUrl)(value)._tag === 'Success';
+
+describe('ExternalHttpsUrl validation (per-component XSS boundary)', () => {
+  test('accepts https URLs without embedded credentials', () => {
+    for (const value of [
+      'https://gyccanada.regfox.com/gyc-canada-2026-speak',
+      'https://docs.google.com/document/d/abc/pub',
+      'https://example.com',
+      'https://example.com/path?q=1#frag',
+    ]) {
+      expect(isValidExternalHttpsUrl(value)).toBe(true);
+    }
+  });
+
+  test('rejects non-https protocols, credentialed URLs, and non-URLs', () => {
+    for (const value of [
+      '', // empty
+      'http://example.com/x', // http: not https:
+      'javascript:alert(1)', // XSS scheme
+      'data:text/html,<script>alert(1)</script>', // data: scheme
+      'file:///etc/passwd', // file: scheme
+      'ftp://example.com/x', // ftp: scheme
+      'https://user:pass@example.com/', // embedded credentials
+      'https://user@example.com/', // embedded username
+      '/relative/path', // not an absolute URL
+      'example.com', // no scheme
+      'not a url at all',
+    ]) {
+      expect(isValidExternalHttpsUrl(value)).toBe(false);
+    }
+  });
+});
+
+const isValidGoogleMapsEmbedUrl = (value: string): boolean =>
+  Schema.decodeUnknownResult(GoogleMapsEmbedUrl)(value)._tag === 'Success';
+
+describe('GoogleMapsEmbedUrl validation (host + path, NOT origin)', () => {
+  test('accepts a real Google Maps embed URL', () => {
+    expect(
+      isValidGoogleMapsEmbedUrl(
+        'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2570.5',
+      ),
+    ).toBe(true);
+    expect(
+      isValidGoogleMapsEmbedUrl('https://www.google.com/maps/embed/v1/place'),
+    ).toBe(true);
+  });
+
+  test('rejects a non-embed Google path (origin check would WRONGLY admit this)', () => {
+    // The defining case: an `origin` test excludes the path, so it would admit
+    // `https://www.google.com/anything`. The host+path filter rejects it.
+    for (const value of [
+      'https://www.google.com/anything',
+      'https://www.google.com/', // bare host, no embed path
+      'https://www.google.com/search?q=evil',
+      'https://www.google.com/maps', // /maps but not /maps/embed
+    ]) {
+      expect(isValidGoogleMapsEmbedUrl(value)).toBe(false);
+    }
+  });
+
+  test('rejects non-google hosts, non-https, and credentialed URLs', () => {
+    for (const value of [
+      'https://evil.com/maps/embed?pb=x', // wrong host
+      'https://maps.google.com/maps/embed', // wrong host (not www.google.com)
+      'https://www.google.com.evil.com/maps/embed', // host spoof
+      'http://www.google.com/maps/embed', // http: not https:
+      'https://user:pass@www.google.com/maps/embed', // embedded credentials
+      'javascript:alert(1)//www.google.com/maps/embed',
+      '',
+    ]) {
+      expect(isValidGoogleMapsEmbedUrl(value)).toBe(false);
     }
   });
 });

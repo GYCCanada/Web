@@ -142,3 +142,6 @@ dist
 
 # Local workflow scripts (not part of the app)
 .claude/
+
+# Local Codex counsel review artifacts (not source)
+docs/.counsel/
