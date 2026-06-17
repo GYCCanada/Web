@@ -1,135 +1,29 @@
-import { Effect, Result, Schema } from "effect";
-import { InfoIcon } from "lucide-react";
+import * as React from "react";
+import { Effect, Schema } from "effect";
 import {
   Form,
   type MetaFunction,
   useActionData,
   useLoaderData,
 } from "react-router";
-import { match } from "ts-pattern";
 
 import { Content } from "~/lib/content.server";
-import { FormProvider, useForm, useFormData } from "~/lib/conform";
+import { FormProvider, useForm } from "~/lib/conform";
+import { definitionToSchema, type DecodedForm } from "~/lib/forms/decode";
+import { FormDefinition } from "~/lib/forms/definition";
+import { FormFields } from "~/lib/forms/render";
+import { formAction } from "~/lib/forms/action";
 import { formValidationError } from "~/lib/effect/errors";
-import { routeFormAction, SubmissionContext } from "~/lib/effect/form";
-import { formatSchemaResult, parseSchema } from "~/lib/effect/form-schema";
 import { routeHandler } from "~/lib/effect/route";
 import { ReactRouterContext } from "~/lib/effect/router-context";
 import { useTranslate } from "~/lib/localization/context";
 import { getLocale } from "~/lib/localization/localization";
 import { toVolunteerView } from "~/lib/content/pages/project";
-import type { TranslationKey } from "~/lib/localization/translations";
 import { Mailer } from "~/lib/mailer.server";
-import { Toast } from "~/lib/toast.server";
 import { Button } from "~/ui/button";
-import { HoneypotField } from "~/ui/honeypot-field";
-import { FieldErrors, fieldErrorStyle } from "~/ui/field-error";
-import { Label } from "~/ui/label";
+import { fieldErrorStyle } from "~/ui/field-error";
 import { Main } from "~/ui/main";
-import { Radio, RadioGroup, Radios } from "~/ui/radio";
 import { RichText } from "~/ui/rich-text";
-import { TextField } from "~/ui/text-field";
-
-// `invalid_type_error` keys from the old zod schema fired when a field's
-// submitted value was not a string (e.g. duplicate field names POST an array).
-// A node-level `message` annotation re-labels the resulting `InvalidType` issue
-// with a translation key. Every message must be a real `TranslationKey` —
-// `FieldErrors` renders it through `translate()`, so a key absent from
-// `translations.ts` would render `undefined`. Only `email` has a dedicated
-// `.error` key; the others reuse their `.required` key for the invalid-type case
-// (the old zod schema pointed those at `.error` keys that never existed in
-// `translations.ts` and so rendered blank — reusing `.required` is safe copy).
-// `.annotateKey({ messageMissingKey })` covers the absent-field case (the old
-// zod `required_error` fired for both empty and absent values); `.check` covers
-// the empty-string case; the node-level `message` covers the invalid-type case.
-const Name = Schema.String.annotate({ message: "volunteer.form.name.required" })
-  .check(Schema.isMinLength(1, { message: "volunteer.form.name.required" }))
-  .annotateKey({ messageMissingKey: "volunteer.form.name.required" });
-const Email = Schema.String.annotate({
-  message: "volunteer.form.email.error",
-}).check(Schema.isMinLength(1, { message: "volunteer.form.email.required" }));
-const Phone = Schema.String.check(
-  Schema.isMinLength(1, { message: "volunteer.form.phone.required" }),
-);
-const Age = Schema.String.annotate({ message: "volunteer.form.age.required" })
-  .check(Schema.isMinLength(1, { message: "volunteer.form.age.required" }))
-  .annotateKey({ messageMissingKey: "volunteer.form.age.required" });
-const Location = Schema.String.annotate({
-  message: "volunteer.form.location.required",
-})
-  .check(Schema.isMinLength(1, { message: "volunteer.form.location.required" }))
-  .annotateKey({ messageMissingKey: "volunteer.form.location.required" });
-const Background = Schema.String.annotate({
-  message: "volunteer.form.background.required",
-})
-  .check(
-    Schema.isMinLength(1, { message: "volunteer.form.background.required" }),
-  )
-  .annotateKey({ messageMissingKey: "volunteer.form.background.required" });
-const Why = Schema.String.annotate({ message: "volunteer.form.why.required" })
-  .check(Schema.isMinLength(1, { message: "volunteer.form.why.required" }))
-  .annotateKey({ messageMissingKey: "volunteer.form.why.required" });
-// `positions` is a multi-checkbox group: when nothing is selected the form
-// submits no `positions` field at all (unchecked checkboxes do not submit).
-// Classic `parseWithZod` coerced that absent field to `[]`; replicate it with a
-// decode-time default so an empty selection stays a valid submission.
-const Positions = Schema.optionalKey(Schema.Array(Schema.String)).pipe(
-  Schema.withDecodingDefault(Effect.succeed([] as string[])),
-);
-
-// The discriminator. Modeled as a single `Literals` field rather than per-member
-// `Schema.Literal`s inside a `Schema.Union`: a union whose members all fail
-// reports one top-level union-mismatch message (Effect v4 behavior), so the
-// discriminator error could not attach to the `method` field. The method
-// RadioGroup has no default selection, so submitting without choosing a method
-// is a real user path — a missing/invalid `method` must surface
-// `volunteer.form.method.required` on the method field, matching the old zod
-// `discriminatedUnion` behavior.
-const Method = Schema.Literals(["email", "phone", "both"])
-  .annotate({ message: "volunteer.form.method.required" })
-  .annotateKey({ messageMissingKey: "volunteer.form.method.required" });
-
-// Per-method requirements (email when email/both, phone when phone/both) are
-// expressed as a struct-level filter that attaches each issue to the relevant
-// field path, replacing the per-member required fields the union encoded.
-export const schema = Schema.Struct({
-  name: Name,
-  method: Method,
-  age: Age,
-  location: Location,
-  background: Background,
-  why: Why,
-  positions: Positions,
-  // Re-annotate the optional wrapper so a non-string (array) value still maps to
-  // a translation key instead of the wrapper's union-mismatch text. `phone` has
-  // no `.error` key, so reuse `.required` to keep real copy on screen.
-  email: Schema.optional(Email).annotate({
-    message: "volunteer.form.email.error",
-  }),
-  phone: Schema.optional(Phone).annotate({
-    message: "volunteer.form.phone.required",
-  }),
-}).check(
-  Schema.makeFilter((value) => {
-    const issues: Array<{ path: ReadonlyArray<PropertyKey>; issue: string }> =
-      [];
-    if (
-      (value.method === "email" || value.method === "both") &&
-      value.email === undefined
-    ) {
-      issues.push({ path: ["email"], issue: "volunteer.form.email.required" });
-    }
-    if (
-      (value.method === "phone" || value.method === "both") &&
-      value.phone === undefined
-    ) {
-      issues.push({ path: ["phone"], issue: "volunteer.form.phone.required" });
-    }
-    return issues.length === 0 ? undefined : issues;
-  }),
-);
-
-const clientSchema = Schema.toStandardSchemaV1(schema);
 
 export const meta: MetaFunction = ({ params }) => {
   const local = getLocale(params);
@@ -147,74 +41,110 @@ export const meta: MetaFunction = ({ params }) => {
   ];
 };
 
-type Position = {
-  title: string;
-  tasks: string[];
-  team: string;
-};
-
 export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   const content = yield* Content.Service;
-  // `positions` is a static empty list (no request-scoped data yet).
   return {
     page: toVolunteerView(yield* content.getPage("volunteer"), locale),
-    positions: [] as Position[],
+    definition: yield* content.getForm("volunteer"),
   };
 });
 
-export const action = routeFormAction(function* () {
-  const { url } = yield* ReactRouterContext;
-  const submission = yield* SubmissionContext;
-  const mailer = yield* Mailer.Service;
-  const toast = yield* Toast;
+// The string value of one decoded field, or `''` when absent — the decoder has
+// already proven these fields' types, so reading them off the generic
+// `DecodedForm` record is a projection, not re-validation (`boundary-discipline`).
+const str = (decoded: DecodedForm, name: string): string => {
+  const value = decoded[name];
+  return typeof value === "string" ? value : "";
+};
 
-  const parsed = parseSchema(schema, submission.payload);
-  if (Result.isFailure(parsed)) {
-    return yield* formValidationError(formatSchemaResult(parsed) ?? {});
-  }
-  const data = parsed.success;
+/**
+ * The method-specific contact line — email, phone, or both — mirroring the
+ * hand-tuned action's `ts-pattern` match. The cross-field rules guarantee the
+ * gated field is present, so the omitted branches never produce a blank line in
+ * practice; a defensive empty string keeps the body well-formed either way.
+ */
+const contactLine = (decoded: DecodedForm): string => {
+  const method = str(decoded, "method");
+  const email = `Email: ${str(decoded, "email")}`;
+  const phone = `Phone: ${str(decoded, "phone")}`;
+  if (method === "phone") return phone;
+  if (method === "both") return `${email}\n${phone}`;
+  return email;
+};
 
-  const result = yield* Effect.exit(
-    mailer.send({
-      subject: `[!] Volunteer Request from ${data.name}`,
-      content: `Name: ${data.name}\n${match(data)
-        .with({ method: "email" }, (d) => `Email: ${d.email}`)
-        .with({ method: "phone" }, (d) => `Phone: ${d.phone}`)
-        .with({ method: "both" }, (d) => `Email: ${d.email}\nPhone: ${d.phone}`)
-        .exhaustive()}
-        \nMessage: ${data.why}
-        \nBackground: ${data.background}
-        \nAge: ${data.age}
-        \nLocation: ${data.location}
-        \nPositions: ${(data.positions ?? []).join(", ")}
+/**
+ * The vestigial `positions` line: the pre-migration form never populated
+ * `data.positions` (a hardcoded `[]`), so its checkbox block never rendered and
+ * the field was never submitted. The engine definition therefore carries no
+ * `positions` field; this reads it defensively off the decoded payload (always
+ * absent → `[]`) so the notification's `Positions:` line stays byte-identical to
+ * the old action's always-empty output.
+ */
+const positionsLine = (decoded: DecodedForm): string => {
+  const value = decoded["positions"];
+  const positions = Array.isArray(value) ? value : [];
+  return positions.join(", ");
+};
+
+// The volunteer action is the generic skeleton (Branch 6.2): `Content.getForm` →
+// `decodeForm` → `notify` → `toast.redirect`. The form-specific part is the
+// notification — the same mailer body the hand-tuned action built, now over the
+// engine's decoded payload.
+export const action = formAction({
+  form: "volunteer",
+  notify: (decoded) =>
+    Effect.gen(function* () {
+      const mailer = yield* Mailer.Service;
+      const name = str(decoded, "name");
+      const result = yield* Effect.exit(
+        mailer.send({
+          subject: `[!] Volunteer Request from ${name}`,
+          content: `Name: ${name}\n${contactLine(decoded)}
+        \nMessage: ${str(decoded, "why")}
+        \nBackground: ${str(decoded, "background")}
+        \nAge: ${str(decoded, "age")}
+        \nLocation: ${str(decoded, "location")}
+        \nPositions: ${positionsLine(decoded)}
         `,
+        }),
+      );
+      if (result._tag === "Failure") {
+        yield* Effect.logError("Error sending email", result.cause);
+        return yield* formValidationError({
+          formErrors: ["contact.form.error"],
+        });
+      }
     }),
-  );
-  if (result._tag === "Failure") {
-    yield* Effect.logError("Error sending email", result.cause);
-    return yield* formValidationError({
-      formErrors: ["contact.form.error"],
-    });
-  }
-
-  return yield* toast.redirect(url.pathname, {
-    description: "volunteer.form.success.description" satisfies TranslationKey,
-    title: "volunteer.form.success.title" satisfies TranslationKey,
-    type: "success",
-    form: "volunteer",
-  });
+  success: {
+    title: "volunteer.form.success.title",
+    description: "volunteer.form.success.description",
+  },
 });
 
 export default function Index() {
   const translate = useTranslate();
-  const data = useLoaderData<typeof loader>();
+  const { page, definition: encodedDefinition } =
+    useLoaderData<typeof loader>();
+
+  // The loader JSON crossed a boundary; re-decode it through `FormDefinition` so
+  // the client schema is built from a branded definition (`boundary-discipline`).
+  const definition = React.useMemo(
+    () => Schema.decodeUnknownSync(FormDefinition)(encodedDefinition),
+    [encodedDefinition],
+  );
+  const clientSchema = React.useMemo(
+    () => Schema.toStandardSchemaV1(definitionToSchema(definition)),
+    [definition],
+  );
+
   const actionData = useActionData<typeof action>();
-  const { form, fields } = useForm(clientSchema, {
+  const { form: f } = useForm(clientSchema, {
     id: "volunteer",
     shouldValidate: "onSubmit",
     shouldRevalidate: "onInput",
+    lastResult: actionData?.result,
     defaultValue: {
       name: "",
       method: "email",
@@ -222,159 +152,29 @@ export default function Index() {
       phone: undefined,
       age: "",
       location: "",
-      positions: [] as string[],
       background: "",
       why: "",
     },
-    lastResult: actionData?.result,
   });
-
-  const method = useFormData(
-    form.id,
-    (formData) => formData.get(fields.method.name) ?? "email",
-    { fallback: "email" },
-  ) as "email" | "phone" | "both";
 
   return (
     <Main className="gap-10 px-4 py-12 text-2xl md:gap-16 md:px-16">
       <div className="flex flex-col gap-4 md:gap-16">
         <h1 className="text-5xl">
-          <RichText runs={data.page.title} />
+          <RichText runs={page.title} />
         </h1>
-        <p>{data.page.subtitle}</p>
+        <p>{page.subtitle}</p>
       </div>
 
-      <FormProvider context={form.context}>
-        <Form method="POST" className="flex flex-col gap-4" {...form.props}>
-          {data.positions.length > 0 ? (
-            <div className="flex flex-col gap-3">
-              <h2>{data.page.directions}</h2>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {data.positions.map((position) => (
-                  <div
-                    key={position.title}
-                    className="has-[input[checked]]:border-accent-600 flex flex-col gap-1.5 border-2 border-transparent"
-                  >
-                    <input
-                      className="sr-only"
-                      type="checkbox"
-                      aria-label={position.title}
-                      name={fields.positions.name}
-                      value={position.title}
-                    />
-                    <h3 className="font-semibold">{position.title}</h3>
-                    <ul className="flex flex-col gap-1.5">
-                      {position.tasks.map((task) => (
-                        <li key={task}>{task}</li>
-                      ))}
-                    </ul>
-                    <p className="flex items-center gap-2">
-                      <InfoIcon />
-                      {position.team}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <TextField name={fields.name.name}>
-            <Label>{translate("volunteer.form.name.label")}</Label>
-            <TextField.Input
-              type="text"
-              placeholder={
-                translate("volunteer.form.name.placeholder") as string
-              }
-            />
-            <FieldErrors />
-          </TextField>
-
-          <RadioGroup name={fields.method.name}>
-            <Label>{translate("volunteer.form.method.label")}</Label>
-            <Radios>
-              <Radio value="phone">
-                {translate("volunteer.form.method.phone")}
-              </Radio>
-              <Radio value="email">
-                {translate("volunteer.form.method.email")}
-              </Radio>
-              <Radio value="both">
-                {translate("volunteer.form.method.both")}
-              </Radio>
-            </Radios>
-            <FieldErrors />
-          </RadioGroup>
-          {method === "email" || method === "both" ? (
-            <TextField name={fields.email.name}>
-              <Label>{translate("volunteer.form.email.label")}</Label>
-              <TextField.Input
-                type="email"
-                placeholder={
-                  translate("volunteer.form.email.placeholder") as string
-                }
-              />
-              <FieldErrors />
-            </TextField>
-          ) : null}
-          {method === "phone" || method === "both" ? (
-            <TextField name={fields.phone.name}>
-              <Label>{translate("volunteer.form.phone.label")}</Label>
-              <TextField.Input
-                type="tel"
-                placeholder={
-                  translate("volunteer.form.phone.placeholder") as string
-                }
-              />
-              <FieldErrors />
-            </TextField>
-          ) : null}
-          <TextField name={fields.age.name}>
-            <Label>{translate("volunteer.form.age.label")}</Label>
-            <TextField.Input
-              type="number"
-              placeholder={
-                translate("volunteer.form.age.placeholder") as string
-              }
-            />
-            <FieldErrors />
-          </TextField>
-          <TextField name={fields.location.name}>
-            <Label>{translate("volunteer.form.location.label")}</Label>
-            <TextField.Input
-              type="text"
-              placeholder={
-                translate("volunteer.form.location.placeholder") as string
-              }
-            />
-            <FieldErrors />
-          </TextField>
-          <TextField name={fields.background.name}>
-            <Label>{translate("volunteer.form.background.label")}</Label>
-            <TextField.TextArea
-              rows={5}
-              placeholder={
-                translate("volunteer.form.background.placeholder") as string
-              }
-            />
-            <FieldErrors />
-          </TextField>
-          <TextField name={fields.why.name}>
-            <Label>{translate("volunteer.form.why.label")}</Label>
-            <TextField.TextArea
-              rows={5}
-              placeholder={
-                translate("volunteer.form.why.placeholder") as string
-              }
-            />
-            <FieldErrors />
-          </TextField>
-          <HoneypotField />
+      <FormProvider context={f.context}>
+        <Form className="flex flex-col gap-4" method="POST" {...f.props}>
+          <FormFields definition={definition} formId={f.id} />
 
           <div>
             <Button variant="accent" type="submit">
               {translate("volunteer.form.submit")}
             </Button>
-            {form.errors && form.errors.length > 0 ? (
+            {f.errors && f.errors.length > 0 ? (
               <p className={fieldErrorStyle}>
                 {translate("volunteer.form.error")}
               </p>

@@ -12,6 +12,7 @@ import {
   defaultVolunteerForm,
   defaultVolunteerPage,
 } from './defaults';
+import { FormDefinition } from '../../forms/definition';
 import {
   AboutPage,
   ArchivePage,
@@ -21,7 +22,6 @@ import {
   DraftFaqPage,
   DraftGivePage,
   FaqPage,
-  FormDefinition,
   GivePage,
   HomePage,
   VolunteerPage,
@@ -81,8 +81,8 @@ export const PAGE_IDS = PageId.literals;
 
 /**
  * The closed set of site Forms (CONTEXT §Form definition). Each owns a
- * `FormDefinition` object (`forms/<form>.json`); Branch 6 grows the placeholder
- * schema into the structural field graph the generic decoder/renderer read.
+ * `FormDefinition` object (`forms/<form>.json`) — the structural field graph the
+ * generic decoder/renderer (Branch 6) read.
  */
 export const FormId = Schema.Literals(['contact', 'volunteer', 'registration']);
 export type FormId = typeof FormId.Type;
@@ -149,7 +149,7 @@ const draftPageSpec = <A, I>(
 /**
  * Build a spec with NO laxer draft variant: the draft boundary IS the strict
  * schema. Used by pages/forms without an add-item flow (contact, volunteer, home,
- * and the placeholder forms) — there is no id-only intermediate state, so the draft
+ * and the form definitions) — there is no id-only intermediate state, so the draft
  * and publish boundaries coincide.
  */
 const pageSpec = <A, I>(
@@ -177,9 +177,10 @@ export const PAGE_SPECS = {
 } as const satisfies { readonly [P in PageId]: ObjectSpec<unknown, unknown> };
 
 /**
- * The Form registry — one entry per `FormId`. Each is the placeholder
- * `FormDefinition` today (Branch 5.1); Branch 6 grows the schema, leaving this
- * registry's shape unchanged.
+ * The Form registry — one entry per `FormId`. Each decodes through the structural
+ * `FormDefinition` (Branch 6.1: the closed `FieldKind` set + variants + cross-field
+ * rules); the bundled default carries the form's CMS-editable copy with an empty
+ * field graph until that form migrates onto the engine (6.3–6.5).
  */
 export const FORM_SPECS = {
   contact: pageSpec(FormDefinition, defaultContactForm),

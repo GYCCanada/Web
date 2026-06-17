@@ -1,114 +1,29 @@
-import { Effect, Result, Schema } from "effect";
+import * as React from "react";
+import { Effect, Schema } from "effect";
 import {
   Form,
   type MetaFunction,
   useActionData,
   useLoaderData,
 } from "react-router";
-import { match } from "ts-pattern";
 
 import { Content } from "~/lib/content.server";
-import { FormProvider, useForm, useFormData } from "~/lib/conform";
+import { FormProvider, useForm } from "~/lib/conform";
+import { definitionToSchema, type DecodedForm } from "~/lib/forms/decode";
+import { FormDefinition } from "~/lib/forms/definition";
+import { FormFields } from "~/lib/forms/render";
+import { formAction } from "~/lib/forms/action";
 import { formValidationError } from "~/lib/effect/errors";
-import { routeFormAction, SubmissionContext } from "~/lib/effect/form";
-import { formatSchemaResult, parseSchema } from "~/lib/effect/form-schema";
 import { routeHandler } from "~/lib/effect/route";
 import { ReactRouterContext } from "~/lib/effect/router-context";
 import { useTranslate } from "~/lib/localization/context";
 import { getLocale } from "~/lib/localization/localization";
 import { toContactView } from "~/lib/content/pages/project";
-import type { TranslationKey } from "~/lib/localization/translations";
 import { Mailer } from "~/lib/mailer.server";
-import { Toast } from "~/lib/toast.server";
 import { Button } from "~/ui/button";
-import { HoneypotField } from "~/ui/honeypot-field";
-import { FieldErrors, fieldErrorStyle } from "~/ui/field-error";
-import { Label } from "~/ui/label";
+import { fieldErrorStyle } from "~/ui/field-error";
 import { Main } from "~/ui/main";
-import { Radio, RadioGroup, Radios } from "~/ui/radio";
 import { RichText } from "~/ui/rich-text";
-import { TextField } from "~/ui/text-field";
-
-// Match the previous zod `.email()` validation: a basic, permissive email shape.
-const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// `invalid_type_error` keys from the old zod schema fired when a field's
-// submitted value was not a string (e.g. duplicate field names POST an array).
-// Effect Schema surfaces that as an `InvalidType` issue; a node-level `message`
-// annotation re-labels it with a translation key. Every message must be a real
-// `TranslationKey` — `FieldErrors` renders it through `translate()`, so a key
-// that is absent from `translations.ts` would render `undefined`. Fields that
-// have a dedicated `.error` key use it; the rest reuse their `.required` key for
-// the invalid-type case (the old zod schemas pointed those at `.error` keys that
-// never existed, which rendered blank — reusing `.required` is the safe copy).
-// `.annotateKey({ messageMissingKey })` covers the absent-field case (the old
-// zod `required_error` fired for both empty and absent values); `.check` covers
-// the empty-string case; the node-level `message` covers the invalid-type case.
-const Name = Schema.String.annotate({ message: "contact.form.name.error" })
-  .check(Schema.isMinLength(1, { message: "contact.form.name.required" }))
-  .annotateKey({ messageMissingKey: "contact.form.name.required" });
-const Message = Schema.String.annotate({
-  message: "contact.form.message.required",
-})
-  .check(Schema.isMinLength(1, { message: "contact.form.message.required" }))
-  .annotateKey({ messageMissingKey: "contact.form.message.required" });
-const Email = Schema.String.check(
-  Schema.isMinLength(1, { message: "contact.form.email.required" }),
-  Schema.isPattern(EMAIL_REGEXP, { message: "contact.form.email.error" }),
-);
-const Phone = Schema.String.check(
-  Schema.isMinLength(1, { message: "contact.form.phone.required" }),
-);
-
-// The discriminator. Modeled as a single `Literals` field rather than per-member
-// `Schema.Literal`s inside a `Schema.Union`: a union whose members all fail
-// reports one top-level union-mismatch message (Effect v4 behavior), so the
-// discriminator error could not attach to the `method` field. As a struct field
-// with `message` (invalid value) + `messageMissingKey` (absent) annotations, a
-// missing or invalid `method` attributes cleanly to the `method` path — matching
-// the old zod `discriminatedUnion` behavior that surfaced
-// `contact.form.contact-method.required` on the method field.
-const Method = Schema.Literals(["email", "phone", "both"])
-  .annotate({ message: "contact.form.contact-method.required" })
-  .annotateKey({ messageMissingKey: "contact.form.contact-method.required" });
-
-// Per-method requirements (email when email/both, phone when phone/both) are
-// expressed as a struct-level filter that attaches each issue to the relevant
-// field path, replacing the per-member required fields the union encoded.
-export const schema = Schema.Struct({
-  method: Method,
-  name: Name,
-  message: Message,
-  // Re-annotate the optional wrapper so a non-string (array) value still maps to
-  // a translation key instead of the wrapper's union-mismatch text. `phone` has
-  // no `.error` key, so reuse `.required` to keep real copy on screen.
-  email: Schema.optional(Email).annotate({
-    message: "contact.form.email.error",
-  }),
-  phone: Schema.optional(Phone).annotate({
-    message: "contact.form.phone.required",
-  }),
-}).check(
-  Schema.makeFilter((value) => {
-    const issues: Array<{ path: ReadonlyArray<PropertyKey>; issue: string }> =
-      [];
-    if (
-      (value.method === "email" || value.method === "both") &&
-      value.email === undefined
-    ) {
-      issues.push({ path: ["email"], issue: "contact.form.email.required" });
-    }
-    if (
-      (value.method === "phone" || value.method === "both") &&
-      value.phone === undefined
-    ) {
-      issues.push({ path: ["phone"], issue: "contact.form.phone.required" });
-    }
-    return issues.length === 0 ? undefined : issues;
-  }),
-);
-
-const clientSchema = Schema.toStandardSchemaV1(schema);
 
 export const meta: MetaFunction = ({ params }) => {
   const locale = getLocale(params);
@@ -133,56 +48,85 @@ export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   const content = yield* Content.Service;
-  return { page: toContactView(yield* content.getPage("contact"), locale) };
+  return {
+    page: toContactView(yield* content.getPage("contact"), locale),
+    definition: yield* content.getForm("contact"),
+  };
 });
 
-export const action = routeFormAction(function* () {
-  const { url } = yield* ReactRouterContext;
-  const submission = yield* SubmissionContext;
-  const mailer = yield* Mailer.Service;
-  const toast = yield* Toast;
+// The string value of one decoded field, or `''` when absent — the decoder has
+// already proven these fields' types, so reading them off the generic
+// `DecodedForm` record is a projection, not re-validation (`boundary-discipline`).
+const str = (decoded: DecodedForm, name: string): string => {
+  const value = decoded[name];
+  return typeof value === "string" ? value : "";
+};
 
-  const parsed = parseSchema(schema, submission.payload);
-  if (Result.isFailure(parsed)) {
-    return yield* formValidationError(formatSchemaResult(parsed) ?? {});
-  }
-  const data = parsed.success;
+/**
+ * The method-specific contact line — email, phone, or both — mirroring the
+ * hand-tuned action's `ts-pattern` match. The cross-field rules guarantee the
+ * gated field is present, so the omitted branches never produce a blank line in
+ * practice; a defensive empty string keeps the body well-formed either way.
+ */
+const contactLine = (decoded: DecodedForm): string => {
+  const method = str(decoded, "method");
+  const email = `Email: ${str(decoded, "email")}`;
+  const phone = `Phone: ${str(decoded, "phone")}`;
+  if (method === "phone") return phone;
+  if (method === "both") return `${email}\n${phone}`;
+  return email;
+};
 
-  const result = yield* Effect.exit(
-    mailer.send({
-      subject: `[!] Contact Inquiry from ${data.name}`,
-      content: `Name: ${data.name}\n${match(data)
-        .with(
-          {
-            method: "email",
-          },
-          (d) => `Email: ${d.email}`,
-        )
-        .with({ method: "phone" }, (d) => `Phone: ${d.phone}`)
-        .with({ method: "both" }, (d) => `Email: ${d.email}\nPhone: ${d.phone}`)
-        .exhaustive()}\nMessage: ${data.message}`,
+// The contact action is the generic skeleton (Branch 6.2): `Content.getForm` →
+// `decodeForm` → `notify` → `toast.redirect`. The form-specific part is the
+// notification — the same mailer body the hand-tuned action built, now over the
+// engine's decoded payload.
+export const action = formAction({
+  form: "contact",
+  notify: (decoded) =>
+    Effect.gen(function* () {
+      const mailer = yield* Mailer.Service;
+      const name = str(decoded, "name");
+      const result = yield* Effect.exit(
+        mailer.send({
+          subject: `[!] Contact Inquiry from ${name}`,
+          content: `Name: ${name}\n${contactLine(decoded)}\nMessage: ${str(
+            decoded,
+            "message",
+          )}`,
+        }),
+      );
+      if (result._tag === "Failure") {
+        yield* Effect.logError("Error sending email", result.cause);
+        return yield* formValidationError({
+          formErrors: ["contact.form.error"],
+        });
+      }
     }),
-  );
-  if (result._tag === "Failure") {
-    yield* Effect.logError("Error sending email", result.cause);
-    return yield* formValidationError({
-      formErrors: ["contact.form.error"],
-    });
-  }
-
-  return yield* toast.redirect(url.pathname, {
-    description: "contact.form.success.description" satisfies TranslationKey,
-    title: "contact.form.success.title" satisfies TranslationKey,
-    type: "success",
-    form: "contact",
-  });
+  success: {
+    title: "contact.form.success.title",
+    description: "contact.form.success.description",
+  },
 });
 
 export default function Index() {
   const translate = useTranslate();
-  const { page } = useLoaderData<typeof loader>();
+  const { page, definition: encodedDefinition } =
+    useLoaderData<typeof loader>();
+
+  // The loader JSON crossed a boundary; re-decode it through `FormDefinition` so
+  // the client schema is built from a branded definition (`boundary-discipline`).
+  const definition = React.useMemo(
+    () => Schema.decodeUnknownSync(FormDefinition)(encodedDefinition),
+    [encodedDefinition],
+  );
+  const clientSchema = React.useMemo(
+    () => Schema.toStandardSchemaV1(definitionToSchema(definition)),
+    [definition],
+  );
+
   const actionData = useActionData<typeof action>();
-  const { form: f, fields } = useForm(clientSchema, {
+  const { form: f } = useForm(clientSchema, {
     id: "contact",
     shouldValidate: "onSubmit",
     shouldRevalidate: "onInput",
@@ -196,12 +140,6 @@ export default function Index() {
     },
   });
 
-  const method = useFormData(
-    f.id,
-    (formData) => formData.get(fields.method.name) ?? "email",
-    { fallback: "email" },
-  ) as "email" | "phone" | "both";
-
   return (
     <Main className="gap-10 px-3 py-4 text-2xl md:py-16 md:px-16">
       <div className="flex flex-col gap-4 md:gap-16">
@@ -213,68 +151,7 @@ export default function Index() {
 
       <FormProvider context={f.context}>
         <Form className="flex flex-col gap-4" method="POST" {...f.props}>
-          <TextField name={fields.name.name}>
-            <Label>{translate("contact.form.name")}</Label>
-            <TextField.Input
-              placeholder={translate("contact.form.name.placeholder") as string}
-            />
-            <FieldErrors />
-          </TextField>
-
-          <RadioGroup name={fields.method.name} defaultValue="both">
-            <Label>{translate("contact.form.contact-method")}</Label>
-            <Radios>
-              <Radio value="email">
-                {translate("contact.form.contact-method.email")}
-              </Radio>
-              <Radio value="phone">
-                {translate("contact.form.contact-method.phone")}
-              </Radio>
-              <Radio value="both">
-                {translate("contact.form.contact-method.both")}
-              </Radio>
-            </Radios>
-            <FieldErrors />
-          </RadioGroup>
-
-          {method === "email" || method === "both" ? (
-            <TextField name={fields.email.name}>
-              <Label>{translate("contact.form.email")}</Label>
-              <TextField.Input
-                type="email"
-                placeholder={
-                  translate("contact.form.email.placeholder") as string
-                }
-              />
-              <FieldErrors />
-            </TextField>
-          ) : null}
-
-          {method === "phone" || method === "both" ? (
-            <TextField name={fields.phone.name}>
-              <Label>{translate("contact.form.phone")}</Label>
-              <TextField.Input
-                type="tel"
-                placeholder={
-                  translate("contact.form.phone.placeholder") as string
-                }
-              />
-              <FieldErrors />
-            </TextField>
-          ) : null}
-
-          <TextField name={fields.message.name}>
-            <Label>{translate("contact.form.message")}</Label>
-            <TextField.TextArea
-              rows={5}
-              placeholder={
-                translate("contact.form.message.placeholder") as string
-              }
-            />
-            <FieldErrors />
-          </TextField>
-
-          <HoneypotField />
+          <FormFields definition={definition} formId={f.id} />
 
           <div>
             <Button type="submit" variant="accent">

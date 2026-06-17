@@ -15,7 +15,8 @@ import {
   defaultFaqPage,
 } from './content/pages/defaults';
 import { formObjectKey, pageObjectKey } from './content/pages/registry';
-import { AboutPage, FaqPage, FormDefinition } from './content/pages/schema';
+import { AboutPage, FaqPage } from './content/pages/schema';
+import { FormDefinition } from './forms/definition';
 import { HexColour, SiteContent } from './content/schema';
 import type { SiteContent as SiteContentType } from './content/schema';
 import { dayjs } from './dayjs';

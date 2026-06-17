@@ -4,13 +4,10 @@ import { Effect, Schema } from 'effect';
 import {
   defaultAboutPage,
   defaultArchivePage,
-  defaultContactForm,
   defaultContactPage,
   defaultFaqPage,
   defaultGivePage,
   defaultHomePage,
-  defaultRegistrationForm,
-  defaultVolunteerForm,
   defaultVolunteerPage,
 } from './defaults';
 import {
@@ -22,7 +19,6 @@ import {
   DraftFaqPage,
   DraftGivePage,
   FaqPage,
-  FormDefinition,
   GivePage,
   HomePage,
   LinkHref,
@@ -69,30 +65,6 @@ describe('per-page default round-trips', () => {
         expect(restored).toEqual(value);
       }));
   }
-});
-
-describe('FormDefinition placeholder', () => {
-  const cases = [
-    ['contact', defaultContactForm],
-    ['volunteer', defaultVolunteerForm],
-    ['registration', defaultRegistrationForm],
-  ] as const;
-
-  for (const [name, value] of cases) {
-    it.effect(`${name} form definition round-trips`, () =>
-      Effect.gen(function* () {
-        const restored = yield* roundTrips(FormDefinition, value);
-        expect(restored).toEqual(value);
-      }));
-  }
-
-  test('an optional intro is representable and round-trips', () => {
-    const withIntro = Schema.decodeUnknownSync(FormDefinition)({
-      title: { en: 'Contact', fr: 'Contact' },
-      intro: { en: 'Say hello', fr: 'Dites bonjour' },
-    });
-    expect(withIntro.intro).toBeDefined();
-  });
 });
 
 const isValidLinkHref = (value: string): boolean =>

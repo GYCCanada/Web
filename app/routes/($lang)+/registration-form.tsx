@@ -1,8 +1,12 @@
 import type { SubmissionResult } from '@conform-to/react/future';
+import * as React from 'react';
+import { Schema } from 'effect';
 import { Form } from 'react-router';
 import dayjs from 'dayjs';
 
 import { FormProvider, useForm, useFormData } from '~/lib/conform';
+import { definitionToSchema } from '~/lib/forms/decode';
+import { FormDefinition } from '~/lib/forms/definition';
 import { useTranslate } from '~/lib/localization/context';
 import { Button } from '~/ui/button';
 import { Checkbox, Checkboxes, CheckboxGroup } from '~/ui/checkbox';
@@ -12,10 +16,159 @@ import { Main } from '~/ui/main';
 import { Radio, RadioGroup, Radios } from '~/ui/radio';
 import { TextField } from '~/ui/text-field';
 
-import {
-  makeDefaultRegistrant,
-  RegistrationStandardSchema,
-} from './registration-schema';
+/**
+ * The registrant's FORM-INPUT (encoded) field-name contract — the static shape
+ * conform's `getFieldset()` accessors are keyed off. This is the FORM's own
+ * concern (the field names it renders `name=` for), NOT the validation: every
+ * leaf is the raw `string`/absent value the browser submits (booleans are
+ * `'true'`/`'false'`/`'on'` strings here, not decoded booleans), and there are no
+ * checks or message keys — the runtime validation is supplied entirely by the
+ * engine codec below (`definitionToSchema`). Mirrors the definition graph the
+ * render-parity half of `registration-form.test.tsx` pins (it asserts the live
+ * form's emitted submit-names equal `defaultRegistrationForm`'s field names), so a
+ * field added/renamed in the definition without a matching accessor here is caught.
+ *
+ * `make-impossible-states-unrepresentable`: the accessor shape is a real Schema,
+ * not a hand-written interface, so its field set is the typed contract the form's
+ * `getFieldset()` reads route through.
+ */
+const RegistrantInput = Schema.Struct({
+  type: Schema.optional(Schema.Literals(['attendee', 'exhibitor'])),
+  name: Schema.optional(Schema.String),
+  email: Schema.optional(Schema.String),
+  phone: Schema.optional(Schema.String),
+  dateOfBirth: Schema.optional(Schema.String),
+  gender: Schema.optional(Schema.Literals(['male', 'female'])),
+  meals: Schema.optional(Schema.String),
+  dietaryRestrictions: Schema.optional(Schema.String),
+  outreach: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  parent: Schema.optional(
+    Schema.Struct({
+      name: Schema.optional(Schema.String),
+      email: Schema.optional(Schema.String),
+      phone: Schema.optional(Schema.String),
+    }),
+  ),
+  extra: Schema.optional(
+    Schema.Struct({
+      howDidYouHear: Schema.optional(Schema.String),
+      whyAreYouAttending: Schema.optional(Schema.String),
+      whatAreYouExcitedAbout: Schema.optional(Schema.String),
+      firstTimeAttending: Schema.optional(Schema.String),
+      church: Schema.optional(Schema.String),
+      merch: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+      other: Schema.optional(Schema.String),
+      tos: Schema.optional(Schema.String),
+    }),
+  ),
+  volunteer: Schema.optional(
+    Schema.Struct({
+      songLeader: Schema.optional(Schema.String),
+      musician: Schema.optional(Schema.String),
+      instrument: Schema.optional(Schema.String),
+      specialMusic: Schema.optional(Schema.String),
+      hospitality: Schema.optional(Schema.String),
+      registrationStation: Schema.optional(Schema.String),
+      usher: Schema.optional(Schema.String),
+      outreachLeader: Schema.optional(Schema.String),
+      smallGroupLeader: Schema.optional(Schema.String),
+      seminarRoomHost: Schema.optional(Schema.String),
+      cameraOperator: Schema.optional(Schema.String),
+      photographer: Schema.optional(Schema.String),
+      roamingMic: Schema.optional(Schema.String),
+    }),
+  ),
+  synopsis: Schema.optional(Schema.String),
+  website: Schema.optional(Schema.String),
+  company: Schema.optional(Schema.String),
+});
+
+/**
+ * Registration's client validation schema, DERIVED from the structural Form
+ * engine's stored `registration` `FormDefinition` (`derive-dont-sync`,
+ * registration-launch Branch 6). The engine definition validates ONE registrant
+ * (the attendee/exhibitor discriminator + nested groups + boolean codecs — the
+ * riskiest graph, proven byte-equivalent to the former hand-tuned schema by the
+ * registration equivalence harness before that oracle was retired in 6.6); this
+ * form keeps the repeating-`registrants` SHELL (a repeating-array-of-variant-items
+ * is not in the closed `FieldKind` set), so it wraps the per-registrant codec in
+ * `{ registrants: Array(...) }`.
+ *
+ * The definition is read from `Content.getForm('registration')` in each
+ * `{2024,2025,2026}/form` loader and passed in as the `definition` prop (BLOCKER 2:
+ * registration is now CMS-backed like contact/volunteer — editing the stored
+ * `forms/registration.json` changes what the form accepts and how it renders, with
+ * no code change; ADR 0007/0008 consequence). The loader JSON crossed a boundary,
+ * so the component re-decodes it through `FormDefinition` (`boundary-discipline`)
+ * before building the client codec.
+ *
+ * The engine codec's OUTPUT is a generic `Record<string, unknown>` (the data-driven
+ * decoder is field-name-agnostic), so conform's field metadata is re-typed at the
+ * seam to {@link RegistrantInput} — the form's own field-name contract. This is a
+ * TYPE-only annotation over an unchanged engine RUNTIME (the "cast at the seam"
+ * idiom this codebase already uses), NOT a re-declaration of the validation: every
+ * issue the form shows is computed by the engine codec.
+ */
+const RegistrationFormShape = Schema.Struct({
+  registrants: Schema.mutable(Schema.Array(RegistrantInput)),
+});
+
+const makeRegistrationStandardSchema = (definition: FormDefinition) => {
+  const registrationSchema = Schema.Struct({
+    registrants: Schema.mutable(
+      Schema.Array(definitionToSchema(definition)),
+    ).annotateKey({ messageMissingKey: 'registration.form.type.required' }),
+  });
+  return Schema.toStandardSchemaV1(registrationSchema) as unknown as ReturnType<
+    typeof Schema.toStandardSchemaV1<typeof RegistrationFormShape>
+  >;
+};
+
+/**
+ * The form's initial / appended registrant value — the raw string/absent
+ * (form-input) values the browser submits, NOT decoded booleans, so conform's
+ * `defaultValue` consumes it directly. Keyed exactly by the engine definition's
+ * registrant field names (asserted in the equivalence harness's render-parity
+ * half), so an "Add Registrant" appends a blank attendee.
+ */
+export const makeDefaultRegistrant = () => ({
+  name: '',
+  email: '',
+  phone: '',
+  dateOfBirth: '',
+  parent: undefined as
+    | { name?: string; email?: string; phone?: string }
+    | undefined,
+  gender: undefined as string | undefined,
+  dietaryRestrictions: undefined as string | undefined,
+  meals: undefined as string | undefined,
+  extra: {
+    firstTimeAttending: undefined as string | undefined,
+    howDidYouHear: '',
+    whyAreYouAttending: '',
+    whatAreYouExcitedAbout: '',
+    church: undefined as string | undefined,
+    merch: [] as string[],
+    other: '',
+    tos: undefined as string | undefined,
+  },
+  outreach: [] as string[],
+  volunteer: {
+    songLeader: undefined as string | undefined,
+    musician: undefined as string | undefined,
+    instrument: undefined as string | undefined,
+    specialMusic: undefined as string | undefined,
+    hospitality: undefined as string | undefined,
+    registrationStation: undefined as string | undefined,
+    usher: undefined as string | undefined,
+    outreachLeader: undefined as string | undefined,
+    smallGroupLeader: undefined as string | undefined,
+    seminarRoomHost: undefined as string | undefined,
+    cameraOperator: undefined as string | undefined,
+    photographer: undefined as string | undefined,
+    roamingMic: undefined as string | undefined,
+  },
+});
 
 /**
  * Shared registration form, parameterized by conference `year`. The three
@@ -31,18 +184,49 @@ import {
  */
 export function RegistrationForm({
   year,
+  definition: encodedDefinition,
+  initialRegistrants,
   actionData,
 }: {
   year: number;
+  definition: typeof FormDefinition.Encoded;
+  /**
+   * The form's seed registrants — defaults to one blank attendee shell
+   * (`makeDefaultRegistrant()`). Overridable so a test (or a future
+   * resume-a-draft flow) can seed a registrant whose `type` selects the SSR
+   * branch the server renders: the branch is derived from each registrant's
+   * default `type` (see `liveValues`' fallback below), so a seeded
+   * `type: 'attendee'` makes the server render the attendee graph — the branch
+   * the render-parity test pins (BLOCKER 4).
+   */
+  initialRegistrants?: ReadonlyArray<
+    ReturnType<typeof makeDefaultRegistrant> & { type?: string }
+  >;
   actionData?: SubmissionResult<string[]> | null;
 }) {
   const translate = useTranslate();
 
-  const { form, fields, intent } = useForm(RegistrationStandardSchema, {
+  // The loader JSON crossed a boundary; re-decode it through `FormDefinition` so
+  // the client codec is built from a branded definition (`boundary-discipline`),
+  // exactly as `contact.tsx` does.
+  const definition = React.useMemo(
+    () => Schema.decodeUnknownSync(FormDefinition)(encodedDefinition),
+    [encodedDefinition],
+  );
+  const registrationStandardSchema = React.useMemo(
+    () => makeRegistrationStandardSchema(definition),
+    [definition],
+  );
+
+  const seedRegistrants: ReadonlyArray<
+    ReturnType<typeof makeDefaultRegistrant> & { type?: string }
+  > = initialRegistrants ?? [makeDefaultRegistrant()];
+
+  const { form, fields, intent } = useForm(registrationStandardSchema, {
     shouldValidate: 'onSubmit',
     shouldRevalidate: 'onInput',
     defaultValue: {
-      registrants: [makeDefaultRegistrant()],
+      registrants: [...seedRegistrants],
     },
     lastResult: actionData,
   });
@@ -50,11 +234,24 @@ export function RegistrationForm({
   const registrants = fields.registrants.getFieldList();
 
   // `/future` field metadata exposes no live `.value`; read the current `type`
-  // and `dateOfBirth` for each registrant from the live form data instead.
+  // and `dateOfBirth` for each registrant from the live form data instead. The
+  // `useFormData` SSR snapshot is the FALLBACK (conform's server store snapshot
+  // returns it verbatim), so the fallback carries each registrant's DEFAULT
+  // `type`/`dateOfBirth` — the server then renders the branch matching the seed
+  // (the same `useFormData(... ?? default)` idiom the generic renderer's
+  // `VariantSection` uses), instead of always falling to the empty/exhibitor
+  // branch. On the client the live `formData.get(...)` takes over on first input.
   const names = registrants.map((registrant) => {
     const set = registrant.getFieldset();
     return { type: set.type.name, dateOfBirth: set.dateOfBirth.name };
   });
+  const fallback = seedRegistrants.map((registrant) => ({
+    type: typeof registrant.type === 'string' ? registrant.type : null,
+    dateOfBirth:
+      typeof registrant.dateOfBirth === 'string'
+        ? registrant.dateOfBirth
+        : null,
+  }));
   const liveValues = useFormData(
     form.id,
     (formData) =>
@@ -62,7 +259,7 @@ export function RegistrationForm({
         type: formData.get(n.type),
         dateOfBirth: formData.get(n.dateOfBirth),
       })),
-    { fallback: [] as Array<{ type: string | null; dateOfBirth: string | null }> },
+    { fallback },
   );
 
   return (
@@ -474,10 +671,10 @@ export function RegistrationForm({
                       <Checkbox name={volunteer.seminarRoomHost.name}>
                         {translate('registration.form.seminar-room-host.label')}
                       </Checkbox>
-                      <Checkbox name={volunteer.photographer.name}>
+                      <Checkbox name={volunteer.cameraOperator.name}>
                         {translate('registration.form.camera-operator.label')}
                       </Checkbox>
-                      <Checkbox>
+                      <Checkbox name={volunteer.photographer.name}>
                         {translate('registration.form.photographer.label')}
                       </Checkbox>
                       <Checkbox name={volunteer.roamingMic.name}>
