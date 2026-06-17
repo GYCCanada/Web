@@ -6,6 +6,10 @@ import {
   Content,
   SITE_CONTENT_DRAFT_KEY,
   SITE_CONTENT_KEY,
+  bustForm,
+  bustPage,
+  bustSite,
+  type BustTarget,
 } from '../content.server';
 import { deepMerge, setAtPath, type Json } from './admin-form';
 import { defaultContent } from './defaults';
@@ -137,6 +141,25 @@ export const scopeKeys = (scope: ContentScope): ScopeKeys => {
         draftKey: formDraftKey(scope.form),
         publishedKey: formObjectKey(scope.form),
       };
+  }
+};
+
+/**
+ * Map a `ContentScope` (which carries the draft/published key PAIR) to the
+ * `Content` read path's `BustTarget` (which names only the *published* cache to
+ * invalidate). `publish` promotes a scope's draft to its published object, so the
+ * cache it must bust is that scope's published read cache — site / page / form —
+ * so the change is live on the next read with no redeploy, and ONLY that object's
+ * cache is invalidated (ADR 0008's per-object isolation).
+ */
+const bustTargetOf = (scope: ContentScope): BustTarget => {
+  switch (scope.kind) {
+    case 'site':
+      return bustSite;
+    case 'page':
+      return bustPage(scope.page);
+    case 'form':
+      return bustForm(scope.form);
   }
 };
 
@@ -654,7 +677,10 @@ export const layer = Layer.effect(
       // from reopening as stale content. Hence it must not fail the publish —
       // the live document is already written.
       yield* storage.delete(draftKey).pipe(Effect.ignore);
-      yield* content.bust();
+      // Bust ONLY this scope's published read cache (ADR 0008): publishing a page
+      // makes that page live on the next read without busting any other page,
+      // form, or the conference (`site`) cache.
+      yield* content.bust(bustTargetOf(scope));
     });
 
     return Service.of({
