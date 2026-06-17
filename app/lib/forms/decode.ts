@@ -316,17 +316,40 @@ const requiredMessageOf = (
 
 /**
  * The presence issue an ABSENT selected-variant `nestedGroup` surfaces: a real
- * key at the group's FIRST presence-requirable inner field path (e.g.
- * `['extra', <first required inner field>]`), mirroring the registration
- * oracle's `['extra', 'tos']` (`registration-schema.ts:274-279`) — a selected
- * attendee branch that omits the whole `extra` group is an error, not a success
- * (`make-impossible-states-unrepresentable`). An empty group (no presence-
- * requirable inner field) cannot anchor a key, so it imposes no group-level
- * presence — its own (absent) inner fields carry no requirement anyway.
+ * key inside the group, anchored at the field the definition's `presenceAnchor`
+ * names (registration's `extra` → `tos`, matching the registration oracle's
+ * `['extra', 'tos']` anchor, `registration-schema.ts:274-279`), or — when no
+ * anchor is declared — the group's FIRST presence-requirable inner field (the
+ * back-compatible default). A selected attendee branch that omits the whole
+ * `extra` group is an error, not a success
+ * (`make-impossible-states-unrepresentable`); WHICH inner key carries it is
+ * DECLARED data, not a positional coincidence (`derive-dont-sync`) — this is what
+ * makes the engine's emitted `TranslationKey` set identical to the oracle's
+ * (ADR 0007, plan §"identical emitted TranslationKey sets").
+ *
+ * A declared `presenceAnchor` that does not name a presence-requirable inner field
+ * is ignored (fall through to first) rather than silently dropped — the
+ * `FieldName` brand guarantees it is a safe token, but it could name a non-
+ * presence-requirable inner field (an `optionalText`); the first presence-
+ * requirable field is then the only meaningful anchor. An empty group (no
+ * presence-requirable inner field) cannot anchor a key, so it imposes no group-
+ * level presence — its own (absent) inner fields carry no requirement anyway.
  */
 const groupPresenceIssue = (
   group: Extract<FieldKind, { _tag: 'nestedGroup' }>,
 ): PresenceIssue | undefined => {
+  if (group.presenceAnchor !== undefined) {
+    const anchored = group.fields.find(
+      (inner) =>
+        inner.name === group.presenceAnchor && isPresenceRequirableLeaf(inner),
+    );
+    if (anchored && isPresenceRequirableLeaf(anchored)) {
+      return {
+        path: [group.name, anchored.name],
+        issue: requiredMessageOf(anchored),
+      };
+    }
+  }
   for (const inner of group.fields) {
     if (!isPresenceRequirableLeaf(inner)) continue;
     return { path: [group.name, inner.name], issue: requiredMessageOf(inner) };

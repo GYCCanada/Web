@@ -1,11 +1,12 @@
 import type { SubmissionResult } from '@conform-to/react/future';
+import * as React from 'react';
 import { Schema } from 'effect';
 import { Form } from 'react-router';
 import dayjs from 'dayjs';
 
 import { FormProvider, useForm, useFormData } from '~/lib/conform';
-import { defaultRegistrationForm } from '~/lib/content/pages/defaults';
 import { definitionToSchema } from '~/lib/forms/decode';
+import { FormDefinition } from '~/lib/forms/definition';
 import { useTranslate } from '~/lib/localization/context';
 import { Button } from '~/ui/button';
 import { Checkbox, Checkboxes, CheckboxGroup } from '~/ui/checkbox';
@@ -84,15 +85,22 @@ const RegistrantInput = Schema.Struct({
 
 /**
  * Registration's client validation schema, DERIVED from the structural Form
- * engine's `defaultRegistrationForm` definition (`derive-dont-sync`,
+ * engine's stored `registration` `FormDefinition` (`derive-dont-sync`,
  * registration-launch Branch 6). The engine definition validates ONE registrant
  * (the attendee/exhibitor discriminator + nested groups + boolean codecs — the
  * riskiest graph, proven byte-equivalent to the former hand-tuned schema by the
  * registration equivalence harness before that oracle was retired in 6.6); this
  * form keeps the repeating-`registrants` SHELL (a repeating-array-of-variant-items
  * is not in the closed `FieldKind` set), so it wraps the per-registrant codec in
- * `{ registrants: Array(...) }`. Editing the stored `forms/registration.json` now
- * changes what the form accepts with no code change.
+ * `{ registrants: Array(...) }`.
+ *
+ * The definition is read from `Content.getForm('registration')` in each
+ * `{2024,2025,2026}/form` loader and passed in as the `definition` prop (BLOCKER 2:
+ * registration is now CMS-backed like contact/volunteer — editing the stored
+ * `forms/registration.json` changes what the form accepts and how it renders, with
+ * no code change; ADR 0007/0008 consequence). The loader JSON crossed a boundary,
+ * so the component re-decodes it through `FormDefinition` (`boundary-discipline`)
+ * before building the client codec.
  *
  * The engine codec's OUTPUT is a generic `Record<string, unknown>` (the data-driven
  * decoder is field-name-agnostic), so conform's field metadata is re-typed at the
@@ -101,21 +109,20 @@ const RegistrantInput = Schema.Struct({
  * idiom this codebase already uses), NOT a re-declaration of the validation: every
  * issue the form shows is computed by the engine codec.
  */
-const RegistrationSchema = Schema.Struct({
-  registrants: Schema.mutable(
-    Schema.Array(definitionToSchema(defaultRegistrationForm)),
-  ).annotateKey({ messageMissingKey: 'registration.form.type.required' }),
-});
-
 const RegistrationFormShape = Schema.Struct({
   registrants: Schema.mutable(Schema.Array(RegistrantInput)),
 });
 
-const RegistrationStandardSchema = Schema.toStandardSchemaV1(
-  RegistrationSchema,
-) as unknown as ReturnType<
-  typeof Schema.toStandardSchemaV1<typeof RegistrationFormShape>
->;
+const makeRegistrationStandardSchema = (definition: FormDefinition) => {
+  const registrationSchema = Schema.Struct({
+    registrants: Schema.mutable(
+      Schema.Array(definitionToSchema(definition)),
+    ).annotateKey({ messageMissingKey: 'registration.form.type.required' }),
+  });
+  return Schema.toStandardSchemaV1(registrationSchema) as unknown as ReturnType<
+    typeof Schema.toStandardSchemaV1<typeof RegistrationFormShape>
+  >;
+};
 
 /**
  * The form's initial / appended registrant value — the raw string/absent
@@ -129,35 +136,37 @@ export const makeDefaultRegistrant = () => ({
   email: '',
   phone: '',
   dateOfBirth: '',
-  parent: undefined,
-  gender: undefined,
-  dietaryRestrictions: undefined,
-  meals: undefined,
+  parent: undefined as
+    | { name?: string; email?: string; phone?: string }
+    | undefined,
+  gender: undefined as string | undefined,
+  dietaryRestrictions: undefined as string | undefined,
+  meals: undefined as string | undefined,
   extra: {
-    firstTimeAttending: undefined,
+    firstTimeAttending: undefined as string | undefined,
     howDidYouHear: '',
     whyAreYouAttending: '',
     whatAreYouExcitedAbout: '',
-    church: undefined,
-    merch: [],
+    church: undefined as string | undefined,
+    merch: [] as string[],
     other: '',
-    tos: undefined,
+    tos: undefined as string | undefined,
   },
-  outreach: [],
+  outreach: [] as string[],
   volunteer: {
-    songLeader: undefined,
-    musician: undefined,
-    instrument: undefined,
-    specialMusic: undefined,
-    hospitality: undefined,
-    registrationStation: undefined,
-    usher: undefined,
-    outreachLeader: undefined,
-    smallGroupLeader: undefined,
-    seminarRoomHost: undefined,
-    cameraOperator: undefined,
-    photographer: undefined,
-    roamingMic: undefined,
+    songLeader: undefined as string | undefined,
+    musician: undefined as string | undefined,
+    instrument: undefined as string | undefined,
+    specialMusic: undefined as string | undefined,
+    hospitality: undefined as string | undefined,
+    registrationStation: undefined as string | undefined,
+    usher: undefined as string | undefined,
+    outreachLeader: undefined as string | undefined,
+    smallGroupLeader: undefined as string | undefined,
+    seminarRoomHost: undefined as string | undefined,
+    cameraOperator: undefined as string | undefined,
+    photographer: undefined as string | undefined,
+    roamingMic: undefined as string | undefined,
   },
 });
 
@@ -175,18 +184,49 @@ export const makeDefaultRegistrant = () => ({
  */
 export function RegistrationForm({
   year,
+  definition: encodedDefinition,
+  initialRegistrants,
   actionData,
 }: {
   year: number;
+  definition: typeof FormDefinition.Encoded;
+  /**
+   * The form's seed registrants — defaults to one blank attendee shell
+   * (`makeDefaultRegistrant()`). Overridable so a test (or a future
+   * resume-a-draft flow) can seed a registrant whose `type` selects the SSR
+   * branch the server renders: the branch is derived from each registrant's
+   * default `type` (see `liveValues`' fallback below), so a seeded
+   * `type: 'attendee'` makes the server render the attendee graph — the branch
+   * the render-parity test pins (BLOCKER 4).
+   */
+  initialRegistrants?: ReadonlyArray<
+    ReturnType<typeof makeDefaultRegistrant> & { type?: string }
+  >;
   actionData?: SubmissionResult<string[]> | null;
 }) {
   const translate = useTranslate();
 
-  const { form, fields, intent } = useForm(RegistrationStandardSchema, {
+  // The loader JSON crossed a boundary; re-decode it through `FormDefinition` so
+  // the client codec is built from a branded definition (`boundary-discipline`),
+  // exactly as `contact.tsx` does.
+  const definition = React.useMemo(
+    () => Schema.decodeUnknownSync(FormDefinition)(encodedDefinition),
+    [encodedDefinition],
+  );
+  const registrationStandardSchema = React.useMemo(
+    () => makeRegistrationStandardSchema(definition),
+    [definition],
+  );
+
+  const seedRegistrants: ReadonlyArray<
+    ReturnType<typeof makeDefaultRegistrant> & { type?: string }
+  > = initialRegistrants ?? [makeDefaultRegistrant()];
+
+  const { form, fields, intent } = useForm(registrationStandardSchema, {
     shouldValidate: 'onSubmit',
     shouldRevalidate: 'onInput',
     defaultValue: {
-      registrants: [makeDefaultRegistrant()],
+      registrants: [...seedRegistrants],
     },
     lastResult: actionData,
   });
@@ -194,11 +234,24 @@ export function RegistrationForm({
   const registrants = fields.registrants.getFieldList();
 
   // `/future` field metadata exposes no live `.value`; read the current `type`
-  // and `dateOfBirth` for each registrant from the live form data instead.
+  // and `dateOfBirth` for each registrant from the live form data instead. The
+  // `useFormData` SSR snapshot is the FALLBACK (conform's server store snapshot
+  // returns it verbatim), so the fallback carries each registrant's DEFAULT
+  // `type`/`dateOfBirth` — the server then renders the branch matching the seed
+  // (the same `useFormData(... ?? default)` idiom the generic renderer's
+  // `VariantSection` uses), instead of always falling to the empty/exhibitor
+  // branch. On the client the live `formData.get(...)` takes over on first input.
   const names = registrants.map((registrant) => {
     const set = registrant.getFieldset();
     return { type: set.type.name, dateOfBirth: set.dateOfBirth.name };
   });
+  const fallback = seedRegistrants.map((registrant) => ({
+    type: typeof registrant.type === 'string' ? registrant.type : null,
+    dateOfBirth:
+      typeof registrant.dateOfBirth === 'string'
+        ? registrant.dateOfBirth
+        : null,
+  }));
   const liveValues = useFormData(
     form.id,
     (formData) =>
@@ -206,7 +259,7 @@ export function RegistrationForm({
         type: formData.get(n.type),
         dateOfBirth: formData.get(n.dateOfBirth),
       })),
-    { fallback: [] as Array<{ type: string | null; dateOfBirth: string | null }> },
+    { fallback },
   );
 
   return (

@@ -395,10 +395,11 @@ describe('variant (discriminated-union presence)', () => {
 
 // A selected variant branch carrying a `nestedGroup` (registration's attendee-
 // only `extra` group): the WHOLE group can be omitted from the payload, and the
-// engine must still demand it — surfacing a real key at the group's first
-// presence-requirable inner field, mirroring the oracle's `['extra', …]`
-// requirement (`registration-schema.ts:268-279`). Without this, a selected
-// attendee that omits `extra` would decode SUCCESS — a behaviour divergence.
+// engine must still demand it — surfacing a real key at the group's declared
+// `presenceAnchor` inner field (registration's `extra` anchors at `tos`),
+// mirroring the oracle's `['extra', 'tos']` requirement
+// (`registration-schema.ts:268-279`). Without this, a selected attendee that
+// omits `extra` would decode SUCCESS — a behaviour divergence.
 const variantGroupDef = asDefinition({
   title: text('F', 'F'),
   fields: [
@@ -425,6 +426,7 @@ const variantGroupDef = asDefinition({
             _tag: 'nestedGroup',
             name: 'extra',
             label: text('Extra', 'Extra'),
+            presenceAnchor: 'tos',
             fields: [
               {
                 _tag: 'requiredText',
@@ -460,8 +462,77 @@ const variantGroupDef = asDefinition({
 });
 
 describe('variant nestedGroup presence', () => {
-  test('a selected branch with the whole group omitted emits a real key at the first inner field', () => {
+  test('a selected branch with the whole group omitted emits a real key at the declared presenceAnchor', () => {
     const errors = errorsFor(variantGroupDef, { name: 'Ada', type: 'attendee' });
+    // Anchored at `tos` (the declared `presenceAnchor`), matching the oracle's
+    // `['extra','tos']` — NOT the group's first field (`howDidYouHear`).
+    expect(errors?.fieldErrors['extra.tos']).toEqual([
+      'registration.form.tos.required',
+    ]);
+    expect(errors?.fieldErrors['extra.howDidYouHear']).toBeUndefined();
+  });
+
+  test('without a presenceAnchor, an absent group falls back to the first presence-requirable inner field', () => {
+    const noAnchorDef = asDefinition({
+      title: text('F', 'F'),
+      fields: [
+        {
+          _tag: 'requiredText',
+          name: 'name',
+          label: text('Name', 'Nom'),
+          requiredMessage: 'registration.form.name.required',
+        },
+      ],
+      variant: {
+        discriminator: 'type',
+        requiredMessage: 'registration.form.type.required',
+        options: [
+          { value: 'attendee', label: text('Attendee', 'Participant') },
+          { value: 'exhibitor', label: text('Exhibitor', 'Exposant') },
+        ],
+        variants: [
+          {
+            value: 'attendee',
+            label: text('Attendee', 'Participant'),
+            fields: [
+              {
+                _tag: 'nestedGroup',
+                name: 'extra',
+                label: text('Extra', 'Extra'),
+                fields: [
+                  {
+                    _tag: 'requiredText',
+                    name: 'howDidYouHear',
+                    label: text('How', 'Comment'),
+                    requiredMessage:
+                      'registration.form.how-did-you-hear.required',
+                  },
+                  {
+                    _tag: 'checkboxBoolean',
+                    name: 'tos',
+                    label: text('Accept', 'Accepter'),
+                    requiredMessage: 'registration.form.tos.required',
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            value: 'exhibitor',
+            label: text('Exhibitor', 'Exposant'),
+            fields: [
+              {
+                _tag: 'requiredText',
+                name: 'company',
+                label: text('Company', 'Entreprise'),
+                requiredMessage: 'registration.form.company.required',
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const errors = errorsFor(noAnchorDef, { name: 'Ada', type: 'attendee' });
     expect(errors?.fieldErrors['extra.howDidYouHear']).toEqual([
       'registration.form.how-did-you-hear.required',
     ]);

@@ -109,6 +109,9 @@ const fullDefinitionJson = {
       _tag: 'nestedGroup',
       name: 'parent',
       label: text('Parent', 'Parent'),
+      // Exercise the `presenceAnchor` key in the lossless round-trip (the
+      // declared inner field an absent group's presence error anchors at).
+      presenceAnchor: 'parentName',
       fields: [
         {
           _tag: 'requiredText',

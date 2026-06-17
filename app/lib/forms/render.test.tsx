@@ -267,3 +267,92 @@ describe('FormFields renders a discriminated variant', () => {
     expect(html).not.toContain('name="company"');
   });
 });
+
+// The contact/volunteer `method`-gated `email`/`phone` (registration-launch
+// BLOCKER 1): both fields are `optional: true` and a pair of `requiredWhenEquals`
+// rules makes each required only when `method` is one of its trigger values. The
+// hand-tuned forms rendered the gated field CONDITIONALLY, so an inactive field
+// was ABSENT from the POST and its `optional: true` codec accepted the absence.
+// The generic renderer must reproduce that conditional VISIBILITY — otherwise the
+// always-rendered field POSTs a present blank (`phone=''`) its codec rejects as
+// `requiredMessage`. These tests pin that a gated field appears only when its
+// `when` value is active.
+const methodGatedDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'requiredText',
+      name: 'name',
+      label: text('Name', 'Nom'),
+      requiredMessage: 'contact.form.name.required',
+    },
+    {
+      _tag: 'literal',
+      name: 'method',
+      label: text('Method', 'Méthode'),
+      options: [
+        { value: 'email', label: text('Email', 'Courriel') },
+        { value: 'phone', label: text('Phone', 'Téléphone') },
+        { value: 'both', label: text('Both', 'Les deux') },
+      ],
+      requiredMessage: 'contact.form.contact-method.required',
+    },
+    {
+      _tag: 'email',
+      name: 'email',
+      label: text('Email', 'Courriel'),
+      optional: true,
+      requiredMessage: 'contact.form.email.required',
+      invalidMessage: 'contact.form.email.error',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'phone',
+      label: text('Phone', 'Téléphone'),
+      optional: true,
+      requiredMessage: 'contact.form.phone.required',
+    },
+  ],
+  rules: [
+    {
+      _tag: 'requiredWhenEquals',
+      when: 'method',
+      equals: ['email', 'both'],
+      target: 'email',
+      message: 'contact.form.email.required',
+    },
+    {
+      _tag: 'requiredWhenEquals',
+      when: 'method',
+      equals: ['phone', 'both'],
+      target: 'phone',
+      message: 'contact.form.phone.required',
+    },
+  ],
+});
+
+describe('FormFields gates requiredWhenEquals targets on their when-field', () => {
+  test('method=email renders email, hides phone (so phone is absent from the POST)', () => {
+    const html = render(methodGatedDef, { defaultValue: { method: 'email' } });
+    expect(html).toContain('name="email"');
+    expect(html).not.toContain('name="phone"');
+  });
+
+  test('method=phone renders phone, hides email', () => {
+    const html = render(methodGatedDef, { defaultValue: { method: 'phone' } });
+    expect(html).toContain('name="phone"');
+    expect(html).not.toContain('name="email"');
+  });
+
+  test('method=both renders both gated fields', () => {
+    const html = render(methodGatedDef, { defaultValue: { method: 'both' } });
+    expect(html).toContain('name="email"');
+    expect(html).toContain('name="phone"');
+  });
+
+  test('the always-present, ungated fields render regardless of method', () => {
+    const html = render(methodGatedDef, { defaultValue: { method: 'phone' } });
+    expect(html).toContain('name="name"');
+    expect(html).toContain('name="method"');
+  });
+});

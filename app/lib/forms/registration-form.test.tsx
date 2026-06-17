@@ -1,14 +1,24 @@
 import { describe, expect, test } from 'bun:test';
+import { Schema } from 'effect';
 import { renderToString } from 'react-dom/server';
 import { createRoutesStub } from 'react-router';
 
 import { defaultRegistrationForm } from '~/lib/content/pages/defaults';
+import { FormDefinition } from '~/lib/forms/definition';
 import { LocalizationProvider } from '~/lib/localization/provider';
 import { root } from '~/lib/localization/translations';
 import {
   makeDefaultRegistrant,
   RegistrationForm,
 } from '~/routes/($lang)+/registration-form';
+
+// The encoded (on-bucket) form of the registration definition — what
+// `Content.getForm('registration')` serializes across the loader boundary and the
+// `definition` prop the live form re-decodes. Encoding the bundled default once
+// here is the exact value a route passes in (BLOCKER 2: registration is CMS-backed).
+const encodedRegistrationForm = Schema.encodeSync(FormDefinition)(
+  defaultRegistrationForm,
+);
 
 /**
  * Registration render-level field-name + default-value parity (registration-launch
@@ -88,14 +98,22 @@ const collectNames = (
  * name — exactly the class of bug a hand-copied default could not catch (a control
  * with the wrong `name`, or a control with no `name` at all).
  */
-const renderedNames = (): Set<string> => {
+const renderedNames = (
+  initialRegistrants?: ReadonlyArray<
+    ReturnType<typeof makeDefaultRegistrant> & { type?: string }
+  >,
+): Set<string> => {
   const Stub = createRoutesStub([
     {
       id: 'root',
       path: ':lang?',
       Component: () => (
         <LocalizationProvider translation={root.en}>
-          <RegistrationForm year={2026} />
+          <RegistrationForm
+            year={2026}
+            definition={encodedRegistrationForm}
+            initialRegistrants={initialRegistrants}
+          />
         </LocalizationProvider>
       ),
     },
@@ -135,6 +153,82 @@ describe('registration render-level field-name + default-value parity', () => {
       ),
     ]);
     expect([...names].sort()).toEqual([...expected].sort());
+  });
+
+  // BLOCKER 4: the ATTENDEE branch — the most complex graph (the nested,
+  // always-rendered `extra` group, the always-rendered `volunteer` group, the
+  // minors-only `parent`) — must be render-pinned too, not just the exhibitor
+  // branch a default SSR snapshot happens to take. SSR's `useFormData` snapshot is
+  // the fallback, and the form now derives that fallback from each seed
+  // registrant's `type` — so seeding `type: 'attendee'` makes the server render the
+  // attendee graph. We seed a NON-MINOR `dateOfBirth` so the minors-only `parent`
+  // group is (correctly) NOT rendered; every other attendee control is. This is
+  // exactly the assertion the `photographer`/`cameraOperator` wrong-name regression
+  // needs: a control with the wrong `name=` (or none) is a missing/extra entry
+  // here, invisible to the default-keys-only checks below.
+  test('the rendered attendee branch submit-names match the definition exactly (incl. nested extra + volunteer)', () => {
+    const seed = makeDefaultRegistrant();
+    const names = renderedNames([
+      {
+        // Seed a non-minor attendee so the SSR fallback selects the attendee
+        // branch and the minors-only `parent` group stays hidden. The checkbox
+        // GROUPS (`outreach`, `extra.merch`, `extra.tos`) emit their submit-`name`
+        // only when a value is selected (conform mirrors selected checkboxes as
+        // hidden named inputs), so seed a selection for each — otherwise an empty
+        // group renders no name and the strict set comparison would (correctly)
+        // not see it. Radios + text fields + single named checkboxes emit names
+        // unconditionally.
+        ...seed,
+        type: 'attendee',
+        dateOfBirth: '1990-01-01',
+        outreach: ['not-sure'],
+        extra: { ...seed.extra, merch: ['none'], tos: 'true' },
+      },
+    ]);
+    const attendeeBranch = defaultRegistrationForm.variant?.variants.find(
+      (v) => v.value === 'attendee',
+    );
+    // The attendee render descends the always-rendered `extra` and `volunteer`
+    // groups (so every inner control's submit-name is pinned, incl.
+    // `volunteer.photographer` / `volunteer.cameraOperator`), but NOT the
+    // minors-only `parent` (hidden for a non-minor seed) — so drop its names.
+    const attendeeLeaves = collectNames(
+      attendeeBranch?.fields ?? [],
+      true,
+    ).filter((name) => !name.startsWith('parent.'));
+    const expected = new Set([
+      'registrants[0]',
+      `registrants[0].${defaultRegistrationForm.variant?.discriminator}`,
+      ...collectNames(defaultRegistrationForm.fields, false).map(
+        (name) => `registrants[0].${name}`,
+      ),
+      ...attendeeLeaves.map((name) => `registrants[0].${name}`),
+    ]);
+    expect([...names].sort()).toEqual([...expected].sort());
+    // Belt-and-braces on the specific regression: the two controls the original
+    // wrong-name bug hit are present with their exact dotted names.
+    expect(names.has('registrants[0].volunteer.photographer')).toBe(true);
+    expect(names.has('registrants[0].volunteer.cameraOperator')).toBe(true);
+    // The exhibitor-only fields never leak onto an attendee.
+    for (const exhibitorOnly of ['company', 'synopsis', 'website']) {
+      expect(names.has(`registrants[0].${exhibitorOnly}`)).toBe(false);
+    }
+  });
+
+  // The minors-only `parent` group DOES render when the seed is a minor — pinning
+  // the `isMinor` gate and the nested `parent.*` submit-names.
+  test('a minor attendee additionally renders the parent group controls', () => {
+    const minorYear = new Date().getFullYear() - 10;
+    const names = renderedNames([
+      {
+        ...makeDefaultRegistrant(),
+        type: 'attendee',
+        dateOfBirth: `${minorYear}-01-01`,
+      },
+    ]);
+    for (const parentField of ['name', 'email', 'phone']) {
+      expect(names.has(`registrants[0].parent.${parentField}`)).toBe(true);
+    }
   });
 
   // DEFAULT-VALUE parity, derived (`derive-dont-sync`): the form's REAL

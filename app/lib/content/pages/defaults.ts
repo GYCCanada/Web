@@ -798,6 +798,12 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
             _tag: 'nestedGroup',
             name: 'extra',
             label: { en: 'Extra information', fr: 'Informations supplémentaires' },
+            // An absent `extra` group anchors its presence error at `tos`,
+            // matching the registration oracle's `['extra','tos']` anchor
+            // (registration-spec.md:78). Without this, `groupPresenceIssue` would
+            // anchor at the group's first presence-requirable field
+            // (`howDidYouHear`), diverging from the oracle's emitted key set.
+            presenceAnchor: 'tos',
             fields: [
               {
                 _tag: 'requiredText',

@@ -11,7 +11,12 @@ import { Label } from '~/ui/label';
 import { Radio, RadioGroup, Radios } from '~/ui/radio';
 import { TextField } from '~/ui/text-field';
 
-import type { FieldKind, FormDefinition, FormVariantSet } from './definition';
+import type {
+  CrossFieldRule,
+  FieldKind,
+  FormDefinition,
+  FormVariantSet,
+} from './definition';
 
 /**
  * The generic form renderer (ADR 0007, CONTEXT §Form definition; registration-
@@ -129,19 +134,72 @@ function LeafField({
 }
 
 /**
+ * The cross-field-conditional gate on a field's VISIBILITY (registration-launch
+ * Branch 6, BLOCKER 1). A `requiredWhenEquals` rule whose `target` is a top-level
+ * `optional: true` field models the contact/volunteer `method`-gated `email` /
+ * `phone`: the field exists in the payload only WHEN its `when` field's live value
+ * is one of `equals`, and the decoder accepts the key's ABSENCE (`optional: true`)
+ * the rest of the time. The hand-tuned forms rendered exactly this — `method ===
+ * 'email' || method === 'both' ? <email> : null` (`contact.tsx:240/253`) — so an
+ * inactive field was absent from the POST and its `optional: true` codec accepted
+ * the absence. The generic renderer must reproduce that conditional VISIBILITY, or
+ * the always-rendered field POSTs a present blank (`phone=''`) that its codec then
+ * rejects as `requiredMessage` — the regression this gate fixes.
+ *
+ * `derive-dont-sync`: the gate is DERIVED from the definition's `requiredWhenEquals`
+ * rules (the same rules that re-impose PRESENCE server-side), never a hand-wired
+ * `method` switch — editing the rule's `equals` set changes both the visibility and
+ * the validation in lockstep. The live `when` value is read via `useFormData`
+ * (matching the `useFormData(... ?? default)` idiom the hand-tuned forms used),
+ * falling back to the field's own default so the server renders the same branch the
+ * client will.
+ */
+function RuleGatedField({
+  rule,
+  formId,
+  children,
+}: {
+  rule: CrossFieldRule;
+  formId: string;
+  children: React.ReactNode;
+}) {
+  const meta = useField<string>(rule.when);
+  const fallback =
+    typeof meta.defaultValue === 'string' ? meta.defaultValue : undefined;
+  const live = useFormData(formId, (formData) => formData.get(rule.when), {
+    fallback,
+  });
+  const value = typeof live === 'string' ? live : fallback;
+  const active =
+    typeof value === 'string' && rule.equals.includes(value as never);
+  return active ? <>{children}</> : null;
+}
+
+/**
  * Render one field — a leaf control, or a `nestedGroup`'s heading + its inner
  * fields under dotted `group.field` submit-names (so `parseSubmission` nests them
  * into `{ group: { field: … } }`, the shape the decoder's nested `Schema.Struct`
  * expects).
+ *
+ * `gateRules` is the index of `requiredWhenEquals` rules keyed by `target` name
+ * (built once in {@link FormFields}); a top-level field that is a rule's target is
+ * wrapped in a {@link RuleGatedField} so its visibility tracks the `when` field —
+ * the contact/volunteer `method`-gated `email`/`phone`. Fields inside a
+ * `nestedGroup` carry no top-level gate (the registration groups gate structurally
+ * via the variant), so the recursion does not propagate `gateRules` inward.
  */
 function FieldControl({
   field,
   prefix,
   locale,
+  formId,
+  gateRules,
 }: {
   field: FieldKind;
   prefix: string;
   locale: Locale;
+  formId: string;
+  gateRules?: ReadonlyMap<string, CrossFieldRule>;
 }) {
   if (field._tag === 'nestedGroup') {
     return (
@@ -153,13 +211,22 @@ function FieldControl({
             field={inner}
             prefix={`${prefix}${field.name}.`}
             locale={locale}
+            formId={formId}
           />
         ))}
       </fieldset>
     );
   }
-  return (
+  const control = (
     <LeafField field={field} name={`${prefix}${field.name}`} locale={locale} />
+  );
+  const rule = gateRules?.get(field.name);
+  return rule ? (
+    <RuleGatedField rule={rule} formId={formId}>
+      {control}
+    </RuleGatedField>
+  ) : (
+    control
   );
 }
 
@@ -210,6 +277,7 @@ function VariantSection({
               field={field}
               prefix=""
               locale={locale}
+              formId={formId}
             />
           ))
         : null}
@@ -233,6 +301,19 @@ export function FormFields({
 }) {
   const locale = useLocale();
 
+  // Index the `requiredWhenEquals` rules by their `target` so a gated top-level
+  // field (the `method`-gated `email`/`phone`) renders only when its `when` value
+  // is one of `equals` — reproducing the hand-tuned forms' conditional visibility
+  // so an inactive field is ABSENT from the POST, not a present blank its codec
+  // would reject (`derive-dont-sync`: the gate IS the rule).
+  const gateRules = React.useMemo(() => {
+    const map = new Map<string, CrossFieldRule>();
+    for (const rule of definition.rules ?? []) {
+      if (rule._tag === 'requiredWhenEquals') map.set(rule.target, rule);
+    }
+    return map;
+  }, [definition.rules]);
+
   return (
     <>
       {definition.fields.map((field) => (
@@ -241,6 +322,8 @@ export function FormFields({
           field={field}
           prefix=""
           locale={locale}
+          formId={formId}
+          gateRules={gateRules}
         />
       ))}
       {definition.variant ? (

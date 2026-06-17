@@ -178,6 +178,7 @@ type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
       readonly name: Name;
       readonly label: Txt;
       readonly optional?: Bool;
+      readonly presenceAnchor?: Name;
       readonly fields: ReadonlyArray<FieldKindShape<Name, Txt, Msg, Opt, Bool>>;
     };
 
@@ -288,6 +289,9 @@ const fieldChrome = {
  *     present (`Schema.optional(Parent)` / `Schema.optional(Volunteer)` in the
  *     oracle). An absent non-optional group inside a selected variant is an error
  *     (the always-rendered `extra` group); an absent `optional` group is valid.
+ *     `presenceAnchor` names which inner field that absent-group error attributes
+ *     to (registration's `extra` → `tos`, the oracle's `['extra','tos']` anchor);
+ *     omitted, it defaults to the group's first presence-requirable inner field.
  *
  * Two ORTHOGONAL optionality axes, never conflated:
  *   - WHICH FIELDS APPEAR for a registrant (an exhibitor-only field on an
@@ -345,6 +349,15 @@ export const FieldKind = Schema.TaggedUnion({
     name: FieldName,
     label: Text,
     optional: Schema.optionalKey(Schema.Boolean),
+    // When a NON-optional group is omitted whole from a selected variant, the
+    // engine must surface a real key SOMEWHERE inside it; `presenceAnchor` names
+    // WHICH inner field that key attributes to (registration's `extra` anchors at
+    // `tos`, matching the oracle's `['extra','tos']`). Absent → the group's first
+    // presence-requirable inner field (the back-compatible default). The named
+    // field must exist in `fields` and be presence-requirable; `groupPresenceIssue`
+    // validates this at decode time. Declared data, not a positional coincidence
+    // (`derive-dont-sync`, `make-impossible-states-unrepresentable`).
+    presenceAnchor: Schema.optionalKey(FieldName),
     fields: Schema.Array(
       Schema.suspend(
         (): Schema.Codec<FieldKind, FieldKindEncoded> => FieldKind,

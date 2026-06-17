@@ -99,6 +99,82 @@ describe('formAction', () => {
     });
   });
 
+  // BLOCKER 1 regression pin: contact's `email`/`phone` are `optional: true` and
+  // the renderer GATES each on `method` (renders the active one only). So the real
+  // rendered method=email payload OMITS `phone` — and that absence must decode to
+  // success. The inverse (method=phone, no `email`) likewise. If the renderer ever
+  // regressed to rendering both unconditionally, the browser would POST a present
+  // BLANK (`phone=''`) for the inactive field, which the `optional: true` codec
+  // rejects as `requiredMessage` — proven below. These submit through the REAL
+  // `parseSubmission` (no `stripEmptyValues`), so a present `''` is kept, exactly
+  // as the browser sends it.
+  it('the rendered method=phone payload (email field absent) decodes to success', async () => {
+    let notified: DecodedForm | undefined;
+    const action = formAction({
+      form: 'contact',
+      notify: (decoded) =>
+        Effect.sync(() => {
+          notified = decoded;
+        }),
+      success: {
+        title: 'contact.form.success.title',
+        description: 'contact.form.success.description',
+      },
+    });
+
+    let thrown: unknown;
+    try {
+      await action(
+        makeFormArgs({
+          method: 'phone',
+          name: 'Ada',
+          phone: '123-456-7890',
+          message: 'hi',
+        }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(302);
+    expect(notified).toEqual({
+      method: 'phone',
+      name: 'Ada',
+      phone: '123-456-7890',
+      message: 'hi',
+    });
+  });
+
+  it('a present-blank inactive field (the pre-fix unconditional render) FAILS — why the renderer must gate it', async () => {
+    const action = formAction({
+      form: 'contact',
+      notify: () => Effect.void,
+      success: {
+        title: 'contact.form.success.title',
+        description: 'contact.form.success.description',
+      },
+    });
+
+    // The regression payload: method=email but the browser ALSO posted an empty
+    // `phone` (the bug the renderer fix prevents). `parseSubmission` keeps the
+    // present `''`, and the `optional: true` phone codec rejects a present blank.
+    const result = await action(
+      makeFormArgs({
+        method: 'email',
+        name: 'Ada',
+        email: 'ada@example.com',
+        phone: '',
+        message: 'hi',
+      }),
+    );
+
+    expect(result.status).toBe('error');
+    expect(result.result.error?.fieldErrors?.['phone']).toEqual([
+      'contact.form.phone.required',
+    ]);
+  });
+
   it('a notify failure aborts the redirect and reports a form-level error', async () => {
     const action = formAction({
       form: 'contact',
