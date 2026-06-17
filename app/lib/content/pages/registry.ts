@@ -26,6 +26,7 @@ import {
   HomePage,
   VolunteerPage,
 } from './schema';
+import { type ListItemId } from '../schema';
 
 /**
  * The per-Page + per-Form object REGISTRY (ADR 0008, registration-launch Branch 5.2).
@@ -108,6 +109,18 @@ export const formObjectKey = (form: FormId): string => `forms/${form}.json`;
 /** The *unpublished* draft key for a Form definition object (`forms/<form>.draft.json`). */
 export const formDraftKey = (form: FormId): string =>
   `forms/${form}.draft.json`;
+
+/**
+ * The bucket key one persisted `Submission` lives at
+ * (`submissions/<form>/<id>.json`, CONTEXT §Submission, settled #8). Derived from
+ * the closed `FormId` plus the submission's `ListItemId` so a persist call can
+ * never target a form that doesn't exist nor hand-type the prefix — the same
+ * `make-impossible-states-unrepresentable` discipline the page/form key templates
+ * carry. The `<form>/` segment groups a form's submissions under one prefix the
+ * future first-party registrar (CONTEXT §Submission:47) lists by.
+ */
+export const submissionKey = (form: FormId, id: ListItemId): string =>
+  `submissions/${form}/${id}.json`;
 
 // ---------------------------------------------------------------------------
 // Object specs (schema + default per id)
