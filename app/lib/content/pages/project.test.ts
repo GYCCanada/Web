@@ -4,6 +4,7 @@ import { Schema } from 'effect';
 import { Locale } from '../../localization/localization';
 import {
   defaultAboutPage,
+  defaultArchivePage,
   defaultContactPage,
   defaultFaqPage,
   defaultGivePage,
@@ -13,6 +14,7 @@ import {
 } from './defaults';
 import {
   toAboutView,
+  toArchiveView,
   toContactView,
   toFaqView,
   toGiveView,
@@ -204,6 +206,7 @@ describe('per-page projection', () => {
     expect(toGiveView(defaultGivePage, Locale.En).enabled).toBe(true);
     expect(toContactView(defaultContactPage, Locale.En).enabled).toBe(true);
     expect(toVolunteerView(defaultVolunteerPage, Locale.En).enabled).toBe(true);
+    expect(toArchiveView(defaultArchivePage, Locale.En).enabled).toBe(true);
     expect(toHomeView(defaultHomePage, Locale.En).enabled).toBe(true);
     expect(toTeamView(defaultTeamPage, Locale.En).enabled).toBe(false);
 
