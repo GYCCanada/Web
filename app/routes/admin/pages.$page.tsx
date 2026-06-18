@@ -22,6 +22,7 @@ import {
   uploadedImageKey,
   type Json,
 } from '~/lib/content/admin-form';
+import { prepareImage } from '~/lib/content/image-optimize.server';
 import { collectListOps, fieldName } from '~/lib/content/list-edit';
 import { PAGE_SPECS, PageId } from '~/lib/content/pages/registry';
 import { ListItemId, newListItemId } from '~/lib/content/schema';
@@ -151,7 +152,8 @@ export const action = routeAction(function* () {
 
   // ---- image upload --------------------------------------------------------
   // Identical in shape to the site editor (`content.tsx`), scoped to THIS page:
-  // validate the file, store its raw bytes, then `DraftEditor.applyImageUpload`
+  // validate the file, optimize it at the shared `prepareImage` boundary, store
+  // the prepared bytes, then `DraftEditor.applyImageUpload`
   // rewrites the targeted `<image>.key` field on the page draft so the new image
   // survives a reload and a later publish. The image-upload path is REUSED, not
   // re-implemented — `applyImageUpload` is scope-generic and `setAtPath` already
@@ -176,11 +178,17 @@ export const action = routeAction(function* () {
       );
     }
 
-    const now = yield* Clock.currentTimeMillis;
-    const key = uploadedImageKey(uploadTarget, file.type, now);
+    // Shrink + re-encode at the ONE shared boundary (Feature B), identical to
+    // the site editor: WebP for decodable rasters, GIF/originals passed through,
+    // so the key + `storage.put` follow `prepared.contentType`, never `file.type`.
     const bytes = new Uint8Array(yield* Effect.promise(() => file.arrayBuffer()));
+    const prepared = yield* prepareImage(bytes, file.type);
+    const now = yield* Clock.currentTimeMillis;
+    const key = uploadedImageKey(uploadTarget, prepared.contentType, now);
 
-    const putExit = yield* Effect.exit(storage.put(key, bytes, file.type));
+    const putExit = yield* Effect.exit(
+      storage.put(key, prepared.bytes, prepared.contentType),
+    );
     if (putExit._tag === 'Failure') {
       return Response.json(
         {

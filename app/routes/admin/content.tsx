@@ -34,6 +34,7 @@ import {
   uploadedImageKey,
   type Json,
 } from '~/lib/content/admin-form';
+import { prepareImage } from '~/lib/content/image-optimize.server';
 import { collectListOps, fieldName } from '~/lib/content/list-edit';
 import {
   DraftSiteContent,
@@ -58,9 +59,10 @@ export const headers = adminSecurityHeaders;
  *   - **Publish** writes `content/site.json`, removes the draft, and **busts the
  *     `Content` read cache** so the change is live on the next public read with
  *     NO redeploy (D3);
- *   - per-image **Upload** stores the raw bytes under `images/uploads/…` and
- *     rewrites the targeted `…key` field to the new bucket object key (the
- *     resize/WebP/thumbnail pipeline is deferred — CMS plan §"Non-goals").
+ *   - per-image **Upload** shrinks + re-encodes the bytes to WebP at the one
+ *     shared `prepareImage` boundary (`~/lib/content/image-optimize.server`),
+ *     stores them under `images/uploads/…`, and rewrites the targeted `…key`
+ *     field to the new bucket object key.
  *
  * The merge-onto-current-document strategy (`~/lib/content/admin-form`) means the
  * form only carries the fields it renders; every unedited deep field (long bios,
@@ -129,7 +131,8 @@ export const action = routeAction(function* () {
   const intent = String(form.get('intent') ?? 'save-draft');
 
   // ---- image upload --------------------------------------------------------
-  // The route owns the FormData side: validate the file and store its raw bytes;
+  // The route owns the FormData side: validate the file, optimize it at the
+  // shared `prepareImage` boundary, and store the prepared bytes;
   // `DraftEditor.applyImageUpload` then rewrites the targeted `…key` field on the
   // draft so the new image survives a reload and a later publish.
   const uploadTarget = imageUploadTarget(intent);
@@ -152,11 +155,18 @@ export const action = routeAction(function* () {
       );
     }
 
-    const now = yield* Clock.currentTimeMillis;
-    const key = uploadedImageKey(uploadTarget, file.type, now);
+    // Shrink + re-encode at the ONE shared boundary (Feature B): WebP for the
+    // decodable raster types, GIF/originals passed through. The key + `storage.put`
+    // follow `prepared.contentType` — never `file.type` — or the served object's
+    // extension/type would lie.
     const bytes = new Uint8Array(yield* Effect.promise(() => file.arrayBuffer()));
+    const prepared = yield* prepareImage(bytes, file.type);
+    const now = yield* Clock.currentTimeMillis;
+    const key = uploadedImageKey(uploadTarget, prepared.contentType, now);
 
-    const putExit = yield* Effect.exit(storage.put(key, bytes, file.type));
+    const putExit = yield* Effect.exit(
+      storage.put(key, prepared.bytes, prepared.contentType),
+    );
     if (putExit._tag === 'Failure') {
       return Response.json(
         {

@@ -5,6 +5,7 @@ import { RouterContextProvider } from 'react-router';
 import { Auth } from '~/lib/auth.server';
 import { makeAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
 import type { RouteArgs } from '~/lib/effect/router-context';
+import { Storage } from '~/lib/storage.server';
 import { layerTest } from '~/lib/storage.test-helper';
 
 import { action } from './pages.$page';
@@ -61,8 +62,16 @@ const mintCookie = async (
   return header;
 };
 
-/** POST an `upload:groupPhoto.key` multipart request to the team page action. */
-const postUpload = async (file: File): Promise<Response> => {
+/**
+ * POST an `upload:groupPhoto.key` multipart request to the team page action,
+ * returning the response AND the request `args` so a success test can inspect
+ * the bytes the action actually stored — through the SAME `context.runtime`, so
+ * the in-memory bucket is the one the action wrote to (a fresh `ManagedRuntime`
+ * would build a fresh, empty store).
+ */
+const postUpload = async (
+  file: File,
+): Promise<{ res: Response; args: RouteArgs }> => {
   const { layer, context } = makeContext();
   const cookie = await mintCookie(layer);
 
@@ -83,13 +92,23 @@ const postUpload = async (file: File): Promise<Response> => {
     params: { page: 'team' },
     context,
   };
-  return (await action(args)) as Response;
+  const res = (await action(args)) as Response;
+  return { res, args };
+};
+
+/** The `key` echoed in the action's success redirect `?status=Image uploaded: <key>`. */
+const uploadedKeyFromRedirect = (res: Response): string => {
+  const location = res.headers.get('location') ?? '';
+  const status = new URL(location, 'http://localhost').searchParams.get('status') ?? '';
+  const match = status.match(/Image uploaded: (.+)$/);
+  if (match === null) throw new Error(`no uploaded key in redirect: ${location}`);
+  return match[1]!;
 };
 
 describe('team page editor action — image-upload guards (A.5)', () => {
   it('an empty file is a 400 (no bytes stored)', async () => {
     const empty = new File([], 'photo.jpg', { type: 'image/jpeg' });
-    const res = await postUpload(empty);
+    const { res } = await postUpload(empty);
     expect(res.status).toBe(400);
     const json = (await res.json()) as { ok: boolean; error: string };
     expect(json.ok).toBe(false);
@@ -100,10 +119,57 @@ describe('team page editor action — image-upload guards (A.5)', () => {
     const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'doc.pdf', {
       type: 'application/pdf',
     });
-    const res = await postUpload(pdf);
+    const { res } = await postUpload(pdf);
     expect(res.status).toBe(400);
     const json = (await res.json()) as { ok: boolean; error: string };
     expect(json.ok).toBe(false);
     expect(json.error).toContain('Upload a JPEG');
+  });
+});
+
+/**
+ * The per-page editor upload SUCCESS path through the REAL action (Feature B.2).
+ * A wide JPEG must be resized + re-encoded to WebP at the shared `prepareImage`
+ * boundary, so the action's redirect key ends `.webp` AND the byte the action
+ * stored in the shared in-memory bucket carries an `image/webp` content-type —
+ * proving the key + `storage.put` follow the RE-ENCODED type, not `file.type`.
+ */
+describe('team page editor action — image-upload resize-to-webp (B.2)', () => {
+  // A 1×1 PNG seed grown to a wide JPEG via Bun.Image — a real >MAX_WIDTH image.
+  const wideJpeg = async (): Promise<File> => {
+    const seed = new Uint8Array(
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    );
+    const bytes = new Uint8Array(
+      await new Bun.Image(seed).resize(2400, 800).jpeg({ quality: 90 }).toBuffer(),
+    );
+    return new File([bytes], 'wide.jpg', { type: 'image/jpeg' });
+  };
+
+  it('a wide JPEG is stored as a .webp object with an image/webp content-type', async () => {
+    const { res, args } = await postUpload(await wideJpeg());
+
+    // Success is a redirect carrying the stored key in its status message.
+    expect(res.status).toBe(302);
+    const key = uploadedKeyFromRedirect(res);
+    expect(key).toMatch(/^images\/uploads\/groupPhoto-key-\d+\.webp$/);
+
+    // The action's put landed an image/webp object under that key — queried
+    // through the SAME runtime the action used, so it is the same bucket.
+    const head = await args.context.runtime.run(
+      args,
+      Effect.gen(function* () {
+        const storage = yield* Storage.Service;
+        return yield* storage.head(key);
+      }),
+    );
+
+    expect(head._tag).toBe('Some');
+    if (head._tag === 'Some') {
+      expect(head.value.contentType).toBe('image/webp');
+    }
   });
 });
