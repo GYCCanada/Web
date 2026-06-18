@@ -663,6 +663,107 @@ describe('per-page /admin editor via DraftEditor (page scope, ADR 0008/0006)', (
     expect([...result.bytes]).toEqual([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
   });
 
+  it('a plain Team save (no image uploaded) PUBLISHES — keyless alt slots pruned', async () => {
+    // The editor ALWAYS renders both image slots' alt `Bilingual` inputs, so a
+    // plain save posts `groupPhoto.alt`/`portrait.alt` with NO key. Before the
+    // prune that produced a present-but-keyless image object — draft-valid but
+    // publish-INVALID (`groupPhoto.key: Missing key`), so the admin could not
+    // publish the team page without uploading BOTH images. This drives the real
+    // editDocument → publish path and asserts publish SUCCEEDS with both slots
+    // section-skipped.
+    const teamScope = pageScope('team');
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+        const override = assembleOverrides([
+          ['subtitle.en', 'The team subtitle'],
+          ['subtitle.fr', 'Le sous-titre'],
+          ['boardHeading.en', 'Board of Directors'],
+          ['boardHeading.fr', "Conseil d'administration"],
+          ['groupPhoto.alt.en', ''],
+          ['groupPhoto.alt.fr', ''],
+          ['portrait.alt.en', ''],
+          ['portrait.alt.fr', ''],
+        ]) as Json;
+        yield* TestClock.adjust('1 second');
+        yield* editor.editDocument(teamScope, override);
+        const publishExit = yield* Effect.exit(editor.publish(teamScope));
+        const live = yield* content.getPage('team');
+        return {
+          publishTag: publishExit._tag,
+          subtitleEn: live.subtitle.en,
+          groupPhoto: live.groupPhoto,
+          portrait: live.portrait,
+        };
+      }),
+    );
+    expect(result.publishTag).toBe('Success');
+    expect(result.subtitleEn).toBe('The team subtitle');
+    // Both image slots stay absent (section-skip), not present-but-keyless.
+    expect(result.groupPhoto).toBeUndefined();
+    expect(result.portrait).toBeUndefined();
+  });
+
+  it('upload key → fill alt → PUBLISH: the alt lands on the existing image', async () => {
+    // Once an image IS uploaded (draft carries `key`), the alt override is kept
+    // (NOT pruned) so the upload-first / fill-alt-second flow completes through a
+    // strict publish.
+    const teamScope = pageScope('team');
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
+
+        const key = uploadedImageKey(
+          'groupPhoto.key',
+          'image/jpeg',
+          1_700_000_000_000,
+        );
+        yield* storage.put(
+          key,
+          new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
+          'image/jpeg',
+        );
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyImageUpload(teamScope, 'groupPhoto.key', key);
+
+        // Fill the alt + chrome (the alt override carries NO key — it must merge
+        // onto the just-uploaded key, not be pruned).
+        yield* TestClock.adjust('1 second');
+        yield* editor.editDocument(
+          teamScope,
+          assembleOverrides([
+            ['subtitle.en', 'Sub'],
+            ['subtitle.fr', 'Sous'],
+            ['boardHeading.en', 'Board'],
+            ['boardHeading.fr', 'Conseil'],
+            ['groupPhoto.alt.en', 'The 2022 group photo'],
+            ['groupPhoto.alt.fr', 'La photo de groupe 2022'],
+            ['portrait.alt.en', ''],
+            ['portrait.alt.fr', ''],
+          ]) as Json,
+        );
+        const publishExit = yield* Effect.exit(editor.publish(teamScope));
+        const live = yield* content.getPage('team');
+        return {
+          publishTag: publishExit._tag,
+          groupPhotoKey: String(live.groupPhoto?.key),
+          groupPhotoAltEn: live.groupPhoto?.alt.en,
+          portrait: live.portrait,
+        };
+      }),
+    );
+    expect(result.publishTag).toBe('Success');
+    expect(result.groupPhotoKey).toBe(
+      'images/uploads/groupPhoto-key-1700000000000.jpg',
+    );
+    expect(result.groupPhotoAltEn).toBe('The 2022 group photo');
+    // The portrait (keyless on both base + override) is still section-skipped.
+    expect(result.portrait).toBeUndefined();
+  });
+
   // The route-level 400 guards (empty file / non-image MIME) are driven against
   // the REAL action in `app/routes/admin/pages.$page.action.test.ts`; here we
   // only pin the intent→target derivation the upload branch keys off.

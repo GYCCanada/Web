@@ -11,7 +11,12 @@ import {
   bustSite,
   type BustTarget,
 } from '../content.server';
-import { deepMerge, setAtPath, type Json } from './admin-form';
+import {
+  deepMerge,
+  pruneKeylessImageOverrides,
+  setAtPath,
+  type Json,
+} from './admin-form';
 import { defaultContent } from './defaults';
 import { backfillListItemIds } from './id-backfill';
 import { applyListEdit, type ListOp } from './list-edit';
@@ -596,7 +601,12 @@ export const layer = Layer.effect(
     >(scope: S, override: Json) {
       const codec = resolveScope(scope);
       const base = yield* encodedCurrent(codec, scope);
-      const merged = deepMerge(base, override);
+      // Drop an alt-only image override (Team `groupPhoto` / `portrait` with no
+      // uploaded key and no existing key on the draft) so a present-but-keyless
+      // image object never lands — that object is draft-valid but PUBLISH-invalid
+      // (`<slot>.key: Missing key`). A no-op for every scope without those slots.
+      const pruned = pruneKeylessImageOverrides(base, override);
+      const merged = deepMerge(base, pruned);
       const decoded = yield* decodeOrReject(codec, merged);
       return (yield* storeDraft(codec, decoded)) as ScopeEncoded<S>;
     });

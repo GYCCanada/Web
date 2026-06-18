@@ -296,6 +296,53 @@ export const normalizeFaqAnswers = (override: Json): Json => {
   return { ...override, items: rewrittenItems };
 };
 
+/** A non-empty `key` string on an image-slot object (in a base or an override). */
+const hasImageKey = (slot: Json | undefined): boolean =>
+  slot !== undefined &&
+  isPlainObject(slot) &&
+  typeof slot['key'] === 'string' &&
+  slot['key'].trim() !== '';
+
+/**
+ * Drop an optional image-slot override (`groupPhoto` / `portrait` on the Team
+ * page) that carries ONLY alt text and no uploaded `key` — UNLESS the current
+ * draft already has a `key` for that slot (then the alt edit must land onto the
+ * existing image).
+ *
+ * Why this seam (mirrors `normalizeFaqAnswers`, registration-launch Branch 5.5):
+ * the Team editor ALWAYS renders both image slots' alt-text `Bilingual` inputs,
+ * which always post `groupPhoto.alt.en/.fr` + `portrait.alt.en/.fr`. On a plain
+ * save with no image uploaded, `assembleOverrides` therefore produces a
+ * `groupPhoto: { alt: { en, fr } }` object with NO `key`. That is DRAFT-valid
+ * (the lax `DraftImageRef` makes `key` optional) but PUBLISH-INVALID: the strict
+ * `ImageRef` sees the slot as *present* and rejects it with `groupPhoto.key:
+ * Missing key`. Section-skip is for *absence* of the whole slot (ADR 0008), not a
+ * present-but-keyless object — so the keyless alt-only override is pruned, leaving
+ * the slot absent and the save/publish path clean. Once an image IS uploaded (the
+ * draft base carries `key`), the alt override is kept so the upload-first /
+ * fill-alt-second flow completes (ADR 0006). Only the two named image slots are
+ * touched; every other override passes through verbatim.
+ */
+export const pruneKeylessImageOverrides = (base: Json, override: Json): Json => {
+  if (!isPlainObject(override)) return override;
+  const baseObject = isPlainObject(base) ? base : undefined;
+  const result: MutableJsonObject = {};
+  for (const key of Object.keys(override)) {
+    const slot = override[key];
+    if (slot === undefined) continue;
+    if (
+      (key === 'groupPhoto' || key === 'portrait') &&
+      isPlainObject(slot) &&
+      !hasImageKey(slot) &&
+      !hasImageKey(baseObject?.[key])
+    ) {
+      continue; // keyless, no existing image — drop so the slot stays absent
+    }
+    result[key] = slot;
+  }
+  return result;
+};
+
 /**
  * Deep-merge `overrides` onto `base`, returning a new value. `base` and
  * `overrides` are never mutated.

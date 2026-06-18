@@ -8,13 +8,19 @@ import {
   imageUploadTarget,
   isAcceptedImageType,
   normalizeFaqAnswers,
+  pruneKeylessImageOverrides,
   setAtPath,
   uploadedImageKey,
   type Json,
 } from './admin-form';
 import { defaultContent } from './defaults';
 import { SiteContent, newListItemId } from './schema';
-import { DraftFaqPage, FaqPage } from './pages/schema';
+import {
+  DraftFaqPage,
+  DraftTeamPage,
+  FaqPage,
+  TeamPage,
+} from './pages/schema';
 
 /**
  * The `/admin` editor edits the one `SiteContent` document via a
@@ -183,6 +189,109 @@ describe('normalizeFaqAnswers', () => {
           Schema.decodeUnknownEffect(FaqPage)(merged),
         );
         expect(publishExit._tag).toBe('Failure');
+      }),
+  );
+});
+
+describe('pruneKeylessImageOverrides', () => {
+  test('drops an alt-only image slot with no key on a base that has none', () => {
+    // The Team editor always posts BOTH image slots' alt inputs. On a plain save
+    // with no upload, the override is `{ <slot>: { alt: { en, fr } } }` — no key.
+    // That object is draft-valid but publish-invalid (the strict `ImageRef` needs
+    // a `key`), so it is pruned, leaving the slot ABSENT (section-skip).
+    const override = assembleOverrides(
+      entries({
+        'subtitle.en': 'Sub',
+        'subtitle.fr': 'Sous',
+        'groupPhoto.alt.en': '',
+        'groupPhoto.alt.fr': '',
+        'portrait.alt.en': '',
+        'portrait.alt.fr': '',
+      }),
+    );
+    const pruned = pruneKeylessImageOverrides({}, override) as Record<
+      string,
+      unknown
+    >;
+    expect('groupPhoto' in pruned).toBe(false);
+    expect('portrait' in pruned).toBe(false);
+    expect(pruned['subtitle']).toEqual({ en: 'Sub', fr: 'Sous' });
+  });
+
+  test('keeps an alt edit when the base slot already carries an uploaded key', () => {
+    // Once an image IS uploaded (the draft base has `key`), the alt override must
+    // land onto the existing image — the upload-first / fill-alt-second flow.
+    const base: Json = {
+      groupPhoto: { key: 'images/uploads/group-1.webp' },
+    };
+    const override = assembleOverrides(
+      entries({
+        'groupPhoto.alt.en': 'Group photo',
+        'groupPhoto.alt.fr': 'Photo de groupe',
+        'portrait.alt.en': '',
+        'portrait.alt.fr': '',
+      }),
+    );
+    const pruned = pruneKeylessImageOverrides(base, override) as Record<
+      string,
+      { alt?: { en?: string } }
+    >;
+    expect(pruned['groupPhoto']?.alt?.en).toBe('Group photo');
+    // The untouched portrait (keyless on base + override) is still dropped.
+    expect('portrait' in pruned).toBe(false);
+  });
+
+  test('keeps an override that carries a freshly-uploaded key', () => {
+    const override: Json = {
+      groupPhoto: { key: 'images/uploads/group-1.webp' },
+    };
+    const pruned = pruneKeylessImageOverrides({}, override) as Record<
+      string,
+      unknown
+    >;
+    expect('groupPhoto' in pruned).toBe(true);
+  });
+
+  test('a non-team override (no image slots) passes through verbatim', () => {
+    const override: Json = {
+      title: { en: 'About', fr: 'À propos' },
+      paragraphs: { 'list-id': { text: { en: 'x', fr: 'y' } } },
+    };
+    expect(pruneKeylessImageOverrides({}, override)).toEqual(override);
+  });
+
+  it.effect(
+    'a plain Team save (no image) merges to a draft-valid AND publish-valid doc',
+    () =>
+      Effect.gen(function* () {
+        // The full route invariant: pruned override → merge → decode draft AND
+        // strict. Without the prune, the strict decode fails `groupPhoto.key:
+        // Missing key` (the bug the --deep review caught).
+        const base: Json = {
+          title: [{ _tag: 'text', value: { en: 'Team', fr: 'Équipe' } }],
+          subtitle: { en: 'Old', fr: 'Vieux' },
+          boardHeading: { en: 'Board', fr: 'Conseil' },
+        };
+        const override = pruneKeylessImageOverrides(
+          base,
+          assembleOverrides(
+            entries({
+              'subtitle.en': 'New subtitle',
+              'subtitle.fr': 'Nouveau sous-titre',
+              'groupPhoto.alt.en': '',
+              'groupPhoto.alt.fr': '',
+              'portrait.alt.en': '',
+              'portrait.alt.fr': '',
+            }),
+          ),
+        );
+        const merged = deepMerge(base, override);
+        const draft = yield* Schema.decodeUnknownEffect(DraftTeamPage)(merged);
+        const strict = yield* Schema.decodeUnknownEffect(TeamPage)(merged);
+        expect(draft.subtitle?.en).toBe('New subtitle');
+        expect(strict.subtitle.en).toBe('New subtitle');
+        expect(strict.groupPhoto).toBeUndefined();
+        expect(strict.portrait).toBeUndefined();
       }),
   );
 });
