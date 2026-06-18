@@ -1,4 +1,5 @@
 import type { Locale } from '../../localization/localization';
+import { assetUrl } from '../asset-url';
 import type {
   AboutPage,
   ArchivePage,
@@ -8,6 +9,7 @@ import type {
   HomePage,
   RichText,
   RichTextNode,
+  TeamPage,
   VolunteerPage,
 } from './schema';
 
@@ -130,6 +132,21 @@ export interface HomeView {
   };
 }
 
+/**
+ * The Team page view: the projected RichText title runs, the subtitle + board
+ * heading collapsed to this locale, and EACH image slot projected to a renderable
+ * `{ src, alt }` — or `undefined` when the slot is absent (section-skip). The
+ * route renders `<img>` only for a present slot, so an empty `team.json` shows no
+ * broken image (`make-impossible-states-unrepresentable`, ADR 0008).
+ */
+export interface TeamView {
+  readonly title: readonly RichTextRun[];
+  readonly subtitle: string;
+  readonly boardHeading: string;
+  readonly groupPhoto?: { readonly src: string; readonly alt: string };
+  readonly portrait?: { readonly src: string; readonly alt: string };
+}
+
 // ---------------------------------------------------------------------------
 // Per-page converters (document → this-locale view)
 // ---------------------------------------------------------------------------
@@ -207,4 +224,18 @@ export const toHomeView = (page: HomePage, locale: Locale): HomeView => ({
     subtitle: page.newsletter.subtitle[locale],
     socials: page.newsletter.socials[locale],
   },
+});
+
+export const toTeamView = (page: TeamPage, locale: Locale): TeamView => ({
+  title: toRichText(page.title, locale),
+  subtitle: page.subtitle[locale],
+  boardHeading: page.boardHeading[locale],
+  // Each optional slot projects to `{ src, alt }` or `undefined` (section-skip).
+  // `assetUrl` is the shared leaf-module URL rule (`derive-dont-sync`).
+  groupPhoto: page.groupPhoto
+    ? { src: assetUrl(page.groupPhoto.key), alt: page.groupPhoto.alt[locale] }
+    : undefined,
+  portrait: page.portrait
+    ? { src: assetUrl(page.portrait.key), alt: page.portrait.alt[locale] }
+    : undefined,
 });

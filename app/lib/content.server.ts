@@ -25,9 +25,9 @@ import {
   type PageContent,
   type PageId,
 } from './content/pages/registry';
+import { assetUrl } from './content/asset-url';
 import { SiteContent } from './content/schema';
 import type {
-  AssetKey,
   Conference as DocConference,
   IsoDate,
   Seminar as DocSeminar,
@@ -179,18 +179,9 @@ export type Translation = Record<string, string>;
 // Document → boundary conversion (`derive-dont-sync`, `boundary-discipline`)
 // ---------------------------------------------------------------------------
 
-/**
- * Resolve a bucket object key (`2024/speakers/matt.png`) to the URL the HTML
- * renders (`/images/2024/speakers/matt.png`). Every managed image is served
- * through the Effect server's `GET /images/*` route (C5, mirroring
- * paulo-suzanne's `bucketResponse`): it streams the bucket object when present
- * and falls back to the bundled `public/<key>` file otherwise. So a bucket-less
- * dev/prod still serves today's `public/` art (the default keys map 1:1 onto the
- * `public/` tree), while an uploaded image at the same key transparently
- * overrides it — with no change to any component (`derive-dont-sync`,
- * `boundary-discipline`).
- */
-const assetUrl = (key: AssetKey): string => `/images/${key}`;
+// `assetUrl` (key → `/images/<key>`) is the ONE URL-resolution rule, extracted to
+// the leaf module `./content/asset-url` so the per-page projection (`pages/project`)
+// shares it with no import cycle (`derive-dont-sync`). Imported above.
 
 /**
  * Widen an ISO calendar date to the existing end-of-day-UTC millisecond the

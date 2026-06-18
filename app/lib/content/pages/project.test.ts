@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { Schema } from 'effect';
 
 import { Locale } from '../../localization/localization';
 import {
@@ -7,6 +8,7 @@ import {
   defaultFaqPage,
   defaultGivePage,
   defaultHomePage,
+  defaultTeamPage,
   defaultVolunteerPage,
 } from './defaults';
 import {
@@ -16,9 +18,10 @@ import {
   toGiveView,
   toHomeView,
   toRichText,
+  toTeamView,
   toVolunteerView,
 } from './project';
-import { MailtoHref, RichText, RichTextNode } from './schema';
+import { MailtoHref, RichText, RichTextNode, TeamPage } from './schema';
 
 /**
  * The per-locale boundary projection (registration-launch Branch 5.4): the
@@ -142,6 +145,46 @@ describe('per-page projection', () => {
     expect(en.title.some((run) => run.kind === 'bold')).toBe(true);
     expect(en.subtitle).toBe(defaultVolunteerPage.subtitle.en);
     expect(en.directions).toBe(defaultVolunteerPage.directions.en);
+  });
+
+  it('team: title projects to runs, absent images are undefined (section-skip)', () => {
+    // The bundled default omits both image slots.
+    const en = toTeamView(defaultTeamPage, Locale.En);
+    expect(en.title.some((run) => run.kind === 'italic')).toBe(true);
+    expect(en.subtitle).toBe(defaultTeamPage.subtitle.en);
+    expect(en.boardHeading).toBe(defaultTeamPage.boardHeading.en);
+    expect(en.groupPhoto).toBeUndefined();
+    expect(en.portrait).toBeUndefined();
+
+    const fr = toTeamView(defaultTeamPage, Locale.Fr);
+    expect(fr.boardHeading).toBe(defaultTeamPage.boardHeading.fr);
+  });
+
+  it('team: a present image projects to /images/<key> + the locale alt', () => {
+    const page = Schema.decodeUnknownSync(TeamPage)({
+      title: [{ _tag: 'text', value: { en: 'Team', fr: 'Équipe' } }],
+      subtitle: { en: 'Sub.', fr: 'Sous.' },
+      boardHeading: { en: 'Board', fr: 'Conseil' },
+      groupPhoto: {
+        key: '2026/team/group.jpg',
+        alt: { en: 'A group photo.', fr: 'Une photo de groupe.' },
+      },
+      portrait: {
+        key: '2026/team/logo.png',
+        alt: { en: 'Logo.', fr: 'Logo FR.' },
+      },
+    });
+
+    const en = toTeamView(page, Locale.En);
+    expect(en.groupPhoto).toEqual({
+      src: '/images/2026/team/group.jpg',
+      alt: 'A group photo.',
+    });
+    expect(en.portrait?.src).toBe('/images/2026/team/logo.png');
+
+    const fr = toTeamView(page, Locale.Fr);
+    expect(fr.groupPhoto?.alt).toBe('Une photo de groupe.');
+    expect(fr.portrait?.alt).toBe('Logo FR.');
   });
 
   it('home: nested evergreen copy collapses to the locale', () => {
