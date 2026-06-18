@@ -24,6 +24,7 @@
  * without a runtime (`small-interface-deep-implementation`).
  */
 
+import { extensionForType } from './image-types';
 import { AssetKey } from './schema';
 
 /**
@@ -54,32 +55,14 @@ const isPlainObject = (value: Json): value is { readonly [k: string]: Json } =>
 export const IMAGE_UPLOAD_INTENT_PREFIX = 'upload:';
 
 /**
- * The accepted upload content-types. The resize/WebP pipeline is deferred (CMS
- * plan §"Non-goals"); for now we store the raw bytes under their original
- * content-type, so we only need to gate the obviously-image MIME types to keep
- * a stray PDF / script out of the image namespace.
+ * The accepted-image MIME gate + MIME↔extension table live in the leaf
+ * `image-types` module so both this form-policy module and the pure
+ * `image-optimize.server` resize boundary share one table without a cycle
+ * (`derive-dont-sync`). Re-exported here so the route imports that already pull
+ * `isAcceptedImageType` from `admin-form` keep working.
  */
-const ACCEPTED_IMAGE_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'image/avif',
-]);
-
-export const isAcceptedImageType = (type: string): boolean =>
-  ACCEPTED_IMAGE_TYPES.has(type.toLowerCase());
-
-const EXTENSION_BY_TYPE: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-  'image/avif': 'avif',
-};
-
-export const extensionForType = (type: string): string =>
-  EXTENSION_BY_TYPE[type.toLowerCase()] ?? 'bin';
+export { isAcceptedImageType } from './image-types';
+export { extensionForType };
 
 /**
  * Recover the dotted key path an image-upload intent targets, or `null` if the

@@ -114,6 +114,17 @@ describe('prepareImage', () => {
     expect(prepared.extension).toBe('png');
   });
 
+  it('normalizes the source MIME casing in the fallback content-type', async () => {
+    const corrupt = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2, 1]);
+
+    const prepared = await Effect.runPromise(prepareImage(corrupt, 'IMAGE/PNG'));
+
+    expect(prepared.bytes).toBe(corrupt);
+    // The stored type/extension are clean lowercase, not the uppercase echo.
+    expect(prepared.contentType).toBe('image/png');
+    expect(prepared.extension).toBe('png');
+  });
+
   it('exposes the cap + quality as the single source of truth', () => {
     expect(MAX_WIDTH).toBe(1600);
     expect(WEBP_QUALITY).toBe(80);
