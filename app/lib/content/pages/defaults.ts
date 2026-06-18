@@ -9,6 +9,7 @@ import {
   FaqPage,
   GivePage,
   HomePage,
+  TeamPage,
   VolunteerPage,
 } from './schema';
 
@@ -379,6 +380,45 @@ export const defaultHomePage: HomePage = Schema.decodeUnknownSync(HomePage)({
       en: 'Don’t forget to follow us on social media to get to know our team and stay up-to-date!',
       fr: 'N’oubliez pas de nous suivre sur les réseaux sociaux pour faire connaissance avec notre équipe et rester à jour!',
     },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Team (page chrome — the per-member roster stays on site.json via getTeam())
+// ---------------------------------------------------------------------------
+
+/**
+ * The Team page chrome transcribed from today's flat-key copy (`team.title` +
+ * `team.title.movement`, `team.subtitle`, `team.board`). The italic `movement` run
+ * is carried as an `italic` token so the `<span className="italic">…</span>` styling
+ * of the pre-migration route survives without HTML (closed RichText model).
+ *
+ * The two image slots (`groupPhoto` / `portrait`) are OMITTED here (optionalKey ⇒
+ * section-skip): the real photos are uploaded via the CMS at launch, mirroring how
+ * the site defaults map `public/` art only once an upload overrides it. A brand-new
+ * `team.json` therefore renders the roster + copy with NO broken `<img>`; the launch
+ * upload sets `groupPhoto` / `portrait`. (The legacy `public/team/group-van-2022.jpg`
+ * + `public/logo/gycc.png` stay on disk until an upload supersedes them.)
+ */
+export const defaultTeamPage: TeamPage = Schema.decodeUnknownSync(TeamPage)({
+  title: [
+    {
+      _tag: 'text',
+      value: {
+        en: 'The people behind the ',
+        fr: 'Les personnes derrière le ',
+      },
+    },
+    { _tag: 'italic', value: { en: 'movement', fr: 'mouvement' } },
+    { _tag: 'text', value: { en: '.', fr: '.' } },
+  ],
+  subtitle: {
+    en: 'We are GYC Canada, young people dedicated to spreading the Gospel and living the lives that God has planned for us. As ambassadors of Christ in this world, we are fulfilling His purpose for us and go boldly where our Savior leads.',
+    fr: "Nous sommes GYC Canada, des jeunes dédiés à faire connaître l'Évangile et à vivre les vies que Dieu a prévues pour nous. En tant qu'ambassadeurs de Christ dans ce monde, nous accomplissons Sa volonté pour nous et allons avec courage là où notre Seigneur nous conduit.",
+  },
+  boardHeading: {
+    en: 'Board of Directors',
+    fr: 'Conseil d’administration',
   },
 });
 

@@ -9,6 +9,7 @@ import {
   defaultGivePage,
   defaultHomePage,
   defaultRegistrationForm,
+  defaultTeamPage,
   defaultVolunteerForm,
   defaultVolunteerPage,
 } from './defaults';
@@ -21,9 +22,11 @@ import {
   DraftArchivePage,
   DraftFaqPage,
   DraftGivePage,
+  DraftTeamPage,
   FaqPage,
   GivePage,
   HomePage,
+  TeamPage,
   VolunteerPage,
 } from './schema';
 import { type ListItemId } from '../schema';
@@ -74,6 +77,7 @@ export const PageId = Schema.Literals([
   'volunteer',
   'archive',
   'home',
+  'team',
 ]);
 export type PageId = typeof PageId.Type;
 
@@ -187,6 +191,9 @@ export const PAGE_SPECS = {
   volunteer: pageSpec(VolunteerPage, defaultVolunteerPage),
   archive: draftPageSpec(ArchivePage, DraftArchivePage, defaultArchivePage),
   home: pageSpec(HomePage, defaultHomePage),
+  // Draft ≠ strict: a present image's `alt` may be unfilled in the draft (upload
+  // first, fill alt second), so team wires the laxer `DraftTeamPage` (ADR 0006).
+  team: draftPageSpec(TeamPage, DraftTeamPage, defaultTeamPage),
 } as const satisfies { readonly [P in PageId]: ObjectSpec<unknown, unknown> };
 
 /**

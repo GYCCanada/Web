@@ -1,14 +1,18 @@
 import { Link } from 'react-router';
 
 import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
-import { PAGE_IDS } from '~/lib/content/pages/registry';
+import { PAGE_IDS, type PageId } from '~/lib/content/pages/registry';
 
 export const meta = adminMeta;
 
 export const headers = adminSecurityHeaders;
 
-/** Human label per `PageId` for the dashboard's per-page editor links. */
-const PAGE_LABELS: Record<string, string> = {
+/**
+ * Human label per `PageId` for the dashboard's per-page editor links. Exhaustive
+ * over `PageId` so adding a page to the registry without a label fails to compile
+ * (`make-impossible-states-unrepresentable`).
+ */
+const PAGE_LABELS: { readonly [P in PageId]: string } = {
   about: 'About',
   faq: 'FAQ',
   give: 'Give',
@@ -16,6 +20,7 @@ const PAGE_LABELS: Record<string, string> = {
   volunteer: 'Volunteer',
   archive: 'Archive',
   home: 'Home (evergreen)',
+  team: 'Team',
 };
 
 /**
@@ -56,7 +61,7 @@ export default function AdminIndex() {
                 to={`/admin/pages/${page}`}
                 className="flex min-h-11 items-center justify-between rounded-md border border-neutral-300 px-4 text-sm font-medium transition-colors hover:bg-neutral-100"
               >
-                <span>{PAGE_LABELS[page] ?? page}</span>
+                <span>{PAGE_LABELS[page]}</span>
                 <span aria-hidden className="text-neutral-400">
                   →
                 </span>

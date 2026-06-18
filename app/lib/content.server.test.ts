@@ -13,6 +13,7 @@ import {
   defaultAboutPage,
   defaultContactForm,
   defaultFaqPage,
+  defaultTeamPage,
 } from './content/pages/defaults';
 import { formObjectKey, pageObjectKey } from './content/pages/registry';
 import { AboutPage, FaqPage } from './content/pages/schema';
@@ -575,6 +576,15 @@ describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3
       // No `content/pages/faq.json` in the (empty) bucket → bundled default.
       const faq = yield* content.getPage('faq');
       expect(faq).toEqual(defaultFaqPage);
+    }).pipe(Effect.provide(Layer.provideMerge(Content.layer, emptyStorage))));
+
+  it.effect('getPage("team") falls back to the bundled team default (read path sees the new page)', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      // No `content/pages/team.json` in the (empty) bucket → bundled default.
+      // Proves `team` is preloaded through `PAGE_IDS` into the eager cache map.
+      const team = yield* content.getPage('team');
+      expect(team).toEqual(defaultTeamPage);
     }).pipe(Effect.provide(Layer.provideMerge(Content.layer, emptyStorage))));
 
   it.effect('getForm falls back to the bundled default when the object is absent', () =>
