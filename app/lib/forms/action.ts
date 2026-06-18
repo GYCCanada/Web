@@ -122,40 +122,47 @@ export interface FormActionConfig<E> {
  *   5. `toast.redirect(pathname, { success copy, form })`.
  */
 export const formAction = <E>(config: FormActionConfig<E>) =>
-  routeFormAction(function* () {
-    const { url } = yield* ReactRouterContext;
-    const submission = yield* SubmissionContext;
-    const content = yield* Content.Service;
-    const submissions = yield* Submissions.Service;
-    const toast = yield* Toast;
+  routeFormAction(
+    function* () {
+      const { url } = yield* ReactRouterContext;
+      const submission = yield* SubmissionContext;
+      const content = yield* Content.Service;
+      const submissions = yield* Submissions.Service;
+      const toast = yield* Toast;
 
-    // 404 the action when the owning page is disabled (Feature C, Codex #6): a
-    // disabled page rejects POSTs too, not only its GET. Read off the same
-    // per-page `enabled` flag the loader/nav use.
-    if (!(yield* content.getPage(config.page)).enabled) {
-      return yield* notFound();
-    }
+      const definition = yield* content.getForm(config.form);
 
-    const definition = yield* content.getForm(config.form);
+      const decoded = decodeForm(definition, submission.payload);
+      if (Result.isFailure(decoded)) {
+        return yield* formValidationError(formatSchemaResult(decoded) ?? {});
+      }
 
-    const decoded = decodeForm(definition, submission.payload);
-    if (Result.isFailure(decoded)) {
-      return yield* formValidationError(formatSchemaResult(decoded) ?? {});
-    }
+      // Persist FIRST: the durable `submissions/<form>/<id>.json` object is
+      // written and returned before any notification runs, so a `notify` failure
+      // provably cannot lose the record (settled #8). A `StorageError` here aborts
+      // the submission (losing a record must never look like success).
+      const stored = yield* submissions.persist(config.form, decoded.success);
 
-    // Persist FIRST: the durable `submissions/<form>/<id>.json` object is written
-    // and returned before any notification runs, so a `notify` failure provably
-    // cannot lose the record (settled #8). A `StorageError` here aborts the
-    // submission (losing a record must never look like success).
-    const stored = yield* submissions.persist(config.form, decoded.success);
+      yield* config.notify(stored);
 
-    yield* config.notify(stored);
-
-    yield* toast.redirect(url.pathname, {
-      title: config.success.title,
-      description: config.success.description,
-      type: 'success',
-      form: config.form,
-    });
-    return { reset: true } satisfies FormSuccess;
-  });
+      yield* toast.redirect(url.pathname, {
+        title: config.success.title,
+        description: config.success.description,
+        type: 'success',
+        form: config.form,
+      });
+      return { reset: true } satisfies FormSuccess;
+    },
+    {
+      // ROUTE-LEVEL 404 gate, run BEFORE form-data parse + honeypot handling so a
+      // disabled page rejects EVERY POST (incl. a honeypot-filled one), not only
+      // the normal body path (Feature C, Codex #6, Risk 11). Read off the same
+      // per-page `enabled` flag the loader/nav use (`derive-dont-sync`).
+      guard: Effect.gen(function* () {
+        const content = yield* Content.Service;
+        if (!(yield* content.getPage(config.page)).enabled) {
+          return yield* notFound();
+        }
+      }),
+    },
+  );

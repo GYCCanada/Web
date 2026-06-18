@@ -137,6 +137,21 @@ const handleFormError = (
 export const routeFormAction =
   <Eff extends Effect.Yieldable<any, any, any, FormServices>>(
     body: () => Generator<Eff, FormSuccess, never>,
+    options?: {
+      /**
+       * A ROUTE-LEVEL guard run BEFORE form-data parse + honeypot handling. Its
+       * failure propagates straight to the runtime (it is NOT bucketed by
+       * {@link handleFormError}), so a `NotFoundError` here becomes a real 404 for
+       * EVERY POST — including a honeypot-filled one. This is the seam a disabled
+       * page's action 404 uses (Feature C, Codex #6): the page does not exist, so
+       * no submission is even read.
+       */
+      readonly guard?: Effect.Effect<
+        void,
+        AppError,
+        AppServices | ReactRouterContext
+      >;
+    },
   ) =>
   (args: RouteArgs): Promise<FormResult> => {
     const pipeline: Effect.Effect<
@@ -144,6 +159,9 @@ export const routeFormAction =
       AppError,
       AppServices | ReactRouterContext
     > = Effect.gen(function* () {
+      if (options?.guard !== undefined) {
+        yield* options.guard;
+      }
       const reactRouter = yield* ReactRouterContext;
       const formData = yield* Effect.tryPromise({
         try: () => reactRouter.request.formData(),
