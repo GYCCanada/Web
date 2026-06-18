@@ -113,11 +113,6 @@ export default function Index() {
               {page.mission.readStoryLabel}
             </Link>
           </div>
-          {/* <div>
-            <Link to="/team" className={buttonStyle} data-variant="positive">
-              {translate("main.meet_the_team")}
-            </Link>
-          </div> */}
         </div>
       </section>
       {newsletterEnabled ? (
