@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from 'effect';
+import { Cause, Clock, Effect, Option, Schema } from 'effect';
 import {
   Form,
   redirect,
@@ -16,7 +16,10 @@ import {
 } from '~/lib/content/draft-editor.server';
 import {
   assembleOverrides,
+  imageUploadTarget,
+  isAcceptedImageType,
   normalizeFaqAnswers,
+  uploadedImageKey,
   type Json,
 } from '~/lib/content/admin-form';
 import { collectListOps, fieldName } from '~/lib/content/list-edit';
@@ -25,10 +28,12 @@ import { ListItemId, newListItemId } from '~/lib/content/schema';
 import { Env } from '~/lib/env.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction, routeHandler } from '~/lib/effect/route';
+import { Storage } from '~/lib/storage.server';
 import {
   AddItemButton,
   Bilingual,
   type ActionResult,
+  ImageUpload,
   ItemControls,
   Section,
   Text,
@@ -139,9 +144,64 @@ export const action = routeAction(function* () {
   const scope = pageScope(page);
 
   const editor = yield* DraftEditor.Service;
+  const storage = yield* Storage.Service;
   const { request } = yield* ReactRouterContext;
   const form = yield* Effect.promise(() => request.formData());
   const intent = String(form.get('intent') ?? 'save-draft');
+
+  // ---- image upload --------------------------------------------------------
+  // Identical in shape to the site editor (`content.tsx`), scoped to THIS page:
+  // validate the file, store its raw bytes, then `DraftEditor.applyImageUpload`
+  // rewrites the targeted `<image>.key` field on the page draft so the new image
+  // survives a reload and a later publish. The image-upload path is REUSED, not
+  // re-implemented — `applyImageUpload` is scope-generic and `setAtPath` already
+  // navigates `groupPhoto.key` / `portrait.key` as plain object paths.
+  const uploadTarget = imageUploadTarget(intent);
+  if (uploadTarget !== null) {
+    const file = form.get('file');
+    if (!(file instanceof File) || file.size === 0) {
+      return Response.json(
+        { ok: false, error: 'Choose an image before uploading.', issues: [] },
+        { status: 400 },
+      );
+    }
+    if (!isAcceptedImageType(file.type)) {
+      return Response.json(
+        {
+          ok: false,
+          error: 'Upload a JPEG, PNG, WebP, GIF, or AVIF image.',
+          issues: [],
+        },
+        { status: 400 },
+      );
+    }
+
+    const now = yield* Clock.currentTimeMillis;
+    const key = uploadedImageKey(uploadTarget, file.type, now);
+    const bytes = new Uint8Array(yield* Effect.promise(() => file.arrayBuffer()));
+
+    const putExit = yield* Effect.exit(storage.put(key, bytes, file.type));
+    if (putExit._tag === 'Failure') {
+      return Response.json(
+        {
+          ok: false,
+          error:
+            'Image upload failed — is the bucket configured? ' +
+            Cause.pretty(putExit.cause),
+          issues: [],
+        },
+        { status: 502 },
+      );
+    }
+
+    const applied = yield* editor
+      .applyImageUpload(scope, uploadTarget, key)
+      .pipe(Effect.result);
+    if (applied._tag === 'Failure') return issueResponse(applied.failure);
+    return redirect(
+      `/admin/pages/${page}?status=${encodeURIComponent(`Image uploaded: ${key}`)}`,
+    );
+  }
 
   // ---- list op (add / remove / reorder) ------------------------------------
   if (intent === 'list-op') {
@@ -526,7 +586,11 @@ function PageEditor({
         </>
       );
     }
-    case 'team':
+    case 'team': {
+      // The encoded draft carries each image slot as `{ key?, alt? }` (the lax
+      // `DraftImageRef`); read the current key + alt off whichever is present.
+      const groupPhoto = (encoded['groupPhoto'] ?? {}) as Record<string, unknown>;
+      const portrait = (encoded['portrait'] ?? {}) as Record<string, unknown>;
       return (
         <>
           <RichTextPreview
@@ -544,8 +608,37 @@ function PageEditor({
             name="boardHeading"
             value={text(encoded['boardHeading'] as DraftText)}
           />
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-neutral-800">
+              Group photo
+            </legend>
+            <ImageUpload
+              keyPath="groupPhoto.key"
+              currentKey={String(groupPhoto['key'] ?? '')}
+            />
+            <Bilingual
+              label="Group photo alt"
+              name="groupPhoto.alt"
+              value={text(groupPhoto['alt'] as DraftText)}
+            />
+          </fieldset>
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-neutral-800">
+              Portrait
+            </legend>
+            <ImageUpload
+              keyPath="portrait.key"
+              currentKey={String(portrait['key'] ?? '')}
+            />
+            <Bilingual
+              label="Portrait alt"
+              name="portrait.alt"
+              value={text(portrait['alt'] as DraftText)}
+            />
+          </fieldset>
         </>
       );
+    }
     default:
       // Exhaustive over `PageId`: if a new page is added to the registry without a
       // branch here, `page` is no longer `never` and `satisfies never` fails to

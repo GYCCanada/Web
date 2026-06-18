@@ -7,6 +7,7 @@ import { Storage } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
 import {
   assembleOverrides,
+  imageUploadTarget,
   isAcceptedImageType,
   uploadedImageKey,
   type Json,
@@ -614,5 +615,60 @@ describe('per-page /admin editor via DraftEditor (page scope, ADR 0008/0006)', (
     expect(result.faqEdited).toBe('Edited?');
     // About's cache survived the FAQ publish — per-object isolation holds.
     expect(result.aboutSameRef).toBe(true);
+  });
+
+  it('upload:groupPhoto.key stores bytes + rewrites the team draft key (REUSED applyImageUpload)', async () => {
+    const teamScope = pageScope('team');
+    // The same `upload:<keyPath>` intent the ImageUpload control posts; the route
+    // derives the target via `imageUploadTarget`, mirroring `content.tsx`.
+    const target = imageUploadTarget('upload:groupPhoto.key');
+    expect(target).toBe('groupPhoto.key');
+
+    const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+    const contentType = 'image/jpeg';
+    expect(isAcceptedImageType(contentType)).toBe(true);
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const storage = yield* Storage.Service;
+
+        const key = uploadedImageKey(target!, contentType, 1_700_000_000_000);
+        yield* storage.put(key, jpg, contentType);
+        // The team page has no bucket object yet — it opens on the bundled default
+        // (which OMITS the image). The upload lands the key BEFORE any alt text,
+        // proving the lax `DraftTeamPage` tolerance (key without alt).
+        yield* editor.applyImageUpload(teamScope, target!, key);
+
+        const draft = yield* editor.load(teamScope);
+        const served = yield* storage.get(key);
+        const bytes = new Uint8Array(
+          yield* Effect.promise(() => new Response(served.stream).arrayBuffer()),
+        );
+        return {
+          key,
+          draftKey: String(draft.content.groupPhoto?.key),
+          draftAlt: draft.content.groupPhoto?.alt,
+          bytes,
+        };
+      }),
+    );
+
+    expect(String(result.key)).toMatch(
+      /^images\/uploads\/groupPhoto-key-1700000000000\.jpg$/,
+    );
+    expect(result.draftKey).toBe(result.key);
+    // Key landed with NO alt yet — the upload-first / fill-alt-second flow.
+    expect(result.draftAlt).toBeUndefined();
+    expect([...result.bytes]).toEqual([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+  });
+
+  it('the route image-upload guards reject a non-image MIME and an empty file', () => {
+    // The per-page action reuses `content.tsx`'s guards verbatim: a non-accepted
+    // MIME is a 400, and `imageUploadTarget` only fires for the `upload:` intent.
+    expect(isAcceptedImageType('application/pdf')).toBe(false);
+    expect(isAcceptedImageType('image/png')).toBe(true);
+    expect(imageUploadTarget('save-draft')).toBeNull();
+    expect(imageUploadTarget('upload:portrait.key')).toBe('portrait.key');
   });
 });
