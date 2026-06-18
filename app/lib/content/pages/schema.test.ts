@@ -349,3 +349,94 @@ describe('draft page variants tolerate id-only adds; strict schema blocks publis
     expect(Schema.decodeUnknownResult(FaqPage)(filled)._tag).toBe('Success');
   });
 });
+
+/**
+ * The per-page `enabled` flag (Feature C) is decode-safe via
+ * `withDecodingDefaultKey(Effect.succeed(true))`: a stored `content/pages/<page>.json`
+ * that PREDATES the flag (no `enabled` key) must still decode — to `enabled: true` —
+ * so adding the field can never break an already-published doc (the
+ * required-field-on-a-published-doc hazard the registration launch hit twice). An
+ * explicit `enabled: false` round-trips encode→decode (the passthrough writes it
+ * back, so a re-published object is self-describing). The flag lives on BOTH the
+ * strict and the draft schema (no draft drift), covered across every page incl. team.
+ */
+describe('per-page enabled flag (decode-safe, default true)', () => {
+  // Every page's strict schema, plus a minimal valid encoded body MISSING `enabled`.
+  const strictCases = [
+    ['AboutPage', AboutPage, { title: { en: 'A', fr: 'A' }, paragraphs: [], disclaimer: { en: 'd', fr: 'd' }, quotes: [] }],
+    ['FaqPage', FaqPage, { title: { en: 'F', fr: 'F' }, items: [] }],
+    ['GivePage', GivePage, { title: { en: 'G', fr: 'G' }, reason: { en: 'r', fr: 'r' }, directions: [], donateUrl: 'https://example.org/donate' }],
+    ['ContactPage', ContactPage, { title: { en: 'C', fr: 'C' }, directions: [] }],
+    ['VolunteerPage', VolunteerPage, { title: [], subtitle: { en: 's', fr: 's' }, directions: { en: 'd', fr: 'd' } }],
+    ['ArchivePage', ArchivePage, { title: { en: 'Ar', fr: 'Ar' }, entries: [] }],
+    ['HomePage', HomePage, {
+      tagline: { en: 't', fr: 't' },
+      mission: { readStoryLabel: { en: 'r', fr: 'r' } },
+      join: { title: { en: 'j', fr: 'j' }, subtitle: { en: 's', fr: 's' }, donateLabel: { en: 'd', fr: 'd' }, volunteerLabel: { en: 'v', fr: 'v' } },
+      newsletter: { title: { en: 'n', fr: 'n' }, subtitle: { en: 's', fr: 's' }, socials: { en: 'so', fr: 'so' } },
+    }],
+    ['TeamPage', TeamPage, { title: [], subtitle: { en: 's', fr: 's' }, boardHeading: { en: 'b', fr: 'b' } }],
+  ] as const;
+
+  for (const [name, schema, bodyNoEnabled] of strictCases) {
+    test(`${name}: a stored doc WITHOUT enabled decodes to enabled:true (decode-migration gate)`, () => {
+      const result = Schema.decodeUnknownResult(
+        schema as Schema.Codec<{ readonly enabled: boolean }, unknown>,
+      )(bodyNoEnabled);
+      expect(result._tag).toBe('Success');
+      if (result._tag === 'Success') {
+        expect(result.success.enabled).toBe(true);
+      }
+    });
+
+    it.effect(`${name}: enabled:false round-trips encode→decode`, () =>
+      Effect.gen(function* () {
+        const codec = schema as Schema.Codec<
+          { readonly enabled: boolean },
+          unknown
+        >;
+        const decoded = yield* Schema.decodeUnknownEffect(codec)({
+          ...bodyNoEnabled,
+          enabled: false,
+        });
+        expect(decoded.enabled).toBe(false);
+        const roundtripped = yield* roundTrips(codec, decoded);
+        expect(roundtripped.enabled).toBe(false);
+      }));
+  }
+
+  // The DRAFT variants carry the same defaulted flag (no draft-schema drift).
+  const draftCases = [
+    ['DraftAboutPage', DraftAboutPage, { title: { en: 'A', fr: 'A' }, paragraphs: [], disclaimer: { en: 'd', fr: 'd' }, quotes: [] }],
+    ['DraftFaqPage', DraftFaqPage, { title: { en: 'F', fr: 'F' }, items: [] }],
+    ['DraftGivePage', DraftGivePage, { title: { en: 'G', fr: 'G' }, reason: { en: 'r', fr: 'r' }, directions: [], donateUrl: 'https://example.org/donate' }],
+    ['DraftArchivePage', DraftArchivePage, { title: { en: 'Ar', fr: 'Ar' }, entries: [] }],
+    ['DraftTeamPage', DraftTeamPage, { title: [], subtitle: { en: 's', fr: 's' }, boardHeading: { en: 'b', fr: 'b' } }],
+  ] as const;
+
+  for (const [name, schema, bodyNoEnabled] of draftCases) {
+    test(`${name}: a draft doc WITHOUT enabled decodes to enabled:true`, () => {
+      const result = Schema.decodeUnknownResult(
+        schema as Schema.Codec<{ readonly enabled: boolean }, unknown>,
+      )(bodyNoEnabled);
+      expect(result._tag).toBe('Success');
+      if (result._tag === 'Success') {
+        expect(result.success.enabled).toBe(true);
+      }
+    });
+  }
+
+  test('the bundled defaultTeamPage ships enabled:false (hidden by data, not a code comment)', () => {
+    expect(defaultTeamPage.enabled).toBe(false);
+  });
+
+  test('every other bundled default ships enabled:true', () => {
+    expect(defaultAboutPage.enabled).toBe(true);
+    expect(defaultFaqPage.enabled).toBe(true);
+    expect(defaultGivePage.enabled).toBe(true);
+    expect(defaultContactPage.enabled).toBe(true);
+    expect(defaultVolunteerPage.enabled).toBe(true);
+    expect(defaultArchivePage.enabled).toBe(true);
+    expect(defaultHomePage.enabled).toBe(true);
+  });
+});
