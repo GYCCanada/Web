@@ -61,37 +61,49 @@ export const loader = routeHandler(function* () {
   };
 });
 
-export const action = routeFormAction(function* () {
-  const { url } = yield* ReactRouterContext;
-  const submission = yield* SubmissionContext;
-  const env = yield* Env.Service;
-  if (Option.isNone(env.sendgrid)) {
-    return yield* notFound();
-  }
-  const sendgrid = yield* Sendgrid.Service;
-  const toast = yield* Toast;
+export const action = routeFormAction(
+  function* () {
+    const { url } = yield* ReactRouterContext;
+    const submission = yield* SubmissionContext;
+    const sendgrid = yield* Sendgrid.Service;
+    const toast = yield* Toast;
 
-  const parsed = parseSchema(schema, submission.payload);
-  if (Result.isFailure(parsed)) {
-    return yield* formValidationError(formatSchemaResult(parsed) ?? {});
-  }
-  const data = parsed.success;
+    const parsed = parseSchema(schema, submission.payload);
+    if (Result.isFailure(parsed)) {
+      return yield* formValidationError(formatSchemaResult(parsed) ?? {});
+    }
+    const data = parsed.success;
 
-  const result = yield* Effect.exit(sendgrid.subscribe(data.email, data.name));
-  if (result._tag === "Failure") {
-    yield* Effect.logError("newsletter subscribe failed", result.cause);
-    return yield* formValidationError({
-      formErrors: ["main.newsletter.error" satisfies TranslationKey],
+    const result = yield* Effect.exit(sendgrid.subscribe(data.email, data.name));
+    if (result._tag === "Failure") {
+      yield* Effect.logError("newsletter subscribe failed", result.cause);
+      return yield* formValidationError({
+        formErrors: ["main.newsletter.error" satisfies TranslationKey],
+      });
+    }
+
+    return yield* toast.redirect(url.pathname, {
+      type: "success",
+      title: "main.newsletter.success.title" satisfies TranslationKey,
+      description: "main.newsletter.success.description" satisfies TranslationKey,
+      form: "newsletter-form",
     });
-  }
-
-  return yield* toast.redirect(url.pathname, {
-    type: "success",
-    title: "main.newsletter.success.title" satisfies TranslationKey,
-    description: "main.newsletter.success.description" satisfies TranslationKey,
-    form: "newsletter-form",
-  });
-});
+  },
+  {
+    // ROUTE-LEVEL 404 gate, run BEFORE form-data parse + honeypot handling so a
+    // honeypot-filled POST cannot short-circuit to success and mask a 404 (Codex
+    // #6). The newsletter action 404s when (a) the home page is DISABLED (Feature
+    // C — same flag the loader/nav read), or (b) SendGrid is unconfigured (the
+    // feature does not exist). Both are route-level outcomes, not form errors.
+    guard: Effect.gen(function* () {
+      yield* getEnabledPageOr404("home");
+      const env = yield* Env.Service;
+      if (Option.isNone(env.sendgrid)) {
+        return yield* notFound();
+      }
+    }),
+  },
+);
 
 export default function Index() {
   const { newsletterEnabled, page } = useLoaderData<typeof loader>();
