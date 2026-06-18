@@ -67,6 +67,24 @@ describe('assembleOverrides', () => {
     expect(result.conferences['/2024']?.bible.chapter).toBe(12);
     expect(result.conferences['/2024']?.bible.verse).toBe(3);
   });
+
+  test('coerces an `enabled` leaf to a real boolean (Feature C, Codex #5/#12)', () => {
+    // A CHECKED box posts the hidden `enabled=false` companion FIRST, then the
+    // checkbox `enabled=true` — `form.entries()` yields BOTH in order, and
+    // `setPath`'s last-wins gives `true`. A bare `"true"` string would NOT decode
+    // as `Schema.Boolean`, so it must coerce to a real boolean.
+    const checked = assembleOverrides([
+      ['enabled', 'false'],
+      ['enabled', 'true'],
+    ]) as { enabled: unknown };
+    expect(checked.enabled).toBe(true);
+
+    // An UNCHECKED box posts only the hidden `enabled=false` companion.
+    const unchecked = assembleOverrides([['enabled', 'false']]) as {
+      enabled: unknown;
+    };
+    expect(unchecked.enabled).toBe(false);
+  });
 });
 
 describe('normalizeFaqAnswers', () => {

@@ -34,6 +34,7 @@ import {
   AddItemButton,
   Bilingual,
   type ActionResult,
+  Checkbox,
   ImageUpload,
   ItemControls,
   Section,
@@ -708,6 +709,19 @@ export default function AdminPageEditor() {
       )}
 
       <Form method="post" className="space-y-4">
+        <Section title="Visibility" open>
+          {/* The per-page `enabled` flag (Feature C): when off, the page 404s its
+              public route + action and its nav link is absent — all data-driven.
+              Rendered once for EVERY page (incl. team). The hidden companion in
+              `Checkbox` guarantees a deterministic boolean override every save. */}
+          <Checkbox
+            label="Page enabled (visible in nav + routable)"
+            name="enabled"
+            defaultChecked={Boolean(
+              (encoded as Record<string, unknown>)['enabled'] ?? true,
+            )}
+          />
+        </Section>
         <Section title={`${PAGE_LABELS[page]} content`} open>
           <PageEditor page={page} encoded={encoded as Record<string, unknown>} />
         </Section>
