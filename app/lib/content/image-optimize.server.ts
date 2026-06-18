@@ -26,7 +26,7 @@
 
 import { Effect } from 'effect';
 
-import { extensionForType } from './admin-form';
+import { extensionForType } from './image-types';
 
 /** Upload width cap (px). A wider image is downscaled to this; a narrower one is left as-is. */
 export const MAX_WIDTH = 1600;
@@ -54,9 +54,14 @@ export const prepareImage = (
   sourceType: string,
 ): Effect.Effect<PreparedImage> =>
   Effect.gen(function* () {
+    // Normalize the source MIME once: the GIF check, the fallback content-type,
+    // and `extensionForType` are all case-insensitive, so a `IMAGE/PNG` upload
+    // falls back to a clean lowercase `image/png` rather than echoing the casing.
+    const normalizedType = sourceType.toLowerCase();
+
     // GIF passthrough: a `Bun.Image` decode/re-encode keeps only frame 1, so an
     // animated GIF would silently flatten. Store it verbatim instead.
-    if (sourceType.toLowerCase() === 'image/gif') {
+    if (normalizedType === 'image/gif') {
       return { bytes, contentType: 'image/gif', extension: 'gif' };
     }
 
@@ -80,8 +85,8 @@ export const prepareImage = (
       Effect.catch(() =>
         Effect.succeed<PreparedImage>({
           bytes,
-          contentType: sourceType,
-          extension: extensionForType(sourceType),
+          contentType: normalizedType,
+          extension: extensionForType(normalizedType),
         }),
       ),
     );

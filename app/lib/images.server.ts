@@ -22,7 +22,7 @@
 
 // The only object extensions `/images/*` is ever allowed to serve. Mirrors the
 // image entries in `server.ts`'s `mimeFor` and covers every extension the
-// uploader emits (`EXTENSION_BY_TYPE` in `app/lib/content/admin-form.ts`) plus
+// uploader emits (`EXTENSION_BY_TYPE` in `app/lib/content/image-types.ts`) plus
 // the bundled `public/<year>/…` art (`.jpg`/`.jpeg`/`.png`/`.svg`).
 export const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
   'svg',
