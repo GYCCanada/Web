@@ -14,9 +14,11 @@ import { match } from "ts-pattern";
 
 import { Breakpoint, useBreakpoint } from "~/lib/client-hints";
 import { Content } from "~/lib/content.server";
+import type { PageId } from "~/lib/content/pages/registry";
 import { ReactRouterContext } from "~/lib/effect/router-context";
 import { routeHandler } from "~/lib/effect/route";
 import { useTranslate } from "~/lib/localization/context";
+import type { TranslationKey } from "~/lib/localization/translations";
 import { getLocale, Locale } from "~/lib/localization/localization";
 import { LocalizationProvider } from "~/lib/localization/provider";
 import { useRootLoader } from "~/lib/root-loader";
@@ -38,6 +40,43 @@ export const loader = routeHandler(function* () {
   const enabled = yield* content.getEnabledPages();
   return { lang, translation, currentConference, enabled };
 });
+
+/**
+ * One nav-link model entry: the evergreen `PageId` whose `enabled` flag gates the
+ * link, the route it points to, and the translation key for its label. EVERY nav
+ * consumer (desktop TopNav, mobile PopupNav, footer) derives its links from these
+ * single lists filtered by `enabled[page]` — there is no second hardcoded
+ * page-visibility list (`derive-dont-sync`, Feature C / Codex R6). Adding or hiding
+ * a page link is a data/flag change, never a per-consumer edit.
+ */
+interface NavLink {
+  readonly page: PageId;
+  readonly to: string;
+  readonly labelKey: TranslationKey;
+}
+
+/** The primary nav links (TopNav + PopupNav), in render order. */
+const PRIMARY_NAV: readonly NavLink[] = [
+  { page: "about", to: "/about", labelKey: "nav.about" },
+  { page: "team", to: "/team", labelKey: "nav.team" },
+  { page: "contact", to: "/contact", labelKey: "nav.contact" },
+  { page: "give", to: "/give", labelKey: "nav.give" },
+  { page: "volunteer", to: "/volunteer", labelKey: "nav.volunteer" },
+];
+
+/** The footer links (a subset that historically surfaces FAQ instead of team). */
+const FOOTER_NAV: readonly NavLink[] = [
+  { page: "about", to: "/about", labelKey: "nav.about" },
+  { page: "contact", to: "/contact", labelKey: "nav.contact" },
+  { page: "give", to: "/give", labelKey: "nav.give" },
+  { page: "faq", to: "/faq", labelKey: "nav.faq" },
+];
+
+/** The links from a nav list whose page is enabled, in declaration order. */
+const visibleLinks = (
+  links: readonly NavLink[],
+  enabled: Record<PageId, boolean>,
+): readonly NavLink[] => links.filter((link) => enabled[link.page]);
 
 export default function Layout() {
   const { translation } = useLoaderData<typeof loader>();
@@ -81,7 +120,7 @@ function Nav() {
     .otherwise(() => <TopNav />);
 }
 
-function TopNav() {
+export function TopNav() {
   const translate = useTranslate();
   const { enabled } = useLoaderData<typeof loader>();
 
@@ -100,19 +139,11 @@ function TopNav() {
             year: new Date().getFullYear(),
           })}
         </NavItem>
-        {enabled.about && (
-          <NavItem to="/about">{translate("nav.about")}</NavItem>
-        )}
-        {enabled.team && (
-          <NavItem to="/team">{translate("nav.team")}</NavItem>
-        )}
-        {enabled.contact && (
-          <NavItem to="/contact">{translate("nav.contact")}</NavItem>
-        )}
-        {enabled.give && <NavItem to="/give">{translate("nav.give")}</NavItem>}
-        {enabled.volunteer && (
-          <NavItem to="/volunteer">{translate("nav.volunteer")}</NavItem>
-        )}
+        {visibleLinks(PRIMARY_NAV, enabled).map((link) => (
+          <NavItem key={link.to} to={link.to}>
+            {translate(link.labelKey)}
+          </NavItem>
+        ))}
         <Language />
       </nav>
     </header>
@@ -174,36 +205,12 @@ function PopupNav() {
                         label: translate("nav.home", {
                           year: new Date().getFullYear(),
                         }),
-                        show: true,
                       },
-                      {
-                        to: "/about",
-                        label: translate("nav.about"),
-                        show: enabled.about,
-                      },
-                      {
-                        to: "/team",
-                        label: translate("nav.team"),
-                        show: enabled.team,
-                      },
-                      {
-                        to: "/contact",
-                        label: translate("nav.contact"),
-                        show: enabled.contact,
-                      },
-                      {
-                        to: "/give",
-                        label: translate("nav.give"),
-                        show: enabled.give,
-                      },
-                      {
-                        to: "/volunteer",
-                        label: translate("nav.volunteer"),
-                        show: enabled.volunteer,
-                      },
-                    ]
-                      .filter((item) => item.show)
-                      .map((item, index) => (
+                      ...visibleLinks(PRIMARY_NAV, enabled).map((link) => ({
+                        to: link.to,
+                        label: translate(link.labelKey),
+                      })),
+                    ].map((item, index) => (
                       <NavItem
                         key={item.to}
                         to={item.to}
@@ -330,7 +337,7 @@ function NavItem({
   );
 }
 
-function Footer() {
+export function Footer() {
   const translate = useTranslate();
   const { currentConference, enabled } = useLoaderData<typeof loader>();
   return (
@@ -372,26 +379,11 @@ function Footer() {
               {currentConference.title}{" "}
               {dayjs(currentConference.dates[0]).format("YYYY")}
             </Link>
-            {enabled.about && (
-              <Link to="/about" className={linkStyle}>
-                {translate("nav.about")}
+            {visibleLinks(FOOTER_NAV, enabled).map((link) => (
+              <Link key={link.to} to={link.to} className={linkStyle}>
+                {translate(link.labelKey)}
               </Link>
-            )}
-            {enabled.contact && (
-              <Link to="/contact" className={linkStyle}>
-                {translate("nav.contact")}
-              </Link>
-            )}
-            {enabled.give && (
-              <Link to="/give" className={linkStyle}>
-                {translate("nav.give")}
-              </Link>
-            )}
-            {enabled.faq && (
-              <Link to="/faq" className={linkStyle}>
-                {translate("nav.faq")}
-              </Link>
-            )}
+            ))}
           </div>
         </div>
 
