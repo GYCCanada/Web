@@ -8,6 +8,7 @@ import {
   defaultFaqPage,
   defaultGivePage,
   defaultHomePage,
+  defaultTeamPage,
   defaultVolunteerPage,
 } from './defaults';
 import {
@@ -55,6 +56,7 @@ describe('per-page default round-trips', () => {
     ['VolunteerPage', VolunteerPage, defaultVolunteerPage],
     ['ArchivePage', ArchivePage, defaultArchivePage],
     ['HomePage', HomePage, defaultHomePage],
+    ['TeamPage', TeamPage, defaultTeamPage],
   ] as const;
 
   for (const [name, schema, value] of cases) {

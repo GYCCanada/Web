@@ -16,6 +16,7 @@ const PAGE_LABELS: Record<string, string> = {
   volunteer: 'Volunteer',
   archive: 'Archive',
   home: 'Home (evergreen)',
+  team: 'Team',
 };
 
 /**

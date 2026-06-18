@@ -82,6 +82,7 @@ const PAGE_LABELS: { readonly [P in PageId]: string } = {
   volunteer: 'Volunteer',
   archive: 'Archive',
   home: 'Home (evergreen sections)',
+  team: 'Team',
 };
 
 type ActionResponse = ActionResult;
@@ -525,6 +526,26 @@ function PageEditor({
         </>
       );
     }
+    case 'team':
+      return (
+        <>
+          <RichTextPreview
+            label="Title"
+            nodes={encoded['title'] as ReadonlyArray<Record<string, unknown>> | undefined}
+          />
+          <Bilingual
+            label="Subtitle"
+            name="subtitle"
+            value={text(encoded['subtitle'] as DraftText)}
+            multiline
+          />
+          <Bilingual
+            label="Board heading"
+            name="boardHeading"
+            value={text(encoded['boardHeading'] as DraftText)}
+          />
+        </>
+      );
     default:
       // Exhaustive over `PageId`: if a new page is added to the registry without a
       // branch here, `page` is no longer `never` and `satisfies never` fails to
