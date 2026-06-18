@@ -12,6 +12,7 @@ import { match } from "ts-pattern";
 import { Breakpoint, useBreakpoint } from "~/lib/client-hints";
 import { FormProvider, useForm } from "~/lib/conform";
 import { Content } from "~/lib/content.server";
+import { getEnabledPageOr404 } from "~/lib/content/page-guard.server";
 import { toHomeView } from "~/lib/content/pages/project";
 import { dayjs } from "~/lib/dayjs";
 import { formValidationError, notFound } from "~/lib/effect/errors";
@@ -54,42 +55,55 @@ export const loader = routeHandler(function* () {
   const env = yield* Env.Service;
   return {
     conference: yield* content.getCurrentConference(locale),
-    page: toHomeView(yield* content.getPage("home"), locale),
+    // 404 when the home page is disabled (Feature C); else project the decoded page.
+    page: toHomeView(yield* getEnabledPageOr404("home"), locale),
     newsletterEnabled: Option.isSome(env.sendgrid),
   };
 });
 
-export const action = routeFormAction(function* () {
-  const { url } = yield* ReactRouterContext;
-  const submission = yield* SubmissionContext;
-  const env = yield* Env.Service;
-  if (Option.isNone(env.sendgrid)) {
-    return yield* notFound();
-  }
-  const sendgrid = yield* Sendgrid.Service;
-  const toast = yield* Toast;
+export const action = routeFormAction(
+  function* () {
+    const { url } = yield* ReactRouterContext;
+    const submission = yield* SubmissionContext;
+    const sendgrid = yield* Sendgrid.Service;
+    const toast = yield* Toast;
 
-  const parsed = parseSchema(schema, submission.payload);
-  if (Result.isFailure(parsed)) {
-    return yield* formValidationError(formatSchemaResult(parsed) ?? {});
-  }
-  const data = parsed.success;
+    const parsed = parseSchema(schema, submission.payload);
+    if (Result.isFailure(parsed)) {
+      return yield* formValidationError(formatSchemaResult(parsed) ?? {});
+    }
+    const data = parsed.success;
 
-  const result = yield* Effect.exit(sendgrid.subscribe(data.email, data.name));
-  if (result._tag === "Failure") {
-    yield* Effect.logError("newsletter subscribe failed", result.cause);
-    return yield* formValidationError({
-      formErrors: ["main.newsletter.error" satisfies TranslationKey],
+    const result = yield* Effect.exit(sendgrid.subscribe(data.email, data.name));
+    if (result._tag === "Failure") {
+      yield* Effect.logError("newsletter subscribe failed", result.cause);
+      return yield* formValidationError({
+        formErrors: ["main.newsletter.error" satisfies TranslationKey],
+      });
+    }
+
+    return yield* toast.redirect(url.pathname, {
+      type: "success",
+      title: "main.newsletter.success.title" satisfies TranslationKey,
+      description: "main.newsletter.success.description" satisfies TranslationKey,
+      form: "newsletter-form",
     });
-  }
-
-  return yield* toast.redirect(url.pathname, {
-    type: "success",
-    title: "main.newsletter.success.title" satisfies TranslationKey,
-    description: "main.newsletter.success.description" satisfies TranslationKey,
-    form: "newsletter-form",
-  });
-});
+  },
+  {
+    // ROUTE-LEVEL 404 gate, run BEFORE form-data parse + honeypot handling so a
+    // honeypot-filled POST cannot short-circuit to success and mask a 404 (Codex
+    // #6). The newsletter action 404s when (a) the home page is DISABLED (Feature
+    // C — same flag the loader/nav read), or (b) SendGrid is unconfigured (the
+    // feature does not exist). Both are route-level outcomes, not form errors.
+    guard: Effect.gen(function* () {
+      yield* getEnabledPageOr404("home");
+      const env = yield* Env.Service;
+      if (Option.isNone(env.sendgrid)) {
+        return yield* notFound();
+      }
+    }),
+  },
+);
 
 export default function Index() {
   const { newsletterEnabled, page } = useLoaderData<typeof loader>();
@@ -113,11 +127,6 @@ export default function Index() {
               {page.mission.readStoryLabel}
             </Link>
           </div>
-          {/* <div>
-            <Link to="/team" className={buttonStyle} data-variant="positive">
-              {translate("main.meet_the_team")}
-            </Link>
-          </div> */}
         </div>
       </section>
       {newsletterEnabled ? (

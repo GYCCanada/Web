@@ -8,6 +8,7 @@ import {
 } from "react-router";
 
 import { Content } from "~/lib/content.server";
+import { getEnabledPageOr404 } from "~/lib/content/page-guard.server";
 import { FormProvider, useForm } from "~/lib/conform";
 import { definitionToSchema, type DecodedForm } from "~/lib/forms/decode";
 import { FormDefinition } from "~/lib/forms/definition";
@@ -45,8 +46,10 @@ export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   const content = yield* Content.Service;
+  // 404 when the volunteer page is disabled (Feature C); else project + load form.
+  const page = toVolunteerView(yield* getEnabledPageOr404("volunteer"), locale);
   return {
-    page: toVolunteerView(yield* content.getPage("volunteer"), locale),
+    page,
     definition: yield* content.getForm("volunteer"),
   };
 });
@@ -96,6 +99,7 @@ const positionsLine = (decoded: DecodedForm): string => {
 // when `notify` runs, so a mailer failure cannot lose the record).
 export const action = formAction({
   form: "volunteer",
+  page: "volunteer",
   notify: (submission) =>
     Effect.gen(function* () {
       const decoded = submission.payload;

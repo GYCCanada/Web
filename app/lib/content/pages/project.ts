@@ -69,7 +69,14 @@ export const toRichText = (
 // Per-page view types (what the routes render — plain per-locale strings)
 // ---------------------------------------------------------------------------
 
+/**
+ * Every page view carries the page's `enabled` flag (Feature C) so a route can read
+ * it POST-projection — the route 404s when `!view.enabled`, and the nav layout
+ * derives its links from `getEnabledPages()`. Projected through verbatim by each
+ * converter (`derive-dont-sync`: the flag is the decoded object's, not re-declared).
+ */
 export interface AboutView {
+  readonly enabled: boolean;
   readonly title: string;
   readonly paragraphs: readonly { readonly id: string; readonly text: string }[];
   readonly disclaimer: string;
@@ -81,6 +88,7 @@ export interface AboutView {
 }
 
 export interface FaqView {
+  readonly enabled: boolean;
   readonly title: string;
   readonly items: readonly {
     readonly id: string;
@@ -90,6 +98,7 @@ export interface FaqView {
 }
 
 export interface GiveView {
+  readonly enabled: boolean;
   readonly title: string;
   readonly reason: string;
   readonly directions: readonly { readonly id: string; readonly text: string }[];
@@ -97,17 +106,20 @@ export interface GiveView {
 }
 
 export interface ContactView {
+  readonly enabled: boolean;
   readonly title: string;
   readonly directions: readonly RichTextRun[];
 }
 
 export interface VolunteerView {
+  readonly enabled: boolean;
   readonly title: readonly RichTextRun[];
   readonly subtitle: string;
   readonly directions: string;
 }
 
 export interface ArchiveView {
+  readonly enabled: boolean;
   readonly title: string;
   readonly entries: readonly {
     readonly id: string;
@@ -117,6 +129,7 @@ export interface ArchiveView {
 }
 
 export interface HomeView {
+  readonly enabled: boolean;
   readonly tagline: string;
   readonly mission: { readonly readStoryLabel: string };
   readonly join: {
@@ -140,6 +153,7 @@ export interface HomeView {
  * broken image (`make-impossible-states-unrepresentable`, ADR 0008).
  */
 export interface TeamView {
+  readonly enabled: boolean;
   readonly title: readonly RichTextRun[];
   readonly subtitle: string;
   readonly boardHeading: string;
@@ -152,6 +166,7 @@ export interface TeamView {
 // ---------------------------------------------------------------------------
 
 export const toAboutView = (page: AboutPage, locale: Locale): AboutView => ({
+  enabled: page.enabled,
   title: page.title[locale],
   paragraphs: page.paragraphs.map((p) => ({
     id: p.id,
@@ -166,6 +181,7 @@ export const toAboutView = (page: AboutPage, locale: Locale): AboutView => ({
 });
 
 export const toFaqView = (page: FaqPage, locale: Locale): FaqView => ({
+  enabled: page.enabled,
   title: page.title[locale],
   items: page.items.map((item) => ({
     id: item.id,
@@ -175,6 +191,7 @@ export const toFaqView = (page: FaqPage, locale: Locale): FaqView => ({
 });
 
 export const toGiveView = (page: GivePage, locale: Locale): GiveView => ({
+  enabled: page.enabled,
   title: page.title[locale],
   reason: page.reason[locale],
   directions: page.directions.map((d) => ({ id: d.id, text: d.text[locale] })),
@@ -185,6 +202,7 @@ export const toContactView = (
   page: ContactPage,
   locale: Locale,
 ): ContactView => ({
+  enabled: page.enabled,
   title: page.title[locale],
   directions: toRichText(page.directions, locale),
 });
@@ -193,6 +211,7 @@ export const toVolunteerView = (
   page: VolunteerPage,
   locale: Locale,
 ): VolunteerView => ({
+  enabled: page.enabled,
   title: toRichText(page.title, locale),
   subtitle: page.subtitle[locale],
   directions: page.directions[locale],
@@ -202,6 +221,7 @@ export const toArchiveView = (
   page: ArchivePage,
   locale: Locale,
 ): ArchiveView => ({
+  enabled: page.enabled,
   title: page.title[locale],
   entries: page.entries.map((e) => ({
     id: e.id,
@@ -211,6 +231,7 @@ export const toArchiveView = (
 });
 
 export const toHomeView = (page: HomePage, locale: Locale): HomeView => ({
+  enabled: page.enabled,
   tagline: page.tagline[locale],
   mission: { readStoryLabel: page.mission.readStoryLabel[locale] },
   join: {
@@ -227,6 +248,7 @@ export const toHomeView = (page: HomePage, locale: Locale): HomeView => ({
 });
 
 export const toTeamView = (page: TeamPage, locale: Locale): TeamView => ({
+  enabled: page.enabled,
   title: toRichText(page.title, locale),
   subtitle: page.subtitle[locale],
   boardHeading: page.boardHeading[locale],

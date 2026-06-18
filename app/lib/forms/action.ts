@@ -1,8 +1,8 @@
 import { Effect, Result } from 'effect';
 
 import { Content } from '../content.server';
-import type { FormId } from '../content/pages/registry';
-import { formValidationError } from '../effect/errors';
+import type { FormId, PageId } from '../content/pages/registry';
+import { formValidationError, notFound } from '../effect/errors';
 import {
   type FormSuccess,
   routeFormAction,
@@ -83,6 +83,14 @@ export interface SuccessToast {
  */
 export interface FormActionConfig<E> {
   readonly form: FormId;
+  /**
+   * The evergreen `PageId` that OWNS this form's route (contact ↔ contact page,
+   * volunteer ↔ volunteer page). The action 404s when that page is DISABLED
+   * (Feature C, Codex #6): a disabled page must reject POSTs too, not only its GET
+   * — otherwise a disabled contact page would still accept submissions. Gated off
+   * the SAME per-page `enabled` flag the loader/nav read (`derive-dont-sync`).
+   */
+  readonly page: PageId;
   readonly notify: (
     submission: Submission,
   ) => Effect.Effect<
@@ -114,33 +122,47 @@ export interface FormActionConfig<E> {
  *   5. `toast.redirect(pathname, { success copy, form })`.
  */
 export const formAction = <E>(config: FormActionConfig<E>) =>
-  routeFormAction(function* () {
-    const { url } = yield* ReactRouterContext;
-    const submission = yield* SubmissionContext;
-    const content = yield* Content.Service;
-    const submissions = yield* Submissions.Service;
-    const toast = yield* Toast;
+  routeFormAction(
+    function* () {
+      const { url } = yield* ReactRouterContext;
+      const submission = yield* SubmissionContext;
+      const content = yield* Content.Service;
+      const submissions = yield* Submissions.Service;
+      const toast = yield* Toast;
 
-    const definition = yield* content.getForm(config.form);
+      const definition = yield* content.getForm(config.form);
 
-    const decoded = decodeForm(definition, submission.payload);
-    if (Result.isFailure(decoded)) {
-      return yield* formValidationError(formatSchemaResult(decoded) ?? {});
-    }
+      const decoded = decodeForm(definition, submission.payload);
+      if (Result.isFailure(decoded)) {
+        return yield* formValidationError(formatSchemaResult(decoded) ?? {});
+      }
 
-    // Persist FIRST: the durable `submissions/<form>/<id>.json` object is written
-    // and returned before any notification runs, so a `notify` failure provably
-    // cannot lose the record (settled #8). A `StorageError` here aborts the
-    // submission (losing a record must never look like success).
-    const stored = yield* submissions.persist(config.form, decoded.success);
+      // Persist FIRST: the durable `submissions/<form>/<id>.json` object is
+      // written and returned before any notification runs, so a `notify` failure
+      // provably cannot lose the record (settled #8). A `StorageError` here aborts
+      // the submission (losing a record must never look like success).
+      const stored = yield* submissions.persist(config.form, decoded.success);
 
-    yield* config.notify(stored);
+      yield* config.notify(stored);
 
-    yield* toast.redirect(url.pathname, {
-      title: config.success.title,
-      description: config.success.description,
-      type: 'success',
-      form: config.form,
-    });
-    return { reset: true } satisfies FormSuccess;
-  });
+      yield* toast.redirect(url.pathname, {
+        title: config.success.title,
+        description: config.success.description,
+        type: 'success',
+        form: config.form,
+      });
+      return { reset: true } satisfies FormSuccess;
+    },
+    {
+      // ROUTE-LEVEL 404 gate, run BEFORE form-data parse + honeypot handling so a
+      // disabled page rejects EVERY POST (incl. a honeypot-filled one), not only
+      // the normal body path (Feature C, Codex #6, Risk 11). Read off the same
+      // per-page `enabled` flag the loader/nav use (`derive-dont-sync`).
+      guard: Effect.gen(function* () {
+        const content = yield* Content.Service;
+        if (!(yield* content.getPage(config.page)).enabled) {
+          return yield* notFound();
+        }
+      }),
+    },
+  );

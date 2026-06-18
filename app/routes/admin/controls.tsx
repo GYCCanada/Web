@@ -101,6 +101,36 @@ export function Bilingual({
   );
 }
 
+/**
+ * A boolean checkbox bound to a dotted form-field `name` (Feature C: the per-page
+ * `enabled` flag). An unchecked HTML checkbox is ABSENT from FormData, which would
+ * make "uncheck + save" a no-op (the override would omit the key and `deepMerge`
+ * keeps the base value). So a hidden `<input value="false">` companion is rendered
+ * BEFORE the checkbox: FormData then ALWAYS carries the field — `"false"` when
+ * unchecked, and the checkbox's `"true"` overriding it (last-wins in
+ * `form.entries()` order) when checked. The action's `assembleOverrides` coerces the
+ * resulting `"true"`/`"false"` string to a real boolean before the `Schema.Boolean`
+ * decode (Codex #5/#12), so the save always carries a deterministic boolean override.
+ */
+export function Checkbox({
+  label,
+  name,
+  defaultChecked,
+}: {
+  readonly label: string;
+  readonly name: string;
+  readonly defaultChecked: boolean;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm font-medium text-neutral-800">
+      {/* Hidden companion FIRST so an unchecked box still posts `false`. */}
+      <input type="hidden" name={name} value="false" />
+      <input type="checkbox" name={name} value="true" defaultChecked={defaultChecked} />
+      {label}
+    </label>
+  );
+}
+
 /** A collapsible titled section wrapping a group of fields. */
 export function Section({
   title,

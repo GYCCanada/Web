@@ -105,8 +105,13 @@ const handleFormError = (
       formLevelError(submission, error.message || 'Bad request'),
     );
   }
+  // A 404 is a route-level outcome, not a form-validation outcome: a disabled
+  // page's action (Feature C) and a disabled feature's action (the newsletter
+  // when SendGrid is unconfigured) both `notFound()`, and the public must see a
+  // real 404 — not a 200 form-error report against a page that doesn't exist.
+  // Re-fail so the runtime maps it to a 404 Response (the C1 mapping).
   if (NotFoundError.is(error)) {
-    return Effect.succeed(formLevelError(submission, 'Not found'));
+    return Effect.fail(error);
   }
   if (InternalServerError.is(error)) {
     return Effect.succeed(formLevelError(submission, 'An error occurred'));
@@ -132,6 +137,21 @@ const handleFormError = (
 export const routeFormAction =
   <Eff extends Effect.Yieldable<any, any, any, FormServices>>(
     body: () => Generator<Eff, FormSuccess, never>,
+    options?: {
+      /**
+       * A ROUTE-LEVEL guard run BEFORE form-data parse + honeypot handling. Its
+       * failure propagates straight to the runtime (it is NOT bucketed by
+       * {@link handleFormError}), so a `NotFoundError` here becomes a real 404 for
+       * EVERY POST — including a honeypot-filled one. This is the seam a disabled
+       * page's action 404 uses (Feature C, Codex #6): the page does not exist, so
+       * no submission is even read.
+       */
+      readonly guard?: Effect.Effect<
+        void,
+        AppError,
+        AppServices | ReactRouterContext
+      >;
+    },
   ) =>
   (args: RouteArgs): Promise<FormResult> => {
     const pipeline: Effect.Effect<
@@ -139,6 +159,9 @@ export const routeFormAction =
       AppError,
       AppServices | ReactRouterContext
     > = Effect.gen(function* () {
+      if (options?.guard !== undefined) {
+        yield* options.guard;
+      }
       const reactRouter = yield* ReactRouterContext;
       const formData = yield* Effect.tryPromise({
         try: () => reactRouter.request.formData(),

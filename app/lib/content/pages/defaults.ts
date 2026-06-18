@@ -51,6 +51,7 @@ const PAYPAL_DONATE =
 // ---------------------------------------------------------------------------
 
 export const defaultAboutPage: AboutPage = Schema.decodeUnknownSync(AboutPage)({
+  enabled: true,
   title: { en: 'About Us', fr: 'Notre histoire' },
   paragraphs: [
     {
@@ -111,6 +112,7 @@ export const defaultAboutPage: AboutPage = Schema.decodeUnknownSync(AboutPage)({
 // ---------------------------------------------------------------------------
 
 export const defaultFaqPage: FaqPage = Schema.decodeUnknownSync(FaqPage)({
+  enabled: true,
   title: { en: 'Frequently Asked Questions', fr: 'Foire aux questions' },
   items: [
     {
@@ -247,6 +249,7 @@ export const defaultFaqPage: FaqPage = Schema.decodeUnknownSync(FaqPage)({
 // ---------------------------------------------------------------------------
 
 export const defaultGivePage: GivePage = Schema.decodeUnknownSync(GivePage)({
+  enabled: true,
   title: { en: 'Support the movement.', fr: 'Soutenez le mouvement.' },
   reason: {
     en: "Our call to mission, is to be the light of the world. Our Savior calls us to a worldwide mission of spreading the gospel of Christ's love in this world filled with darkness. This light should not be hidden, covered by the humdrum of life, but out in the open, where all can see and hear. GYC Canada wants to magnify that light, to bring it to all of Canada and the world.",
@@ -292,6 +295,7 @@ export const defaultGivePage: GivePage = Schema.decodeUnknownSync(GivePage)({
 export const defaultContactPage: ContactPage = Schema.decodeUnknownSync(
   ContactPage,
 )({
+  enabled: true,
   title: { en: 'Get in touch with us!', fr: 'Entrez en contact avec nous!' },
   directions: [
     {
@@ -323,6 +327,7 @@ export const defaultContactPage: ContactPage = Schema.decodeUnknownSync(
 export const defaultVolunteerPage: VolunteerPage = Schema.decodeUnknownSync(
   VolunteerPage,
 )({
+  enabled: true,
   title: [
     { _tag: 'text', value: { en: 'Become a part of the ', fr: 'Faites partie du ' } },
     { _tag: 'bold', value: { en: 'movement', fr: 'mouvement' } },
@@ -345,6 +350,7 @@ export const defaultVolunteerPage: VolunteerPage = Schema.decodeUnknownSync(
 export const defaultArchivePage: ArchivePage = Schema.decodeUnknownSync(
   ArchivePage,
 )({
+  enabled: true,
   title: { en: 'Archive', fr: 'Archives' },
   entries: [],
 });
@@ -354,6 +360,7 @@ export const defaultArchivePage: ArchivePage = Schema.decodeUnknownSync(
 // ---------------------------------------------------------------------------
 
 export const defaultHomePage: HomePage = Schema.decodeUnknownSync(HomePage)({
+  enabled: true,
   tagline: {
     en: 'GYC Canada is a movement founded by young people for young people.',
     fr: 'GYC Canada est un mouvement fondé par des jeunes pour des jeunes.',
@@ -399,8 +406,15 @@ export const defaultHomePage: HomePage = Schema.decodeUnknownSync(HomePage)({
  * `team.json` therefore renders the roster + copy with NO broken `<img>`; the launch
  * upload sets `groupPhoto` / `portrait`. (The legacy `public/team/group-van-2022.jpg`
  * + `public/logo/gycc.png` stay on disk until an upload supersedes them.)
+ *
+ * `enabled: false`: the Team page ships HIDDEN — preserving today's hidden-team
+ * behavior as DATA (the seed `team.json`'s own flag), not a hardcoded nav comment
+ * (Feature C, `derive-dont-sync`). The launch flips it on in `/admin/pages/team`
+ * once the photos are uploaded; until then the route 404s and the nav link is
+ * absent, driven entirely off this flag.
  */
 export const defaultTeamPage: TeamPage = Schema.decodeUnknownSync(TeamPage)({
+  enabled: false,
   title: [
     {
       _tag: 'text',

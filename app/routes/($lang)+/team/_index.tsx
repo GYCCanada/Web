@@ -1,6 +1,7 @@
 import { type MetaFunction, useLoaderData } from 'react-router';
 
 import { Content } from '~/lib/content.server';
+import { getEnabledPageOr404 } from '~/lib/content/page-guard.server';
 import { toTeamView } from '~/lib/content/pages/project';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeHandler } from '~/lib/effect/route';
@@ -30,7 +31,9 @@ export const loader = routeHandler(function* () {
   // Page CHROME (title / subtitle / board heading / images) comes from the CMS
   // `TeamPage` object; the per-member executive roster stays on `site.json` via
   // `getTeam()` (conference-executive data, not page copy — not migrated here).
-  const page = toTeamView(yield* content.getPage('team'), locale);
+  // 404 when the team page is disabled (Feature C — today's default-hidden team is
+  // this flag now, not a nav comment).
+  const page = toTeamView(yield* getEnabledPageOr404('team'), locale);
   const { team, board } = yield* content.getTeam();
   return { page, team, board };
 });

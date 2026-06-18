@@ -1,4 +1,4 @@
-import { Schema } from 'effect';
+import { Effect, Schema } from 'effect';
 
 import { AssetKey, ExternalHttpsUrl, ImageRef, ListItemId, Text } from '../schema';
 
@@ -137,6 +137,31 @@ const IdListArray = <S extends Schema.Codec<{ readonly id: string }, unknown>>(
 ) => Schema.Array(item).check(uniqueListItemIds);
 
 // ---------------------------------------------------------------------------
+// EnabledFlag — the decode-safe per-page visibility boolean (Feature C)
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-page `enabled` boolean: whether the page is visible in the nav AND
+ * routable (a disabled page 404s its public loader + any action it owns, and its
+ * nav link is absent). Modelled with `withDecodingDefaultKey(Effect.succeed(true))`
+ * so the key is OPTIONAL on the encoded (stored-JSON) side and supplies `true` when
+ * absent during decode — an already-published `content/pages/<page>.json` that
+ * predates this field still decodes to `enabled: true` (the
+ * required-field-on-an-already-published-doc decode hazard the registration launch
+ * hit twice — here a `true`-by-default boolean is the honest model: a page is
+ * enabled unless explicitly turned off).
+ *
+ * The default `encodingStrategy: 'passthrough'` writes the flag back on encode, so a
+ * re-published object is self-describing (carries its own `enabled`) while a legacy
+ * key-less object keeps decoding to `true`. Identical in the strict and draft
+ * schemas so a page's draft round-trips the flag (no draft-schema drift). Reused by
+ * EVERY page — `derive-dont-sync`, one flag definition.
+ */
+const EnabledFlag = Schema.Boolean.pipe(
+  Schema.withDecodingDefaultKey(Effect.succeed(true)),
+);
+
+// ---------------------------------------------------------------------------
 // Pages
 // ---------------------------------------------------------------------------
 
@@ -148,6 +173,7 @@ const IdListArray = <S extends Schema.Codec<{ readonly id: string }, unknown>>(
  * `about.quote.N.verse`/`.source` pair).
  */
 export const AboutPage = Schema.Struct({
+  enabled: EnabledFlag,
   title: Text,
   paragraphs: IdListArray(Schema.Struct({ id: ListItemId, text: Text })),
   disclaimer: Text,
@@ -164,6 +190,7 @@ export type AboutPage = typeof AboutPage.Type;
  * runs round-trip without HTML.
  */
 export const FaqPage = Schema.Struct({
+  enabled: EnabledFlag,
   title: Text,
   items: IdListArray(
     Schema.Struct({ id: ListItemId, question: Text, answer: RichText }),
@@ -178,6 +205,7 @@ export type FaqPage = typeof FaqPage.Type;
  * boundary as the conference URLs).
  */
 export const GivePage = Schema.Struct({
+  enabled: EnabledFlag,
   title: Text,
   reason: Text,
   directions: IdListArray(Schema.Struct({ id: ListItemId, text: Text })),
@@ -192,6 +220,7 @@ export type GivePage = typeof GivePage.Type;
  * the settled boundary (#5, CONTEXT §Page / §Form definition).
  */
 export const ContactPage = Schema.Struct({
+  enabled: EnabledFlag,
   title: Text,
   directions: RichText,
 });
@@ -203,6 +232,7 @@ export type ContactPage = typeof ContactPage.Type;
  * form. As with Contact, the form fields belong to the `FormDefinition`, not here.
  */
 export const VolunteerPage = Schema.Struct({
+  enabled: EnabledFlag,
   title: RichText,
   subtitle: Text,
   directions: Text,
@@ -217,6 +247,7 @@ export type VolunteerPage = typeof VolunteerPage.Type;
  * nothing). `url` is an `ExternalHttpsUrl` (an archive link may point off-site).
  */
 export const ArchivePage = Schema.Struct({
+  enabled: EnabledFlag,
   title: Text,
   entries: IdListArray(
     Schema.Struct({ id: ListItemId, label: Text, url: ExternalHttpsUrl }),
@@ -233,6 +264,7 @@ export type ArchivePage = typeof ArchivePage.Type;
  * home here, or the retirement regresses (plan, Branch 5).
  */
 export const HomePage = Schema.Struct({
+  enabled: EnabledFlag,
   tagline: Text,
   mission: Schema.Struct({
     readStoryLabel: Text,
@@ -274,6 +306,7 @@ export type HomePage = typeof HomePage.Type;
  *     image carries a strict `{ key, alt }` (a valid `AssetKey` + both-locales alt).
  */
 export const TeamPage = Schema.Struct({
+  enabled: EnabledFlag,
   title: RichText,
   subtitle: Text,
   boardHeading: Text,
@@ -315,6 +348,7 @@ const DraftText = Schema.Struct({
 });
 
 export const DraftAboutPage = Schema.Struct({
+  enabled: EnabledFlag,
   title: Text,
   paragraphs: IdListArray(
     Schema.Struct({ id: ListItemId, text: Schema.optionalKey(DraftText) }),
@@ -331,6 +365,7 @@ export const DraftAboutPage = Schema.Struct({
 export type DraftAboutPage = typeof DraftAboutPage.Type;
 
 export const DraftFaqPage = Schema.Struct({
+  enabled: EnabledFlag,
   title: Text,
   items: IdListArray(
     Schema.Struct({
@@ -343,6 +378,7 @@ export const DraftFaqPage = Schema.Struct({
 export type DraftFaqPage = typeof DraftFaqPage.Type;
 
 export const DraftGivePage = Schema.Struct({
+  enabled: EnabledFlag,
   title: Text,
   reason: Text,
   directions: IdListArray(
@@ -353,6 +389,7 @@ export const DraftGivePage = Schema.Struct({
 export type DraftGivePage = typeof DraftGivePage.Type;
 
 export const DraftArchivePage = Schema.Struct({
+  enabled: EnabledFlag,
   title: Text,
   entries: IdListArray(
     Schema.Struct({
@@ -386,6 +423,7 @@ const DraftImageRef = Schema.Struct({
  * lax `DraftImageRef`) so an uploaded `key` can land before its alt text.
  */
 export const DraftTeamPage = Schema.Struct({
+  enabled: EnabledFlag,
   title: RichText,
   subtitle: Text,
   boardHeading: Text,

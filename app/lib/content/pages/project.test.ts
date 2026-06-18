@@ -4,6 +4,7 @@ import { Schema } from 'effect';
 import { Locale } from '../../localization/localization';
 import {
   defaultAboutPage,
+  defaultArchivePage,
   defaultContactPage,
   defaultFaqPage,
   defaultGivePage,
@@ -13,6 +14,7 @@ import {
 } from './defaults';
 import {
   toAboutView,
+  toArchiveView,
   toContactView,
   toFaqView,
   toGiveView,
@@ -192,6 +194,30 @@ describe('per-page projection', () => {
     const fr = toTeamView(page, Locale.Fr);
     expect(fr.groupPhoto?.alt).toBe('Une photo de groupe.');
     expect(fr.portrait?.alt).toBe('Logo FR.');
+  });
+
+  it('every converter projects the page `enabled` flag through verbatim (Feature C)', () => {
+    // The flag is read off the projected view by the route (404 when !enabled) and
+    // by the nav loader (via getEnabledPages). Each converter must carry the
+    // decoded object's flag, not re-declare one (`derive-dont-sync`). Team's
+    // default ships `false`; every other ships `true`.
+    expect(toAboutView(defaultAboutPage, Locale.En).enabled).toBe(true);
+    expect(toFaqView(defaultFaqPage, Locale.En).enabled).toBe(true);
+    expect(toGiveView(defaultGivePage, Locale.En).enabled).toBe(true);
+    expect(toContactView(defaultContactPage, Locale.En).enabled).toBe(true);
+    expect(toVolunteerView(defaultVolunteerPage, Locale.En).enabled).toBe(true);
+    expect(toArchiveView(defaultArchivePage, Locale.En).enabled).toBe(true);
+    expect(toHomeView(defaultHomePage, Locale.En).enabled).toBe(true);
+    expect(toTeamView(defaultTeamPage, Locale.En).enabled).toBe(false);
+
+    // A flipped flag projects through: a team page decoded with enabled:true.
+    const enabledTeam = Schema.decodeUnknownSync(TeamPage)({
+      enabled: true,
+      title: [{ _tag: 'text', value: { en: 'Team', fr: 'Équipe' } }],
+      subtitle: { en: 'Sub.', fr: 'Sous.' },
+      boardHeading: { en: 'Board', fr: 'Conseil' },
+    });
+    expect(toTeamView(enabledTeam, Locale.En).enabled).toBe(true);
   });
 
   it('home: nested evergreen copy collapses to the locale', () => {
