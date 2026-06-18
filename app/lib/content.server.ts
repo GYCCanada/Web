@@ -431,6 +431,18 @@ export class Service extends Context.Service<
       page: P,
     ) => Effect.Effect<PageContent<P>>;
     /**
+     * The per-page `enabled` visibility flag for EVERY page, read off the same
+     * cached page objects `getPage` reads (Feature C). The nav layout loader folds
+     * this into its data so links render data-driven — a page's link appears iff
+     * its `enabled` is true — with NO second hardcoded page list (`derive-dont-sync`,
+     * the rejected "team-hide nav comment" path). A disabled page's route + action
+     * 404 off the same flag (read via `getPage`). Returns a total
+     * `Record<PageId, boolean>` over the closed page set; a page whose object is
+     * absent/malformed falls back to its bundled default's flag (team's default is
+     * `false`, every other is `true`).
+     */
+    readonly getEnabledPages: () => Effect.Effect<Record<PageId, boolean>>;
+    /**
      * Read one Form definition object (`forms/<form>.json`), decoded at its own
      * boundary through the registry schema, with the same per-object fallback +
      * cache as `getPage`. This is the read path Branch 6's form engine reads its
@@ -618,6 +630,18 @@ export const layer = Layer.effect(
       return (yield* formCaches[form].read) as FormContent<F>;
     });
 
+    // Read every page's cached object and project to its `enabled` flag — a thin
+    // derived read over the SAME per-object caches `getPage` uses (no new cache,
+    // no parallel source). The nav drives off this; a disabled page also 404s its
+    // route/action off the per-page flag (`derive-dont-sync`).
+    const getEnabledPages = Effect.fn('Content.getEnabledPages')(function* () {
+      const enabled = {} as Record<PageId, boolean>;
+      for (const page of PAGE_IDS) {
+        enabled[page] = (yield* getPage(page)).enabled;
+      }
+      return enabled;
+    });
+
     const getConference = Effect.fn('Content.getConference')(function* (
       locale: Locale,
       year?: number,
@@ -687,6 +711,7 @@ export const layer = Layer.effect(
       getTranslations,
       getTeam,
       getPage,
+      getEnabledPages,
       getForm,
       bust,
     });

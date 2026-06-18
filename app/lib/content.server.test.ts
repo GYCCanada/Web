@@ -13,10 +13,11 @@ import {
   defaultAboutPage,
   defaultContactForm,
   defaultFaqPage,
+  defaultGivePage,
   defaultTeamPage,
 } from './content/pages/defaults';
 import { formObjectKey, pageObjectKey } from './content/pages/registry';
-import { AboutPage, FaqPage } from './content/pages/schema';
+import { AboutPage, FaqPage, GivePage, TeamPage } from './content/pages/schema';
 import { FormDefinition } from './forms/definition';
 import { HexColour, SiteContent } from './content/schema';
 import type { SiteContent as SiteContentType } from './content/schema';
@@ -586,6 +587,57 @@ describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3
       const team = yield* content.getPage('team');
       expect(team).toEqual(defaultTeamPage);
     }).pipe(Effect.provide(Layer.provideMerge(Content.layer, emptyStorage))));
+
+  it.effect('getEnabledPages returns the per-page flag for every page (defaults: team false, rest true)', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      // Empty bucket → every page falls back to its bundled default's flag.
+      const enabled = yield* content.getEnabledPages();
+      expect(enabled).toEqual({
+        about: true,
+        faq: true,
+        give: true,
+        contact: true,
+        volunteer: true,
+        archive: true,
+        home: true,
+        // The bundled team default ships enabled:false (hidden by data).
+        team: false,
+      });
+    }).pipe(Effect.provide(Layer.provideMerge(Content.layer, emptyStorage))));
+
+  it.effect('getEnabledPages reflects a published object whose enabled flag is flipped', () =>
+    Effect.gen(function* () {
+      const content = yield* Content.Service;
+      const enabled = yield* content.getEnabledPages();
+      // A published give.json with enabled:false flips give off; team.json with
+      // enabled:true flips team on — both data-driven, read off the page objects.
+      expect(enabled.give).toBe(false);
+      expect(enabled.team).toBe(true);
+      expect(enabled.about).toBe(true);
+    }).pipe(
+      Effect.provide(
+        Layer.provideMerge(
+          Content.layer,
+          Layer.unwrap(
+            Effect.gen(function* () {
+              const giveJson = yield* seedJson(
+                Schema.encodeUnknownEffect(Schema.fromJsonString(GivePage)),
+                GivePage.make({ ...defaultGivePage, enabled: false }),
+              );
+              const teamJson = yield* seedJson(
+                Schema.encodeUnknownEffect(Schema.fromJsonString(TeamPage)),
+                TeamPage.make({ ...defaultTeamPage, enabled: true }),
+              );
+              return layerTest({
+                [pageObjectKey('give')]: { body: giveJson },
+                [pageObjectKey('team')]: { body: teamJson },
+              });
+            }),
+          ),
+        ),
+      ),
+    ));
 
   it.effect('getForm falls back to the bundled default when the object is absent', () =>
     Effect.gen(function* () {
