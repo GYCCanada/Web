@@ -207,10 +207,17 @@ export const assembleOverrides = (
     if (isTranslationField(name)) continue;
     const path = name.split('.');
     const leaf = path[path.length - 1];
+    // Leaf-name coercion so the form's string FormData decodes at the typed schema
+    // boundary: `chapter`/`verse` are numbers; `enabled` (the per-page visibility
+    // checkbox, Feature C) is a real boolean — a bare `"true"`/`"false"` string
+    // would NOT decode as `Schema.Boolean` (Codex #5/#12). The hidden-companion +
+    // checkbox always post an `enabled` value, so this coercion is deterministic.
     const coerced: Json =
       (leaf === 'chapter' || leaf === 'verse') && value.trim() !== ''
         ? Number(value)
-        : value;
+        : leaf === 'enabled'
+          ? value === 'true'
+          : value;
     setPath(root, path, coerced);
   }
   return root;

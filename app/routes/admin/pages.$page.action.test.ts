@@ -2,9 +2,16 @@ import { describe, expect, it } from 'bun:test';
 import { ConfigProvider, Effect, Layer, ManagedRuntime } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
+import { Schema } from 'effect';
+
 import { Auth } from '~/lib/auth.server';
+import { Content } from '~/lib/content.server';
+import { getEnabledPageOr404 } from '~/lib/content/page-guard.server';
+import { pageDraftKey } from '~/lib/content/pages/registry';
+import { DraftTeamPage } from '~/lib/content/pages/schema';
 import { makeAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
 import type { RouteArgs } from '~/lib/effect/router-context';
+import { NotFoundError } from '~/lib/effect/errors';
 import { Storage } from '~/lib/storage.server';
 import { layerTest } from '~/lib/storage.test-helper';
 
@@ -170,6 +177,119 @@ describe('team page editor action — image-upload resize-to-webp (B.2)', () => 
     expect(head._tag).toBe('Some');
     if (head._tag === 'Some') {
       expect(head.value.contentType).toBe('image/webp');
+    }
+  });
+});
+
+/**
+ * POST urlencoded fields to the team page editor action through the REAL action
+ * (past the auth gate), returning the response + the request `args` so the test
+ * can read the draft/published object back through the SAME in-memory bucket.
+ */
+const postTeamFields = async (
+  fields: ReadonlyArray<readonly [string, string]>,
+): Promise<{ res: Response; args: RouteArgs }> => {
+  const { layer, context } = makeContext();
+  const cookie = await mintCookie(layer);
+
+  // URLSearchParams keeps duplicate keys in INSERTION order — exactly how the
+  // browser submits the `Checkbox`'s hidden companion + checkbox pair.
+  const body = new URLSearchParams();
+  for (const [name, value] of fields) body.append(name, value);
+  const url = 'http://localhost/admin/pages/team';
+  const request = new Request(url, {
+    method: 'POST',
+    body,
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+  });
+  const args: RouteArgs = {
+    request,
+    url: new URL(url),
+    pattern: '/admin/pages/:page',
+    params: { page: 'team' },
+    context,
+  };
+  const res = (await action(args)) as Response;
+  return { res, args };
+};
+
+/**
+ * The per-page editor's `enabled`-flag edit (Feature C, C.5). The `Checkbox`
+ * posts a deterministic `enabled` value (hidden companion `false` + checkbox
+ * `true`), `assembleOverrides` coerces it to a real boolean, and the value rides
+ * the normal save/publish path. These drive the REAL action and read the result
+ * back through the same in-memory bucket:
+ *   - a CHECKED box (companion false + checkbox true) lands enabled:true;
+ *   - an UNCHECKED box (companion false only) lands enabled:false;
+ *   - publish enabled=false makes the published team page DISABLED, so the
+ *     public route guard 404s (the page genuinely no longer exists).
+ */
+describe('team page editor action — enabled flag edit (C.5)', () => {
+  /** Read + decode the stored team DRAFT through the action's own bucket. */
+  const readTeamDraft = async (args: RouteArgs): Promise<DraftTeamPage> => {
+    const draftJson = await args.context.runtime.run(
+      args,
+      Effect.gen(function* () {
+        const storage = yield* Storage.Service;
+        const object = yield* storage.get(pageDraftKey('team'));
+        return yield* Effect.promise(() => new Response(object.stream).text());
+      }),
+    );
+    return Schema.decodeUnknownSync(DraftTeamPage)(JSON.parse(draftJson));
+  };
+
+  it('a CHECKED box (companion false + checkbox true) lands enabled:true on the draft', async () => {
+    // The real Checkbox posts the hidden enabled=false FIRST, then the checkbox
+    // enabled=true; last-wins gives true after the assembleOverrides coercion.
+    const { res, args } = await postTeamFields([
+      ['intent', 'save-draft'],
+      ['enabled', 'false'],
+      ['enabled', 'true'],
+    ]);
+    expect(res.status).toBe(302);
+    const draft = await readTeamDraft(args);
+    expect(draft.enabled).toBe(true);
+  });
+
+  it('an UNCHECKED box (companion false only) lands enabled:false on the draft', async () => {
+    // "Uncheck + save" must be effective, not a no-op: the hidden companion makes
+    // the override always carry a deterministic boolean.
+    const { res, args } = await postTeamFields([
+      ['intent', 'save-draft'],
+      ['enabled', 'false'],
+    ]);
+    expect(res.status).toBe(302);
+    const draft = await readTeamDraft(args);
+    expect(draft.enabled).toBe(false);
+  });
+
+  it('publishing enabled=false disables the team page so the public route 404s', async () => {
+    const { res, args } = await postTeamFields([
+      ['intent', 'publish'],
+      ['enabled', 'false'],
+    ]);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain('Published');
+
+    // Read the now-published team page through the public guard: a disabled page
+    // 404s (NotFoundError), and getPage reports enabled:false.
+    const outcome = await args.context.runtime.run(
+      args,
+      Effect.gen(function* () {
+        const content = yield* Content.Service;
+        yield* content.bust({ kind: 'page', page: 'team' });
+        const page = yield* content.getPage('team');
+        const guardExit = yield* Effect.exit(getEnabledPageOr404('team'));
+        return { enabled: page.enabled, guardExit };
+      }),
+    );
+    expect(outcome.enabled).toBe(false);
+    expect(outcome.guardExit._tag).toBe('Failure');
+    if (outcome.guardExit._tag === 'Failure') {
+      const failed = outcome.guardExit.cause.reasons.some(
+        (reason) => reason._tag === 'Fail' && NotFoundError.is(reason.error),
+      );
+      expect(failed).toBe(true);
     }
   });
 });
