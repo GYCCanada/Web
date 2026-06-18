@@ -131,7 +131,8 @@ export const action = routeAction(function* () {
   const intent = String(form.get('intent') ?? 'save-draft');
 
   // ---- image upload --------------------------------------------------------
-  // The route owns the FormData side: validate the file and store its raw bytes;
+  // The route owns the FormData side: validate the file, optimize it at the
+  // shared `prepareImage` boundary, and store the prepared bytes;
   // `DraftEditor.applyImageUpload` then rewrites the targeted `…key` field on the
   // draft so the new image survives a reload and a later publish.
   const uploadTarget = imageUploadTarget(intent);
@@ -154,9 +155,9 @@ export const action = routeAction(function* () {
       );
     }
 
-    // Shrink + re-encode at the ONE shared boundary (Feature B). The stored
-    // object IS WebP after `prepareImage`, so the key + `storage.put` follow
-    // `prepared.contentType` — never `file.type` — or the served object's
+    // Shrink + re-encode at the ONE shared boundary (Feature B): WebP for the
+    // decodable raster types, GIF/originals passed through. The key + `storage.put`
+    // follow `prepared.contentType` — never `file.type` — or the served object's
     // extension/type would lie.
     const bytes = new Uint8Array(yield* Effect.promise(() => file.arrayBuffer()));
     const prepared = yield* prepareImage(bytes, file.type);
