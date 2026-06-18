@@ -55,13 +55,10 @@ const en = {
     'Your message has been sent successfully! We will take notice of it and answer as soon as possible.',
   'give.directions': "Here's how you can give:",
   'give.continue': 'Continue',
-  'team.title': 'The people behind the {{movement}}.',
-  'team.title.movement': 'movement',
-  'team.image.alt': 'A group of young people smiling and standing together.',
-  'team.logo.alt': 'GYC Canada Logo',
-  'team.subtitle':
-    'We are GYC Canada, young people dedicated to spreading the Gospel and living the lives that God has planned for us. As ambassadors of Christ in this world, we are fulfilling His purpose for us and go boldly where our Savior leads.',
-  'team.board': 'Board of Directors',
+  // `team.title` / `team.title.movement` / `team.image.alt` / `team.logo.alt` /
+  // `team.subtitle` / `team.board` migrated to the CMS `TeamPage` object (the
+  // route renders them from `getPage('team')`). `team.position.*` (the executive
+  // roster, still on `site.json` via `getTeam()`) and `nav.team` stay.
   'team.position.president': 'President',
   'team.position.vice-president': 'General Vice President',
   'team.position.vp-logistics': 'VP of Logistics',
@@ -321,13 +318,8 @@ const fr: Record<TranslationKey, string> = {
     'Votre message a été envoyé avec succès! Nous en prendrons connaissance et vous répondrons dès que possible.',
   'give.directions': 'Voici comment vous pouvez donner :',
   'give.continue': 'Continuer',
-  'team.title': 'Les personnes derrière le {{movement}}.',
-  'team.title.movement': 'mouvement',
-  'team.image.alt': 'Un groupe de jeunes souriants et debout ensemble.',
-  'team.logo.alt': 'Logo GYC Canada',
-  'team.subtitle':
-    "Nous sommes GYC Canada, des jeunes dédiés à faire connaître l'Évangile et à vivre les vies que Dieu a prévues pour nous. En tant qu'ambassadeurs de Christ dans ce monde, nous accomplissons Sa volonté pour nous et allons avec courage là où notre Seigneur nous conduit.",
-  'team.board': 'Conseil d’administration',
+  // Team page chrome (title / movement / image.alt / logo.alt / subtitle / board)
+  // migrated to the CMS `TeamPage`; `team.position.*` + `nav.team` stay (see EN).
   'team.position.president': 'Président',
   'team.position.vice-president': 'Vice-président général',
   'team.position.vp-logistics': 'Vice-président de la logistique',
