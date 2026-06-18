@@ -663,12 +663,13 @@ describe('per-page /admin editor via DraftEditor (page scope, ADR 0008/0006)', (
     expect([...result.bytes]).toEqual([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
   });
 
-  it('the route image-upload guards reject a non-image MIME and an empty file', () => {
-    // The per-page action reuses `content.tsx`'s guards verbatim: a non-accepted
-    // MIME is a 400, and `imageUploadTarget` only fires for the `upload:` intent.
-    expect(isAcceptedImageType('application/pdf')).toBe(false);
-    expect(isAcceptedImageType('image/png')).toBe(true);
+  // The route-level 400 guards (empty file / non-image MIME) are driven against
+  // the REAL action in `app/routes/admin/pages.$page.action.test.ts`; here we
+  // only pin the intent→target derivation the upload branch keys off.
+  it('imageUploadTarget fires only for the upload: intent (else save/publish)', () => {
     expect(imageUploadTarget('save-draft')).toBeNull();
+    expect(imageUploadTarget('publish')).toBeNull();
     expect(imageUploadTarget('upload:portrait.key')).toBe('portrait.key');
+    expect(imageUploadTarget('upload:groupPhoto.key')).toBe('groupPhoto.key');
   });
 });
