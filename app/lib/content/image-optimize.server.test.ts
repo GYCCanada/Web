@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { Effect } from 'effect';
+import { Effect, Option } from 'effect';
 
+import { Storage } from '../storage.server';
+import { layerTest } from '../storage.test-helper';
+import { uploadedImageKey } from './admin-form';
 import {
   MAX_WIDTH,
   prepareImage,
@@ -128,5 +131,48 @@ describe('prepareImage', () => {
   it('exposes the cap + quality as the single source of truth', () => {
     expect(MAX_WIDTH).toBe(1600);
     expect(WEBP_QUALITY).toBe(80);
+  });
+});
+
+/**
+ * The route-boundary contract (B.2): both editors run the exact sequence
+ * `prepareImage → uploadedImageKey(target, prepared.contentType) →
+ * storage.put(key, prepared.bytes, prepared.contentType)`. This pins the
+ * load-bearing correction — the key's extension AND the stored content-type
+ * follow the RE-ENCODED type, never `file.type` — against the real in-memory
+ * `Storage` (not a mock), so a regression that keys off the source MIME is
+ * caught here even though the route action itself is a thin shell over this.
+ */
+describe('upload boundary: key + put follow prepared.contentType', () => {
+  const storeUpload = (bytes: Uint8Array, sourceType: string) =>
+    Effect.gen(function* () {
+      const storage = yield* Storage.Service;
+      const prepared = yield* prepareImage(bytes, sourceType);
+      const key = uploadedImageKey('groupPhoto.key', prepared.contentType, 1_700_000_000_000);
+      yield* storage.put(key, prepared.bytes, prepared.contentType);
+      const head = yield* storage.head(key);
+      return { key: String(key), head };
+    }).pipe(Effect.provide(layerTest()));
+
+  it('stores a wide JPEG as a .webp object with an image/webp content-type', async () => {
+    const wide = await jpegOf(2400, 800);
+
+    const { key, head } = await Effect.runPromise(storeUpload(wide, 'image/jpeg'));
+
+    expect(key).toMatch(/\.webp$/);
+    expect(Option.isSome(head)).toBe(true);
+    const stored = Option.getOrThrow(head);
+    expect(stored.contentType).toBe('image/webp');
+    expect(stored.size).toBeGreaterThan(0);
+  });
+
+  it('stores a GIF as a .gif object with an image/gif content-type (passthrough)', async () => {
+    const { key, head } = await Effect.runPromise(
+      storeUpload(GIF_1X1, 'image/gif'),
+    );
+
+    expect(key).toMatch(/\.gif$/);
+    const stored = Option.getOrThrow(head);
+    expect(stored.contentType).toBe('image/gif');
   });
 });

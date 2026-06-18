@@ -22,6 +22,7 @@ import {
   uploadedImageKey,
   type Json,
 } from '~/lib/content/admin-form';
+import { prepareImage } from '~/lib/content/image-optimize.server';
 import { collectListOps, fieldName } from '~/lib/content/list-edit';
 import { PAGE_SPECS, PageId } from '~/lib/content/pages/registry';
 import { ListItemId, newListItemId } from '~/lib/content/schema';
@@ -176,11 +177,17 @@ export const action = routeAction(function* () {
       );
     }
 
-    const now = yield* Clock.currentTimeMillis;
-    const key = uploadedImageKey(uploadTarget, file.type, now);
+    // Shrink + re-encode at the ONE shared boundary (Feature B), identical to
+    // the site editor: the stored object IS WebP after `prepareImage`, so the
+    // key + `storage.put` follow `prepared.contentType`, never `file.type`.
     const bytes = new Uint8Array(yield* Effect.promise(() => file.arrayBuffer()));
+    const prepared = yield* prepareImage(bytes, file.type);
+    const now = yield* Clock.currentTimeMillis;
+    const key = uploadedImageKey(uploadTarget, prepared.contentType, now);
 
-    const putExit = yield* Effect.exit(storage.put(key, bytes, file.type));
+    const putExit = yield* Effect.exit(
+      storage.put(key, prepared.bytes, prepared.contentType),
+    );
     if (putExit._tag === 'Failure') {
       return Response.json(
         {
