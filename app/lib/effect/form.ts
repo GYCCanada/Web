@@ -105,8 +105,13 @@ const handleFormError = (
       formLevelError(submission, error.message || 'Bad request'),
     );
   }
+  // A 404 is a route-level outcome, not a form-validation outcome: a disabled
+  // page's action (Feature C) and a disabled feature's action (the newsletter
+  // when SendGrid is unconfigured) both `notFound()`, and the public must see a
+  // real 404 — not a 200 form-error report against a page that doesn't exist.
+  // Re-fail so the runtime maps it to a 404 Response (the C1 mapping).
   if (NotFoundError.is(error)) {
-    return Effect.succeed(formLevelError(submission, 'Not found'));
+    return Effect.fail(error);
   }
   if (InternalServerError.is(error)) {
     return Effect.succeed(formLevelError(submission, 'An error occurred'));

@@ -1,8 +1,8 @@
 import { Effect, Result } from 'effect';
 
 import { Content } from '../content.server';
-import type { FormId } from '../content/pages/registry';
-import { formValidationError } from '../effect/errors';
+import type { FormId, PageId } from '../content/pages/registry';
+import { formValidationError, notFound } from '../effect/errors';
 import {
   type FormSuccess,
   routeFormAction,
@@ -83,6 +83,14 @@ export interface SuccessToast {
  */
 export interface FormActionConfig<E> {
   readonly form: FormId;
+  /**
+   * The evergreen `PageId` that OWNS this form's route (contact ↔ contact page,
+   * volunteer ↔ volunteer page). The action 404s when that page is DISABLED
+   * (Feature C, Codex #6): a disabled page must reject POSTs too, not only its GET
+   * — otherwise a disabled contact page would still accept submissions. Gated off
+   * the SAME per-page `enabled` flag the loader/nav read (`derive-dont-sync`).
+   */
+  readonly page: PageId;
   readonly notify: (
     submission: Submission,
   ) => Effect.Effect<
@@ -120,6 +128,13 @@ export const formAction = <E>(config: FormActionConfig<E>) =>
     const content = yield* Content.Service;
     const submissions = yield* Submissions.Service;
     const toast = yield* Toast;
+
+    // 404 the action when the owning page is disabled (Feature C, Codex #6): a
+    // disabled page rejects POSTs too, not only its GET. Read off the same
+    // per-page `enabled` flag the loader/nav use.
+    if (!(yield* content.getPage(config.page)).enabled) {
+      return yield* notFound();
+    }
 
     const definition = yield* content.getForm(config.form);
 
