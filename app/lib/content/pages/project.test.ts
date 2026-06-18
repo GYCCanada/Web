@@ -150,7 +150,14 @@ describe('per-page projection', () => {
   it('team: title projects to runs, absent images are undefined (section-skip)', () => {
     // The bundled default omits both image slots.
     const en = toTeamView(defaultTeamPage, Locale.En);
-    expect(en.title.some((run) => run.kind === 'italic')).toBe(true);
+    // Pin the FULL run sequence (not just "some italic run"): a regression that
+    // dropped/reordered the surrounding text runs must fail.
+    expect(en.title).toEqual([
+      { kind: 'text', value: 'The people behind the ' },
+      { kind: 'italic', value: 'movement' },
+      { kind: 'text', value: '.' },
+    ]);
+    expect(en.title).toEqual(toRichText(defaultTeamPage.title, Locale.En));
     expect(en.subtitle).toBe(defaultTeamPage.subtitle.en);
     expect(en.boardHeading).toBe(defaultTeamPage.boardHeading.en);
     expect(en.groupPhoto).toBeUndefined();
