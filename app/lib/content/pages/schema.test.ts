@@ -18,12 +18,14 @@ import {
   DraftArchivePage,
   DraftFaqPage,
   DraftGivePage,
+  DraftTeamPage,
   FaqPage,
   GivePage,
   HomePage,
   LinkHref,
   RichText,
   RichTextNode,
+  TeamPage,
   VolunteerPage,
 } from './schema';
 
@@ -65,6 +67,96 @@ describe('per-page default round-trips', () => {
         expect(restored).toEqual(value);
       }));
   }
+});
+
+/**
+ * The Team page carries a RichText title plus TWO optional `ImageRef` slots. These
+ * pin the decode-safety contract the migration depends on:
+ *   - a `team.json` WITHOUT either image still decodes (section-skip default), and
+ *     WITH each present image round-trips losslessly (the present image carries a
+ *     strict `{ key, alt }`);
+ *   - a present image whose `key` is not a valid `AssetKey` (a leading-`/` path)
+ *     is REJECTED — the strict `AssetKey` brand still gates a present slot;
+ *   - a stored JSON missing BOTH optional image fields decodes (the
+ *     required-field-on-an-already-published-doc gate: the fields are
+ *     `optionalKey`, so adding them never breaks an extant object);
+ *   - the DRAFT variant tolerates an uploaded `key` with NO alt yet (the
+ *     upload-first / fill-alt-second flow), while strict publish still requires both.
+ */
+describe('TeamPage (RichText title + two optional ImageRef slots)', () => {
+  const KEY = '2026/team/group.jpg';
+  const baseEncoded = {
+    title: [
+      { _tag: 'text', value: { en: 'The people behind the ', fr: 'Les personnes derrière le ' } },
+      { _tag: 'italic', value: { en: 'movement', fr: 'mouvement' } },
+      { _tag: 'text', value: { en: '.', fr: '.' } },
+    ],
+    subtitle: { en: 'We are GYC Canada.', fr: 'Nous sommes GYC Canada.' },
+    boardHeading: { en: 'Board of Directors', fr: 'Conseil d’administration' },
+  };
+
+  it.effect('round-trips WITHOUT either image (section-skip)', () =>
+    Effect.gen(function* () {
+      const decoded = yield* Schema.decodeUnknownEffect(TeamPage)(baseEncoded);
+      const restored = yield* roundTrips(TeamPage, decoded);
+      expect(restored).toEqual(decoded);
+      expect(restored.groupPhoto).toBeUndefined();
+      expect(restored.portrait).toBeUndefined();
+    }));
+
+  it.effect('round-trips WITH each present image (strict {key, alt})', () =>
+    Effect.gen(function* () {
+      const decoded = yield* Schema.decodeUnknownEffect(TeamPage)({
+        ...baseEncoded,
+        groupPhoto: { key: KEY, alt: { en: 'A group photo.', fr: 'Une photo de groupe.' } },
+        portrait: { key: '2026/team/portrait.png', alt: { en: 'Logo.', fr: 'Logo.' } },
+      });
+      const restored = yield* roundTrips(TeamPage, decoded);
+      expect(restored).toEqual(decoded);
+      expect(String(restored.groupPhoto?.key)).toBe(KEY);
+      expect(restored.portrait?.alt.fr).toBe('Logo.');
+    }));
+
+  test('a present image with a NON-AssetKey key (leading "/") fails decode', () => {
+    const result = Schema.decodeUnknownResult(TeamPage)({
+      ...baseEncoded,
+      groupPhoto: { key: '/team/group.jpg', alt: { en: 'x', fr: 'x' } },
+    });
+    expect(result._tag).toBe('Failure');
+  });
+
+  test('a present image with a blank-locale alt fails decode (skip != half-filled)', () => {
+    const result = Schema.decodeUnknownResult(TeamPage)({
+      ...baseEncoded,
+      groupPhoto: { key: KEY, alt: { en: '', fr: '' } },
+    });
+    expect(result._tag).toBe('Failure');
+  });
+
+  test('a stored team.json missing BOTH optional image fields decodes (decode-migration gate)', () => {
+    // The exact required-field-on-a-published-doc trap: adding `groupPhoto` /
+    // `portrait` must NOT break an object that predates them. `optionalKey` means
+    // an object with neither field still decodes.
+    const result = Schema.decodeUnknownResult(TeamPage)(baseEncoded);
+    expect(result._tag).toBe('Success');
+  });
+
+  test('the DRAFT variant tolerates an uploaded key with NO alt; strict publish requires both', () => {
+    const keyOnly = {
+      ...baseEncoded,
+      groupPhoto: { key: KEY }, // uploaded key, alt not yet typed
+    };
+    expect(Schema.decodeUnknownResult(DraftTeamPage)(keyOnly)._tag).toBe('Success');
+    expect(Schema.decodeUnknownResult(TeamPage)(keyOnly)._tag).toBe('Failure');
+  });
+
+  test('the DRAFT variant still rejects a MALFORMED present key (not merely absent)', () => {
+    const badKey = {
+      ...baseEncoded,
+      groupPhoto: { key: '/leading-slash.jpg' },
+    };
+    expect(Schema.decodeUnknownResult(DraftTeamPage)(badKey)._tag).toBe('Failure');
+  });
 });
 
 const isValidLinkHref = (value: string): boolean =>

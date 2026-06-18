@@ -1,6 +1,6 @@
 import { Schema } from 'effect';
 
-import { ExternalHttpsUrl, ListItemId, Text } from '../schema';
+import { AssetKey, ExternalHttpsUrl, ImageRef, ListItemId, Text } from '../schema';
 
 /**
  * The per-Page + per-Form content schemas (ADR 0008, settled #5; registration-launch
@@ -251,6 +251,37 @@ export const HomePage = Schema.Struct({
 });
 export type HomePage = typeof HomePage.Type;
 
+/**
+ * The Team page CHROME (registration-launch follow-on: the Team route migrated
+ * into the per-page CMS model). It owns the page's evergreen copy — the rich
+ * title, the subtitle blurb, the board heading — plus TWO named, optional image
+ * slots: the group photo banner and the small portrait/logo beside the title.
+ *
+ * The per-member EXECUTIVE ROSTER (`team[]` / `board[]` on `site.json`, served by
+ * `Content.getTeam()`) is conference-executive DATA, not page chrome, and stays
+ * where it lives — this schema models only the page's hand-built chrome.
+ *
+ * Modelling choices (`~/.brain/principles`):
+ *   - `title` is `RichText` (not plain `Text`) so the italic `movement` run from
+ *     the pre-migration `team.title` / `team.title.movement` pair round-trips as a
+ *     closed `italic` token, NOT HTML — exactly as `VolunteerPage.title` does.
+ *   - `groupPhoto` / `portrait` are each `Schema.optionalKey(ImageRef)`: two
+ *     semantically distinct slots (different aspect / role in the layout), so two
+ *     named optional fields beat one list (`make-impossible-states-unrepresentable`).
+ *     Optional-at-key means a stored `team.json` that predates either field (or
+ *     carries only one uploaded image) still decodes, and the route SECTION-SKIPS
+ *     the absent image (ADR 0008) rather than rendering a broken `<img>`. A PRESENT
+ *     image carries a strict `{ key, alt }` (a valid `AssetKey` + both-locales alt).
+ */
+export const TeamPage = Schema.Struct({
+  title: RichText,
+  subtitle: Text,
+  boardHeading: Text,
+  groupPhoto: Schema.optionalKey(ImageRef),
+  portrait: Schema.optionalKey(ImageRef),
+});
+export type TeamPage = typeof TeamPage.Type;
+
 // ---------------------------------------------------------------------------
 // Draft page variants — the laxer admin-draft schemas (ADR 0006, Branch 5.5)
 // ---------------------------------------------------------------------------
@@ -332,4 +363,34 @@ export const DraftArchivePage = Schema.Struct({
   ),
 });
 export type DraftArchivePage = typeof DraftArchivePage.Type;
+
+/**
+ * A draft image reference for the Team page: a present `key` is still a strict
+ * `AssetKey` (an upload always produces a valid one), but `alt` may be unfilled.
+ * Mirrors the site draft's `DraftImageRef` (`schema.ts:638`) so the admin can
+ * upload the photo FIRST (the action rewrites `groupPhoto.key`) and fill the alt
+ * text SECOND — a strict `ImageRef` in the draft would reject the in-between state
+ * where a key exists but no alt has been typed (ADR 0006: an incomplete required
+ * field blocks PUBLISH, not draft save). Strict publish (`ImageRef`) still requires
+ * both halves (`make-impossible-states-unrepresentable` holds for what is set).
+ */
+const DraftImageRef = Schema.Struct({
+  key: Schema.optionalKey(AssetKey),
+  alt: Schema.optionalKey(DraftText),
+});
+
+/**
+ * The DRAFT variant of `TeamPage`. The chrome copy (`title` RichText, `subtitle`,
+ * `boardHeading`) has no id-only add flow, so it stays strict — there is no laxer
+ * intermediate state to represent for it. Only the two image slots relax (to the
+ * lax `DraftImageRef`) so an uploaded `key` can land before its alt text.
+ */
+export const DraftTeamPage = Schema.Struct({
+  title: RichText,
+  subtitle: Text,
+  boardHeading: Text,
+  groupPhoto: Schema.optionalKey(DraftImageRef),
+  portrait: Schema.optionalKey(DraftImageRef),
+});
+export type DraftTeamPage = typeof DraftTeamPage.Type;
 
