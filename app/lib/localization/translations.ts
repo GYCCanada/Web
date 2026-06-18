@@ -4,7 +4,6 @@ const en = {
   'main.reserve': 'Learn More',
   'main.read_bible': 'Read in Context',
   'main.time_left': 'See you in {{days}} days',
-  'main.meet_the_team': 'Meet the team',
   'main.newsletter.name.label': 'Full Name',
   'main.newsletter.name.placeholder': 'Full Name',
   'main.newsletter.email.label': 'Email',
@@ -267,7 +266,6 @@ const fr: Record<TranslationKey, string> = {
 
   'main.time_left': 'Rendez-vous dans {{days}} jours',
 
-  'main.meet_the_team': 'Rencontrez l’équipe',
   'main.newsletter.name.label': 'Nom complet',
   'main.newsletter.name.placeholder': 'Nom complet',
   'main.newsletter.email.placeholder': 'Courriel',

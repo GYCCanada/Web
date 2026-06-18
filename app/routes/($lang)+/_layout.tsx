@@ -32,7 +32,11 @@ export const loader = routeHandler(function* () {
   const content = yield* Content.Service;
   const translation = yield* content.getTranslations(lang);
   const currentConference = yield* content.getCurrentConference(lang);
-  return { lang, translation, currentConference };
+  // Drive the nav (and footer) links off the per-page `enabled` flags — a page's
+  // link renders iff its page is enabled. This replaces the hardcoded team-hide
+  // comments with DATA (`derive-dont-sync`, Feature C): no second page list.
+  const enabled = yield* content.getEnabledPages();
+  return { lang, translation, currentConference, enabled };
 });
 
 export default function Layout() {
@@ -79,6 +83,7 @@ function Nav() {
 
 function TopNav() {
   const translate = useTranslate();
+  const { enabled } = useLoaderData<typeof loader>();
 
   return (
     <header className="bg-background text-foreground w-full">
@@ -95,11 +100,19 @@ function TopNav() {
             year: new Date().getFullYear(),
           })}
         </NavItem>
-        <NavItem to="/about">{translate("nav.about")}</NavItem>
-        {/* <NavItem to="/team">{translate('nav.team')}</NavItem> */}
-        <NavItem to="/contact">{translate("nav.contact")}</NavItem>
-        <NavItem to="/give">{translate("nav.give")}</NavItem>
-        <NavItem to="/volunteer">{translate("nav.volunteer")}</NavItem>
+        {enabled.about && (
+          <NavItem to="/about">{translate("nav.about")}</NavItem>
+        )}
+        {enabled.team && (
+          <NavItem to="/team">{translate("nav.team")}</NavItem>
+        )}
+        {enabled.contact && (
+          <NavItem to="/contact">{translate("nav.contact")}</NavItem>
+        )}
+        {enabled.give && <NavItem to="/give">{translate("nav.give")}</NavItem>}
+        {enabled.volunteer && (
+          <NavItem to="/volunteer">{translate("nav.volunteer")}</NavItem>
+        )}
         <Language />
       </nav>
     </header>
@@ -110,6 +123,7 @@ function PopupNav() {
   const [open, setOpen] = React.useState(false);
   const toggle = () => setOpen((prev) => !prev);
   const translate = useTranslate();
+  const { enabled } = useLoaderData<typeof loader>();
 
   const location = useLocation();
 
@@ -160,13 +174,36 @@ function PopupNav() {
                         label: translate("nav.home", {
                           year: new Date().getFullYear(),
                         }),
+                        show: true,
                       },
-                      { to: "/about", label: translate("nav.about") },
-                      // { to: "/team", label: translate("nav.team") },
-                      { to: "/contact", label: translate("nav.contact") },
-                      { to: "/give", label: translate("nav.give") },
-                      { to: "/volunteer", label: translate("nav.volunteer") },
-                    ].map((item, index) => (
+                      {
+                        to: "/about",
+                        label: translate("nav.about"),
+                        show: enabled.about,
+                      },
+                      {
+                        to: "/team",
+                        label: translate("nav.team"),
+                        show: enabled.team,
+                      },
+                      {
+                        to: "/contact",
+                        label: translate("nav.contact"),
+                        show: enabled.contact,
+                      },
+                      {
+                        to: "/give",
+                        label: translate("nav.give"),
+                        show: enabled.give,
+                      },
+                      {
+                        to: "/volunteer",
+                        label: translate("nav.volunteer"),
+                        show: enabled.volunteer,
+                      },
+                    ]
+                      .filter((item) => item.show)
+                      .map((item, index) => (
                       <NavItem
                         key={item.to}
                         to={item.to}
@@ -295,7 +332,7 @@ function NavItem({
 
 function Footer() {
   const translate = useTranslate();
-  const { currentConference } = useLoaderData<typeof loader>();
+  const { currentConference, enabled } = useLoaderData<typeof loader>();
   return (
     <footer className="bg-background text-foreground">
       <div className="mx-auto flex w-(--width) flex-col gap-12 px-4 py-10">
@@ -335,18 +372,26 @@ function Footer() {
               {currentConference.title}{" "}
               {dayjs(currentConference.dates[0]).format("YYYY")}
             </Link>
-            <Link to="/about" className={linkStyle}>
-              {translate("nav.about")}
-            </Link>
-            <Link to="/contact" className={linkStyle}>
-              {translate("nav.contact")}
-            </Link>
-            <Link to="/give" className={linkStyle}>
-              {translate("nav.give")}
-            </Link>
-            <Link to="/faq" className={linkStyle}>
-              {translate("nav.faq")}
-            </Link>
+            {enabled.about && (
+              <Link to="/about" className={linkStyle}>
+                {translate("nav.about")}
+              </Link>
+            )}
+            {enabled.contact && (
+              <Link to="/contact" className={linkStyle}>
+                {translate("nav.contact")}
+              </Link>
+            )}
+            {enabled.give && (
+              <Link to="/give" className={linkStyle}>
+                {translate("nav.give")}
+              </Link>
+            )}
+            {enabled.faq && (
+              <Link to="/faq" className={linkStyle}>
+                {translate("nav.faq")}
+              </Link>
+            )}
           </div>
         </div>
 
