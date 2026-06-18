@@ -5,8 +5,12 @@ import { RouterContextProvider } from 'react-router';
 import { Schema } from 'effect';
 
 import { Content } from '../content.server';
-import { defaultContactForm } from '../content/pages/defaults';
-import { formObjectKey } from '../content/pages/registry';
+import {
+  defaultContactForm,
+  defaultContactPage,
+} from '../content/pages/defaults';
+import { formObjectKey, pageObjectKey } from '../content/pages/registry';
+import { ContactPage } from '../content/pages/schema';
 import { formValidationError } from '../effect/errors';
 import { makeAppLayer, makeRequestRuntimeFromLayer } from '../effect/runtime';
 import { ReactRouterContext, type RouteArgs } from '../effect/router-context';
@@ -68,6 +72,7 @@ describe('formAction', () => {
     let notified: Submission | undefined;
     const action = formAction({
       form: 'contact',
+      page: 'contact',
       notify: (submission) =>
         Effect.sync(() => {
           notified = submission;
@@ -125,6 +130,7 @@ describe('formAction', () => {
     let notified: Submission | undefined;
     const action = formAction({
       form: 'contact',
+      page: 'contact',
       notify: (submission) =>
         Effect.sync(() => {
           notified = submission;
@@ -162,6 +168,7 @@ describe('formAction', () => {
   it('a present-blank inactive field (the pre-fix unconditional render) FAILS — why the renderer must gate it', async () => {
     const action = formAction({
       form: 'contact',
+      page: 'contact',
       notify: () => Effect.void,
       success: {
         title: 'contact.form.success.title',
@@ -191,6 +198,7 @@ describe('formAction', () => {
   it('a notify failure aborts the redirect and reports a form-level error', async () => {
     const action = formAction({
       form: 'contact',
+      page: 'contact',
       notify: () =>
         Effect.fail(formValidationError({ formErrors: ['contact.form.error'] })),
       success: {
@@ -240,6 +248,7 @@ describe('formAction', () => {
 
     const action = formAction({
       form: 'contact',
+      page: 'contact',
       notify: () =>
         Effect.fail(formValidationError({ formErrors: ['contact.form.error'] })),
       success: {
@@ -294,10 +303,75 @@ describe('formAction', () => {
     expect(form.title.en).toBe(editedTitle);
   });
 
+  it('404s the action when the owning page is DISABLED (Feature C, Codex #6)', async () => {
+    // Seed a published contact page object with enabled:false. The action must
+    // 404 BEFORE decode/persist/notify — a disabled page rejects POSTs too, not
+    // only its GET. Encode the default contact page with the flag flipped off.
+    const encodePage = Schema.encodeUnknownEffect(
+      Schema.fromJsonString(ContactPage),
+    );
+    const pageJson = await Effect.runPromise(
+      encodePage(ContactPage.make({ ...defaultContactPage, enabled: false })),
+    );
+
+    let notifyRan = false;
+    const action = formAction({
+      form: 'contact',
+      page: 'contact',
+      notify: () =>
+        Effect.sync(() => {
+          notifyRan = true;
+        }),
+      success: {
+        title: 'contact.form.success.title',
+        description: 'contact.form.success.description',
+      },
+    });
+
+    const url = 'http://localhost/contact';
+    const request = new Request(url, {
+      method: 'POST',
+      body: new URLSearchParams({
+        method: 'email',
+        name: 'Ada',
+        email: 'ada@example.com',
+        message: 'hi',
+      }),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    const context = new RouterContextProvider();
+    context.runtime = makeRequestRuntimeFromLayer(
+      makeAppLayer(
+        layerTest({ [pageObjectKey('contact')]: { body: pageJson } }),
+      ),
+    );
+
+    let thrown: unknown;
+    try {
+      await action({
+        request,
+        url: new URL(url),
+        pattern: '/contact',
+        params: {},
+        context,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    // The runtime maps the yielded NotFoundError to a 404 (React Router's
+    // `data('Not Found', { status: 404 })`, a `DataWithResponseInit`), and the
+    // body (decode/persist/notify) never ran.
+    const status = (thrown as { init?: { status?: number } })?.init?.status;
+    expect(status).toBe(404);
+    expect(notifyRan).toBe(false);
+  });
+
   it('skips the body (no notify) when the honeypot is filled', async () => {
     let notifyRan = false;
     const action = formAction({
       form: 'contact',
+      page: 'contact',
       notify: () =>
         Effect.sync(() => {
           notifyRan = true;

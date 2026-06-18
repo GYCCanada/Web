@@ -12,6 +12,7 @@ import { match } from "ts-pattern";
 import { Breakpoint, useBreakpoint } from "~/lib/client-hints";
 import { FormProvider, useForm } from "~/lib/conform";
 import { Content } from "~/lib/content.server";
+import { getEnabledPageOr404 } from "~/lib/content/page-guard.server";
 import { toHomeView } from "~/lib/content/pages/project";
 import { dayjs } from "~/lib/dayjs";
 import { formValidationError, notFound } from "~/lib/effect/errors";
@@ -54,7 +55,8 @@ export const loader = routeHandler(function* () {
   const env = yield* Env.Service;
   return {
     conference: yield* content.getCurrentConference(locale),
-    page: toHomeView(yield* content.getPage("home"), locale),
+    // 404 when the home page is disabled (Feature C); else project the decoded page.
+    page: toHomeView(yield* getEnabledPageOr404("home"), locale),
     newsletterEnabled: Option.isSome(env.sendgrid),
   };
 });

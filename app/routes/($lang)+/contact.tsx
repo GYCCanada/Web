@@ -8,6 +8,7 @@ import {
 } from "react-router";
 
 import { Content } from "~/lib/content.server";
+import { getEnabledPageOr404 } from "~/lib/content/page-guard.server";
 import { FormProvider, useForm } from "~/lib/conform";
 import { definitionToSchema, type DecodedForm } from "~/lib/forms/decode";
 import { FormDefinition } from "~/lib/forms/definition";
@@ -48,8 +49,10 @@ export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   const content = yield* Content.Service;
+  // 404 when the contact page is disabled (Feature C); else project + load the form.
+  const page = toContactView(yield* getEnabledPageOr404("contact"), locale);
   return {
-    page: toContactView(yield* content.getPage("contact"), locale),
+    page,
     definition: yield* content.getForm("contact"),
   };
 });
@@ -85,6 +88,7 @@ const contactLine = (decoded: DecodedForm): string => {
 // when `notify` runs, so a mailer failure cannot lose the record).
 export const action = formAction({
   form: "contact",
+  page: "contact",
   notify: (submission) =>
     Effect.gen(function* () {
       const decoded = submission.payload;
