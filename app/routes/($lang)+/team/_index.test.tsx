@@ -74,9 +74,10 @@ describe('Team route render-parity (CMS chrome + unchanged roster)', () => {
   it('renders the rich title (with the italic movement run), subtitle, and board heading', () => {
     const html = renderTeam(makeLoaderData());
     expect(html).toContain('The people behind the ');
-    // The italic `movement` run renders inside `<span class="italic">`.
-    expect(html).toContain('movement');
-    expect(html).toContain('class="italic"');
+    // Tie the class AND the text together: the `movement` run must be THE italic
+    // run (parity with the pre-migration `<span className="italic">…movement…</span>`),
+    // not merely both appearing somewhere in the markup.
+    expect(html).toMatch(/<span[^>]*class="italic"[^>]*>movement<\/span>/);
     expect(html).toContain('We are GYC Canada');
     expect(html).toContain('Board of Directors');
   });
@@ -115,7 +116,7 @@ describe('Team route render-parity (CMS chrome + unchanged roster)', () => {
   it('renders French chrome under /fr', () => {
     const html = renderTeam(makeLoaderData(toTeamView(defaultTeamPage, Locale.Fr)), 'fr');
     expect(html).toContain('Les personnes derrière le ');
-    expect(html).toContain('mouvement');
+    expect(html).toMatch(/<span[^>]*class="italic"[^>]*>mouvement<\/span>/);
     expect(html).toContain('Conseil d');
   });
 });
