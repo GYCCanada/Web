@@ -597,7 +597,7 @@ export const layer = Layer.effect(
       });
 
     // Build one independent cache per Page and per Form object up front (the id
-    // sets are closed and small — 7 pages + 3 forms). Eager construction keeps
+    // sets are closed and small — 8 pages + 3 forms). Eager construction keeps
     // each `getPage` / `getForm` a pure cache read with no first-call lock, and
     // the bust dispatch a direct record lookup over the closed id.
     const pageCaches = {} as Record<PageId, ObjectCache>;
