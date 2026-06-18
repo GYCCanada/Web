@@ -303,10 +303,13 @@ describe('formAction', () => {
     expect(form.title.en).toBe(editedTitle);
   });
 
-  it('404s the action when the owning page is DISABLED (Feature C, Codex #6)', async () => {
-    // Seed a published contact page object with enabled:false. The action must
-    // 404 BEFORE decode/persist/notify — a disabled page rejects POSTs too, not
-    // only its GET. Encode the default contact page with the flag flipped off.
+  // Run a contact `formAction` whose owning page is seeded DISABLED, against the
+  // given POST body. Returns the thrown 404 (a `DataWithResponseInit`) + whether
+  // notify ran. The gate must 404 EVERY POST, including a honeypot-filled one, so
+  // both bodies route through this helper.
+  const runDisabledPagePost = async (
+    body: Record<string, string>,
+  ): Promise<{ thrown: unknown; notifyRan: boolean }> => {
     const encodePage = Schema.encodeUnknownEffect(
       Schema.fromJsonString(ContactPage),
     );
@@ -331,19 +334,12 @@ describe('formAction', () => {
     const url = 'http://localhost/contact';
     const request = new Request(url, {
       method: 'POST',
-      body: new URLSearchParams({
-        method: 'email',
-        name: 'Ada',
-        email: 'ada@example.com',
-        message: 'hi',
-      }),
+      body: new URLSearchParams(body),
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
     });
     const context = new RouterContextProvider();
     context.runtime = makeRequestRuntimeFromLayer(
-      makeAppLayer(
-        layerTest({ [pageObjectKey('contact')]: { body: pageJson } }),
-      ),
+      makeAppLayer(layerTest({ [pageObjectKey('contact')]: { body: pageJson } })),
     );
 
     let thrown: unknown;
@@ -358,10 +354,32 @@ describe('formAction', () => {
     } catch (error) {
       thrown = error;
     }
+    return { thrown, notifyRan };
+  };
 
-    // The runtime maps the yielded NotFoundError to a 404 (React Router's
-    // `data('Not Found', { status: 404 })`, a `DataWithResponseInit`), and the
-    // body (decode/persist/notify) never ran.
+  it('404s the action when the owning page is DISABLED (Feature C, Codex #6)', async () => {
+    // A disabled page rejects POSTs too, not only its GET. The runtime maps the
+    // yielded NotFoundError to a 404 (React Router's `data('Not Found', { status:
+    // 404 })`, a `DataWithResponseInit`), and the body never ran.
+    const { thrown, notifyRan } = await runDisabledPagePost({
+      method: 'email',
+      name: 'Ada',
+      email: 'ada@example.com',
+      message: 'hi',
+    });
+    const status = (thrown as { init?: { status?: number } })?.init?.status;
+    expect(status).toBe(404);
+    expect(notifyRan).toBe(false);
+  });
+
+  it('404s a HONEYPOT-filled POST to a disabled page (gate runs before honeypot)', async () => {
+    // The route-level gate runs BEFORE form-data parse + honeypot handling, so a
+    // honeypot-filled POST to a disabled page 404s too — it must NOT short-circuit
+    // to a 200-ish honeypot "success" that masks the disabled page (Codex #6).
+    const { thrown, notifyRan } = await runDisabledPagePost({
+      name: 'Ada',
+      website: 'https://spam.example', // honeypot
+    });
     const status = (thrown as { init?: { status?: number } })?.init?.status;
     expect(status).toBe(404);
     expect(notifyRan).toBe(false);
