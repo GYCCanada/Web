@@ -152,7 +152,8 @@ export const action = routeAction(function* () {
 
   // ---- image upload --------------------------------------------------------
   // Identical in shape to the site editor (`content.tsx`), scoped to THIS page:
-  // validate the file, store its raw bytes, then `DraftEditor.applyImageUpload`
+  // validate the file, optimize it at the shared `prepareImage` boundary, store
+  // the prepared bytes, then `DraftEditor.applyImageUpload`
   // rewrites the targeted `<image>.key` field on the page draft so the new image
   // survives a reload and a later publish. The image-upload path is REUSED, not
   // re-implemented — `applyImageUpload` is scope-generic and `setAtPath` already
@@ -178,8 +179,8 @@ export const action = routeAction(function* () {
     }
 
     // Shrink + re-encode at the ONE shared boundary (Feature B), identical to
-    // the site editor: the stored object IS WebP after `prepareImage`, so the
-    // key + `storage.put` follow `prepared.contentType`, never `file.type`.
+    // the site editor: WebP for decodable rasters, GIF/originals passed through,
+    // so the key + `storage.put` follow `prepared.contentType`, never `file.type`.
     const bytes = new Uint8Array(yield* Effect.promise(() => file.arrayBuffer()));
     const prepared = yield* prepareImage(bytes, file.type);
     const now = yield* Clock.currentTimeMillis;
