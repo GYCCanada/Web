@@ -170,6 +170,10 @@ const en = {
   'registration.form.meals.disclaimer':
     'Please Note, we may not be able to accommodate all allergies/sensitivities, but will do our best to accommodate you',
   'registration.form.meals.label': 'Meals',
+  'registration.form.outreach.title': 'Outreach',
+  'registration.form.extra.title': 'Extra Information',
+  'registration.form.volunteer.title': 'Volunteer',
+  'registration.form.add-registrant': 'Add Registrant',
   'registration.form.meals.description':
     'Please select your meal preference. Meals are only available for attendees. Exhibitors must make their own arrangements.',
   'registration.form.meals.yes': 'Weekend Meals (5 Meals) ($60.00)',
@@ -441,6 +445,11 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.meals.disclaimer':
     'Veuillez noter que nous ne pourrons pas accommoder toutes les allergies/sensibilités, mais ferons de notre mieux pour vous accommoder',
   'registration.form.meals.label': 'Repas',
+  // TODO(i18n): native-speaker review of these four FR strings before publish.
+  'registration.form.outreach.title': 'Rayonnement',
+  'registration.form.extra.title': 'Renseignements supplémentaires',
+  'registration.form.volunteer.title': 'Bénévolat',
+  'registration.form.add-registrant': 'Ajouter un participant',
   'registration.form.meals.description':
     'Veuillez sélectionner votre préférence de repas. Les repas ne sont disponibles que pour les participants. Les exposants doivent faire leurs propres arrangements.',
   'registration.form.meals.yes': 'Repas du week-end (5 repas) (60,00 $)',

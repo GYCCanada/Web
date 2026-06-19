@@ -294,43 +294,96 @@ const hasImageKey = (slot: Json | undefined): boolean =>
   slot['key'].trim() !== '';
 
 /**
- * Drop an optional image-slot override (`groupPhoto` / `portrait` on the Team
- * page) that carries ONLY alt text and no uploaded `key` — UNLESS the current
- * draft already has a `key` for that slot (then the alt edit must land onto the
- * existing image).
+ * The dotted paths of every OPTIONAL image slot an `/admin` page editor renders an
+ * alt-text input for: Team's two TOP-LEVEL slots (`groupPhoto` / `portrait`) and
+ * Home's slot NESTED one level under `mission` (`mission.photo`, Feature A
+ * remediation). Each is a `Schema.optionalKey(ImageRef)` whose editor always posts
+ * `<path>.alt.en/.fr` — so a plain save with no upload produces a present-but-
+ * keyless `{ alt }` object that must be pruned (see `pruneKeylessImageOverrides`).
+ * Declared ONCE here (`derive-dont-sync`): adding a new optional image slot is one
+ * entry, not a new branch in the prune walk.
+ */
+const OPTIONAL_IMAGE_SLOT_PATHS: readonly string[] = [
+  'groupPhoto',
+  'portrait',
+  'mission.photo',
+];
+
+/** Read the value at a dotted `path` inside a JSON object, or `undefined`. */
+const valueAtPath = (root: Json | undefined, path: string): Json | undefined => {
+  let cursor: Json | undefined = root;
+  for (const segment of path.split('.')) {
+    if (cursor === undefined || !isPlainObject(cursor)) return undefined;
+    cursor = cursor[segment];
+  }
+  return cursor;
+};
+
+/**
+ * Drop an optional image-slot override (Team's `groupPhoto` / `portrait`, Home's
+ * `mission.photo`) that carries ONLY alt text and no uploaded `key` — UNLESS the
+ * current draft already has a `key` for that slot (then the alt edit must land onto
+ * the existing image).
  *
  * Why this seam (mirrors `normalizeFaqAnswers`, registration-launch Branch 5.5):
- * the Team editor ALWAYS renders both image slots' alt-text `Bilingual` inputs,
- * which always post `groupPhoto.alt.en/.fr` + `portrait.alt.en/.fr`. On a plain
- * save with no image uploaded, `assembleOverrides` therefore produces a
- * `groupPhoto: { alt: { en, fr } }` object with NO `key`. That is DRAFT-valid
- * (the lax `DraftImageRef` makes `key` optional) but PUBLISH-INVALID: the strict
- * `ImageRef` sees the slot as *present* and rejects it with `groupPhoto.key:
- * Missing key`. Section-skip is for *absence* of the whole slot (ADR 0008), not a
- * present-but-keyless object — so the keyless alt-only override is pruned, leaving
- * the slot absent and the save/publish path clean. Once an image IS uploaded (the
- * draft base carries `key`), the alt override is kept so the upload-first /
- * fill-alt-second flow completes (ADR 0006). Only the two named image slots are
- * touched; every other override passes through verbatim.
+ * an image-slot editor ALWAYS renders the slot's alt-text `Bilingual` inputs, which
+ * always post `<slot>.alt.en/.fr`. On a plain save with no image uploaded,
+ * `assembleOverrides` therefore produces a `<slot>: { alt: { en, fr } }` object with
+ * NO `key`. That is DRAFT-valid (the lax `DraftImageRef` makes `key` optional) but
+ * PUBLISH-INVALID: the strict `ImageRef` sees the slot as *present* and rejects it
+ * with `<slot>.key: Missing key`. Section-skip is for *absence* of the whole slot
+ * (ADR 0008), not a present-but-keyless object — so the keyless alt-only override is
+ * pruned, leaving the slot absent and the save/publish path clean. Once an image IS
+ * uploaded (the draft base carries `key`), the alt override is kept so the
+ * upload-first / fill-alt-second flow completes (ADR 0006).
+ *
+ * Each slot is addressed by its dotted path (`OPTIONAL_IMAGE_SLOT_PATHS`), so a
+ * NESTED slot (`mission.photo`) is pruned by walking into `mission` and dropping a
+ * keyless `photo` — leaving `mission`'s other keys (`readStoryLabel`) untouched. A
+ * scope with none of these paths passes through verbatim.
  */
 export const pruneKeylessImageOverrides = (base: Json, override: Json): Json => {
   if (!isPlainObject(override)) return override;
-  const baseObject = isPlainObject(base) ? base : undefined;
-  const result: MutableJsonObject = {};
-  for (const key of Object.keys(override)) {
-    const slot = override[key];
-    if (slot === undefined) continue;
+  let result: Json = override;
+  for (const path of OPTIONAL_IMAGE_SLOT_PATHS) {
+    const slot = valueAtPath(result, path);
     if (
-      (key === 'groupPhoto' || key === 'portrait') &&
+      slot !== undefined &&
       isPlainObject(slot) &&
       !hasImageKey(slot) &&
-      !hasImageKey(baseObject?.[key])
+      !hasImageKey(valueAtPath(base, path))
     ) {
-      continue; // keyless, no existing image — drop so the slot stays absent
+      // Keyless, no existing image — drop so the slot stays absent. Removing a
+      // nested path rebuilds only the objects along it (the rest is shared).
+      result = removeAtPath(result, path);
     }
-    result[key] = slot;
   }
   return result;
+};
+
+/**
+ * Return a copy of `root` with the value at the dotted `path` removed, rebuilding
+ * only the objects along the path (every sibling and untouched subtree is shared by
+ * reference — the override is never mutated). A path segment whose parent isn't a
+ * plain object is a no-op (the slot wasn't there to begin with).
+ */
+const removeAtPath = (root: Json, path: string): Json => {
+  const segments = path.split('.');
+  const recur = (node: Json | undefined, depth: number): Json | undefined => {
+    if (node === undefined || !isPlainObject(node)) return node;
+    const segment = segments[depth];
+    if (segment === undefined) return node;
+    const next: MutableJsonObject = { ...node };
+    if (depth === segments.length - 1) {
+      delete next[segment];
+      return next;
+    }
+    const child = recur(next[segment], depth + 1);
+    if (child === undefined) delete next[segment];
+    else next[segment] = child;
+    return next;
+  };
+  return recur(root, 0) ?? root;
 };
 
 /**

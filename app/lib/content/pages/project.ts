@@ -131,7 +131,12 @@ export interface ArchiveView {
 export interface HomeView {
   readonly enabled: boolean;
   readonly tagline: string;
-  readonly mission: { readonly readStoryLabel: string };
+  readonly mission: {
+    readonly readStoryLabel: string;
+    // The mission photo projected to a renderable `{ src, alt }`, or `undefined`
+    // when the slot is absent (section-skip) — exactly like Team's `groupPhoto`.
+    readonly photo?: { readonly src: string; readonly alt: string };
+  };
   readonly join: {
     readonly title: string;
     readonly subtitle: string;
@@ -233,7 +238,14 @@ export const toArchiveView = (
 export const toHomeView = (page: HomePage, locale: Locale): HomeView => ({
   enabled: page.enabled,
   tagline: page.tagline[locale],
-  mission: { readStoryLabel: page.mission.readStoryLabel[locale] },
+  mission: {
+    readStoryLabel: page.mission.readStoryLabel[locale],
+    // Section-skip when absent; `assetUrl` is the shared leaf-module URL rule
+    // (`derive-dont-sync`), identical to `toTeamView`'s slot projection.
+    photo: page.mission.photo
+      ? { src: assetUrl(page.mission.photo.key), alt: page.mission.photo.alt[locale] }
+      : undefined,
+  },
   join: {
     title: page.join.title[locale],
     subtitle: page.join.subtitle[locale],

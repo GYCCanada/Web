@@ -39,6 +39,7 @@ import type {
 import { dayjs } from './dayjs';
 import { assertValidLocale } from './localization/localization';
 import type { Locale } from './localization/localization';
+import { root as staticTranslations } from './localization/translations';
 import { Storage } from './storage.server';
 
 /**
@@ -584,7 +585,13 @@ export const layer = Layer.effect(
             new Response(object.stream).text(),
           );
           const parsed = yield* parseJson(json);
-          return yield* decode(parsed);
+          // One-shot, idempotent read-boundary backfill (the per-object analogue of
+          // `backfillListItemIds`) — fills a structural gap a legacy published
+          // object leaves after a new optional field was added (home's
+          // `mission.photo`). Absent for specs with no such gap; for ABSENCE only,
+          // so a malformed value still reaches `decode` to be rejected.
+          const normalized = spec.normalize ? spec.normalize(parsed) : parsed;
+          return yield* decode(normalized);
         }).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning(`Content: could not read ${key}`, cause).pipe(
@@ -665,7 +672,16 @@ export const layer = Layer.effect(
     ) {
       assertValidLocale(locale);
       const content = yield* getSiteContent();
-      return content.translations[locale];
+      // Static defaults as the BASE, CMS values as OVERRIDES. `content.translations`
+      // (from `content/site.json`) is an OPEN `Record`, so an already-published
+      // site object NEVER carries a translation key added to the static `root` table
+      // after it was published — and `useTranslate` would then return `undefined`
+      // (a blank heading/button) until someone republished. Merging `root[locale]`
+      // underneath guarantees every static key is present, while a CMS edit to any
+      // key still wins. This makes a static translation addition self-applying on
+      // deploy with no manual republish (the translation analogue of the per-object
+      // read-boundary backfills — `make-operations-idempotent`, `derive-dont-sync`).
+      return { ...staticTranslations[locale], ...content.translations[locale] };
     });
 
     const getTeam = Effect.fn('Content.getTeam')(function* () {

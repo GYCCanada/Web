@@ -773,4 +773,219 @@ describe('per-page /admin editor via DraftEditor (page scope, ADR 0008/0006)', (
     expect(imageUploadTarget('upload:portrait.key')).toBe('portrait.key');
     expect(imageUploadTarget('upload:groupPhoto.key')).toBe('groupPhoto.key');
   });
+
+  // --- Home page's NESTED mission.photo image slot (Feature A remediation) -----
+  // Mirrors the Team image-slot tests above, but the slot lives one level under
+  // `mission` and the bundled default SEEDS it (`main/people.png`) — so the
+  // section-skip / keyless-prune assertions differ where the seed makes them.
+
+  it('the seeded home mission photo reads through to the public Content boundary', async () => {
+    // The default `home` page seeds `mission.photo` = `main/people.png` so the
+    // day-one render matches the pre-migration hardcoded `<img>`. Proven here by
+    // reading the page with no bucket object (the bundled default) and asserting
+    // the projected slot resolves to the managed `/images/main/people.png` URL.
+    const result = await run(
+      Effect.gen(function* () {
+        const content = yield* Content.Service;
+        const live = yield* content.getPage('home');
+        return { key: String(live.mission.photo?.key), alt: live.mission.photo?.alt };
+      }),
+    );
+    expect(result.key).toBe('main/people.png');
+    expect(result.alt).toEqual({ en: 'Mission', fr: 'Mission' });
+  });
+
+  it('upload:mission.photo.key rewrites the NESTED home draft key (REUSED applyImageUpload)', async () => {
+    const homeScope = pageScope('home');
+    // The same generic `upload:<keyPath>` intent — `setPath` navigates the nested
+    // `mission.photo.key` exactly as it does the top-level `groupPhoto.key`.
+    const target = imageUploadTarget('upload:mission.photo.key');
+    expect(target).toBe('mission.photo.key');
+
+    const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const storage = yield* Storage.Service;
+        const key = uploadedImageKey(target!, 'image/jpeg', 1_700_000_000_000);
+        yield* storage.put(key, jpg, 'image/jpeg');
+        yield* editor.applyImageUpload(homeScope, target!, key);
+        const draft = yield* editor.load(homeScope);
+        const mission = draft.content.mission as { photo?: { key?: string } };
+        return { key, draftKey: String(mission.photo?.key) };
+      }),
+    );
+    expect(String(result.key)).toMatch(
+      /^images\/uploads\/mission-photo-key-1700000000000\.jpg$/,
+    );
+    // The uploaded key replaced the seeded `main/people.png` at the nested path.
+    expect(result.draftKey).toBe(String(result.key));
+  });
+
+  // A `home.json` PUBLISHED before `mission.photo` existed — a `mission` with NO
+  // `photo` key, exactly what a pre-field publish wrote. Used to prove the
+  // read-boundary backfill on BOTH the public read and the /admin draft read.
+  const legacyHomeJson = JSON.stringify({
+    enabled: true,
+    tagline: { en: 'Legacy tagline', fr: 'Ancien slogan' },
+    mission: { readStoryLabel: { en: 'Read', fr: 'Lire' } },
+    join: {
+      title: { en: 'Join', fr: 'Rejoignez' },
+      subtitle: { en: 'Sub', fr: 'Sous' },
+      donateLabel: { en: 'Donate', fr: 'Donner' },
+      volunteerLabel: { en: 'Volunteer', fr: 'Bénévole' },
+    },
+    newsletter: {
+      title: { en: 'News', fr: 'Infos' },
+      subtitle: { en: 'NSub', fr: 'NSous' },
+      socials: { en: 'Follow', fr: 'Suivez' },
+    },
+  });
+
+  it('a LEGACY published home.json (no mission.photo) is backfilled to the seeded photo on the PUBLIC read', async () => {
+    // It decodes cleanly (the field is optional), so `getPage` returns it as-is and
+    // the seeded default NEVER applies — the photo would silently vanish. The
+    // read-boundary backfill (`spec.normalize`) fills the absent slot with the
+    // seed, so the public view still shows the photo with no migration/redeploy.
+    const result = await run(
+      Effect.gen(function* () {
+        const content = yield* Content.Service;
+        const live = yield* content.getPage('home');
+        return {
+          taglineEn: live.tagline.en, // proves the LEGACY object is what was read
+          photoKey: String(live.mission.photo?.key),
+          photoAlt: live.mission.photo?.alt,
+        };
+      }),
+      { [pageObjectKey('home')]: { body: legacyHomeJson } },
+    );
+    // The legacy object was read (its tagline), AND its absent photo was backfilled.
+    expect(result.taglineEn).toBe('Legacy tagline');
+    expect(result.photoKey).toBe('main/people.png');
+    expect(result.photoAlt).toEqual({ en: 'Mission', fr: 'Mission' });
+  });
+
+  it('a LEGACY published home.json opens in the /admin editor WITH the seeded photo (draft-read backfill)', async () => {
+    // The --deep review's High: the backfill ran on the PUBLIC read but NOT the
+    // DraftEditor draft read (`objectCodec.fromBucket`), so the editor opened the
+    // slot empty on a legacy doc. With `normalize` now applied there too, the editor
+    // sees the seeded photo — so the admin doesn't unknowingly publish it away.
+    const homeScope = pageScope('home');
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const draft = yield* editor.load(homeScope);
+        const mission = draft.content.mission as {
+          photo?: { key?: string; alt?: unknown };
+        };
+        return { photoKey: String(mission.photo?.key), photoAlt: mission.photo?.alt };
+      }),
+      { [pageObjectKey('home')]: { body: legacyHomeJson } },
+    );
+    expect(result.photoKey).toBe('main/people.png');
+    expect(result.photoAlt).toEqual({ en: 'Mission', fr: 'Mission' });
+  });
+
+  it('a plain save on a LEGACY home.json through the editor PUBLISHES and KEEPS the seeded photo', async () => {
+    // The end-to-end of the --deep High: open a legacy (photo-less) home.json, do a
+    // plain save (posts keyless mission.photo.alt), publish. Before the draft-read
+    // backfill, the base had no key → the prune dropped the alt → publish wrote a
+    // photo-less object (the seed lost). Now the draft base carries the backfilled
+    // key, so the alt edit MERGES onto it and the published object keeps the photo.
+    const homeScope = pageScope('home');
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+        const override = assembleOverrides([
+          ['tagline.en', 'New tagline'],
+          ['tagline.fr', 'Nouveau slogan'],
+          ['mission.readStoryLabel.en', 'Read'],
+          ['mission.readStoryLabel.fr', 'Lire'],
+          ['mission.photo.alt.en', 'Edited alt'],
+          ['mission.photo.alt.fr', 'Alt modifié'],
+          ['join.title.en', 'Join'],
+          ['join.title.fr', 'Rejoignez'],
+          ['join.subtitle.en', 'Sub'],
+          ['join.subtitle.fr', 'Sous'],
+          ['join.donateLabel.en', 'Donate'],
+          ['join.donateLabel.fr', 'Donner'],
+          ['join.volunteerLabel.en', 'Volunteer'],
+          ['join.volunteerLabel.fr', 'Bénévole'],
+          ['newsletter.title.en', 'News'],
+          ['newsletter.title.fr', 'Infos'],
+          ['newsletter.subtitle.en', 'NSub'],
+          ['newsletter.subtitle.fr', 'NSous'],
+          ['newsletter.socials.en', 'Follow'],
+          ['newsletter.socials.fr', 'Suivez'],
+        ]) as Json;
+        yield* TestClock.adjust('1 second');
+        yield* editor.editDocument(homeScope, override);
+        const publishExit = yield* Effect.exit(editor.publish(homeScope));
+        const live = yield* content.getPage('home');
+        return {
+          publishTag: publishExit._tag,
+          photoKey: String(live.mission.photo?.key),
+          photoAltEn: live.mission.photo?.alt.en,
+        };
+      }),
+      { [pageObjectKey('home')]: { body: legacyHomeJson } },
+    );
+    expect(result.publishTag).toBe('Success');
+    // The seeded key survived the plain save; the alt edit landed on it.
+    expect(result.photoKey).toBe('main/people.png');
+    expect(result.photoAltEn).toBe('Edited alt');
+  });
+
+  it('a plain home save (no upload) PUBLISHES and KEEPS the seeded photo', async () => {
+    // The home editor always renders the mission.photo alt `Bilingual`, so a plain
+    // save posts `mission.photo.alt.en/.fr` with NO key. Unlike Team (whose default
+    // is keyless → pruned to absent), home's DEFAULT carries a key, so the prune
+    // KEEPS the alt override (it merges onto the seeded key) and publish succeeds
+    // with the photo intact — the keyless-prune must not clobber a seeded slot.
+    const homeScope = pageScope('home');
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+        const override = assembleOverrides([
+          ['tagline.en', 'A movement'],
+          ['tagline.fr', 'Un mouvement'],
+          ['mission.readStoryLabel.en', 'Read our story'],
+          ['mission.readStoryLabel.fr', 'Lire notre histoire'],
+          ['mission.photo.alt.en', 'Our mission'],
+          ['mission.photo.alt.fr', 'Notre mission'],
+          ['join.title.en', 'Join'],
+          ['join.title.fr', 'Rejoignez'],
+          ['join.subtitle.en', 'Sub'],
+          ['join.subtitle.fr', 'Sous'],
+          ['join.donateLabel.en', 'Donate'],
+          ['join.donateLabel.fr', 'Donner'],
+          ['join.volunteerLabel.en', 'Volunteer'],
+          ['join.volunteerLabel.fr', 'Bénévole'],
+          ['newsletter.title.en', 'News'],
+          ['newsletter.title.fr', 'Infos'],
+          ['newsletter.subtitle.en', 'NSub'],
+          ['newsletter.subtitle.fr', 'NSous'],
+          ['newsletter.socials.en', 'Follow'],
+          ['newsletter.socials.fr', 'Suivez'],
+        ]) as Json;
+        yield* TestClock.adjust('1 second');
+        yield* editor.editDocument(homeScope, override);
+        const publishExit = yield* Effect.exit(editor.publish(homeScope));
+        const live = yield* content.getPage('home');
+        return {
+          publishTag: publishExit._tag,
+          photoKey: String(live.mission.photo?.key),
+          photoAltEn: live.mission.photo?.alt.en,
+          taglineEn: live.tagline.en,
+        };
+      }),
+    );
+    expect(result.publishTag).toBe('Success');
+    expect(result.taglineEn).toBe('A movement');
+    // Seeded key preserved; the alt edit landed onto it (NOT pruned away).
+    expect(result.photoKey).toBe('main/people.png');
+    expect(result.photoAltEn).toBe('Our mission');
+  });
 });

@@ -558,6 +558,27 @@ function PageEditor({
             name="mission.readStoryLabel"
             value={text(mission['readStoryLabel'] as DraftText)}
           />
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-neutral-800">
+              Mission · photo
+            </legend>
+            <ImageUpload
+              keyPath="mission.photo.key"
+              currentKey={String(
+                ((mission['photo'] ?? {}) as Record<string, unknown>)['key'] ??
+                  '',
+              )}
+            />
+            <Bilingual
+              label="Mission photo alt"
+              name="mission.photo.alt"
+              value={text(
+                ((mission['photo'] ?? {}) as Record<string, unknown>)[
+                  'alt'
+                ] as DraftText,
+              )}
+            />
+          </fieldset>
           <Bilingual label="Join · title" name="join.title" value={text(join['title'] as DraftText)} />
           <Bilingual
             label="Join · subtitle"

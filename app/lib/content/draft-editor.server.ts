@@ -365,10 +365,18 @@ const objectCodec = (
   const encodePublishJson = Schema.encodeUnknownEffect(
     Schema.fromJsonString(spec.schema),
   );
+  // The same read-boundary normalization the public `Content` read applies
+  // (`spec.normalize`): a legacy bucket object missing a newly-added optional field
+  // (home's `mission.photo`) must be backfilled BEFORE the draft decode too, or the
+  // `/admin` editor opens the slot empty — and a plain save would then publish an
+  // object that drops the seeded photo (the prune sees no key on the base). For
+  // ABSENCE only, idempotent; a no-op for every scope without a `normalize` hook.
+  const normalize = spec.normalize ?? ((parsed: unknown) => parsed);
   return {
     keys,
     default: spec.default,
-    fromBucket: (json) => parseJson(json).pipe(Effect.flatMap(decodeDraft)),
+    fromBucket: (json) =>
+      parseJson(json).pipe(Effect.map(normalize), Effect.flatMap(decodeDraft)),
     decodeDraft,
     decodePublish,
     encodeObject: (value) =>

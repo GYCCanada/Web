@@ -312,6 +312,53 @@ describe('pruneKeylessImageOverrides', () => {
         expect(strict.portrait).toBeUndefined();
       }),
   );
+
+  test('drops a keyless NESTED home mission.photo, keeping its sibling copy', () => {
+    // Home's slot lives under `mission`. A keyless `mission.photo` on a keyless
+    // base must be pruned WITHOUT disturbing `mission.readStoryLabel` — the prune
+    // rebuilds only the path, sharing every sibling.
+    const override = assembleOverrides(
+      entries({
+        'tagline.en': 'Tag',
+        'tagline.fr': 'Tag',
+        'mission.readStoryLabel.en': 'Read',
+        'mission.readStoryLabel.fr': 'Lire',
+        'mission.photo.alt.en': '',
+        'mission.photo.alt.fr': '',
+      }),
+    );
+    const pruned = pruneKeylessImageOverrides({}, override) as Record<
+      string,
+      unknown
+    >;
+    const mission = pruned['mission'] as
+      | { readStoryLabel?: unknown; photo?: unknown }
+      | undefined;
+    expect(mission?.readStoryLabel).toEqual({ en: 'Read', fr: 'Lire' });
+    expect(mission && 'photo' in mission).toBe(false);
+    expect(pruned['tagline']).toEqual({ en: 'Tag', fr: 'Tag' });
+  });
+
+  test('keeps a home mission.photo alt edit when the base already has the seeded key', () => {
+    // The bundled home default SEEDS `mission.photo.key` = `main/people.png`, so a
+    // plain save's keyless alt override must MERGE onto that key, not be pruned.
+    const base: Json = {
+      mission: {
+        readStoryLabel: { en: 'Read', fr: 'Lire' },
+        photo: { key: 'main/people.png', alt: { en: 'Mission', fr: 'Mission' } },
+      },
+    };
+    const override = assembleOverrides(
+      entries({
+        'mission.photo.alt.en': 'Our mission',
+        'mission.photo.alt.fr': 'Notre mission',
+      }),
+    );
+    const pruned = pruneKeylessImageOverrides(base, override) as {
+      mission?: { photo?: { alt?: { en?: string } } };
+    };
+    expect(pruned.mission?.photo?.alt?.en).toBe('Our mission');
+  });
 });
 
 describe('deepMerge', () => {

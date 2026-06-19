@@ -388,6 +388,35 @@ describe('Content translations + team selectors', () => {
       expect(team.team[0]?.image).toBe('/images/team/elijah.jpg');
       expect(team.board).toContain('George Cho');
     }).pipe(provideSeeded(defaultContent)));
+
+  it.effect(
+    'fills a static translation key absent from a published site.json (no blanks) while a CMS override still wins',
+    () =>
+      Effect.gen(function* () {
+        // The regression Codex's Batch-2/3 review surfaced: `content.translations`
+        // is an OPEN Record, so a published `site.json` predating a newly-added
+        // static key would make `useTranslate` return `undefined` (a blank). The
+        // read boundary now merges the static `root` table UNDER the CMS values, so
+        // a missing key resolves to its static default while a CMS edit overrides.
+        const content = yield* Content.Service;
+        const en = yield* content.getTranslations('en');
+        // A key NOT present in the seeded (stripped) translations resolves to its
+        // static default rather than undefined.
+        expect(en['registration.form.outreach.title']).toBe('Outreach');
+        // The one CMS-provided key overrides the static default.
+        expect(en['registration.form.submit']).toBe('Send it');
+      }).pipe(
+        provideSeeded({
+          ...defaultContent,
+          // A published doc carrying ONLY one (overriding) translation key — every
+          // other static key is absent, exactly like a legacy publish.
+          translations: {
+            en: { 'registration.form.submit': 'Send it' },
+            fr: {},
+          },
+        } as SiteContentType),
+      ),
+  );
 });
 
 describe('Content cache (TTL + single-flight)', () => {

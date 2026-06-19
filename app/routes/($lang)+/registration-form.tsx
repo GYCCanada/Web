@@ -420,7 +420,7 @@ export function RegistrationForm({
                         </fieldset>
                       )}
 
-                      <h2>Meals</h2>
+                      <h2>{translate('registration.form.meals.title')}</h2>
 
                       <RadioGroup name={fields.meals.name}>
                         <Label>
@@ -454,7 +454,7 @@ export function RegistrationForm({
                         <FieldErrors />
                       </TextField>
 
-                      <h2>Outreach</h2>
+                      <h2>{translate('registration.form.outreach.title')}</h2>
                       <CheckboxGroup
                         name={fields.outreach.name}
                         orientation="vertical"
@@ -485,7 +485,7 @@ export function RegistrationForm({
                         <FieldErrors />
                       </CheckboxGroup>
 
-                      <h2>Extra Information</h2>
+                      <h2>{translate('registration.form.extra.title')}</h2>
 
                       <TextField name={extras.howDidYouHear.name}>
                         <Label>
@@ -622,7 +622,7 @@ export function RegistrationForm({
                         <FieldErrors />
                       </CheckboxGroup>
 
-                      <h2>Volunteer</h2>
+                      <h2>{translate('registration.form.volunteer.title')}</h2>
 
                       <Checkbox name={volunteer.songLeader.name}>
                         {translate('registration.form.song-leader.label')}
@@ -740,11 +740,13 @@ export function RegistrationForm({
                 intent.insert({ name: fields.registrants.name });
               }}
             >
-              Add Registrant
+              {translate('registration.form.add-registrant')}
             </Button>
           </div>
           <div>
-            <Button type="submit">Submit</Button>
+            <Button type="submit">
+              {translate('registration.form.submit')}
+            </Button>
           </div>
         </Form>
       </FormProvider>
