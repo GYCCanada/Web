@@ -822,30 +822,31 @@ describe('per-page /admin editor via DraftEditor (page scope, ADR 0008/0006)', (
     expect(result.draftKey).toBe(String(result.key));
   });
 
-  it('a LEGACY published home.json (no mission.photo) is backfilled to the seeded photo on read', async () => {
-    // The regression Codex's Batch-1 review surfaced: a `home.json` PUBLISHED
-    // before `mission.photo` existed carries a `mission` with NO `photo` key. It
-    // decodes cleanly (the field is optional), so `getPage` returns it as-is and
+  // A `home.json` PUBLISHED before `mission.photo` existed — a `mission` with NO
+  // `photo` key, exactly what a pre-field publish wrote. Used to prove the
+  // read-boundary backfill on BOTH the public read and the /admin draft read.
+  const legacyHomeJson = JSON.stringify({
+    enabled: true,
+    tagline: { en: 'Legacy tagline', fr: 'Ancien slogan' },
+    mission: { readStoryLabel: { en: 'Read', fr: 'Lire' } },
+    join: {
+      title: { en: 'Join', fr: 'Rejoignez' },
+      subtitle: { en: 'Sub', fr: 'Sous' },
+      donateLabel: { en: 'Donate', fr: 'Donner' },
+      volunteerLabel: { en: 'Volunteer', fr: 'Bénévole' },
+    },
+    newsletter: {
+      title: { en: 'News', fr: 'Infos' },
+      subtitle: { en: 'NSub', fr: 'NSous' },
+      socials: { en: 'Follow', fr: 'Suivez' },
+    },
+  });
+
+  it('a LEGACY published home.json (no mission.photo) is backfilled to the seeded photo on the PUBLIC read', async () => {
+    // It decodes cleanly (the field is optional), so `getPage` returns it as-is and
     // the seeded default NEVER applies — the photo would silently vanish. The
     // read-boundary backfill (`spec.normalize`) fills the absent slot with the
     // seed, so the public view still shows the photo with no migration/redeploy.
-    const legacyHomeJson = JSON.stringify({
-      enabled: true,
-      tagline: { en: 'Legacy tagline', fr: 'Ancien slogan' },
-      // `mission` WITHOUT a `photo` key — exactly what a pre-field publish wrote.
-      mission: { readStoryLabel: { en: 'Read', fr: 'Lire' } },
-      join: {
-        title: { en: 'Join', fr: 'Rejoignez' },
-        subtitle: { en: 'Sub', fr: 'Sous' },
-        donateLabel: { en: 'Donate', fr: 'Donner' },
-        volunteerLabel: { en: 'Volunteer', fr: 'Bénévole' },
-      },
-      newsletter: {
-        title: { en: 'News', fr: 'Infos' },
-        subtitle: { en: 'NSub', fr: 'NSous' },
-        socials: { en: 'Follow', fr: 'Suivez' },
-      },
-    });
     const result = await run(
       Effect.gen(function* () {
         const content = yield* Content.Service;
@@ -862,6 +863,78 @@ describe('per-page /admin editor via DraftEditor (page scope, ADR 0008/0006)', (
     expect(result.taglineEn).toBe('Legacy tagline');
     expect(result.photoKey).toBe('main/people.png');
     expect(result.photoAlt).toEqual({ en: 'Mission', fr: 'Mission' });
+  });
+
+  it('a LEGACY published home.json opens in the /admin editor WITH the seeded photo (draft-read backfill)', async () => {
+    // The --deep review's High: the backfill ran on the PUBLIC read but NOT the
+    // DraftEditor draft read (`objectCodec.fromBucket`), so the editor opened the
+    // slot empty on a legacy doc. With `normalize` now applied there too, the editor
+    // sees the seeded photo — so the admin doesn't unknowingly publish it away.
+    const homeScope = pageScope('home');
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const draft = yield* editor.load(homeScope);
+        const mission = draft.content.mission as {
+          photo?: { key?: string; alt?: unknown };
+        };
+        return { photoKey: String(mission.photo?.key), photoAlt: mission.photo?.alt };
+      }),
+      { [pageObjectKey('home')]: { body: legacyHomeJson } },
+    );
+    expect(result.photoKey).toBe('main/people.png');
+    expect(result.photoAlt).toEqual({ en: 'Mission', fr: 'Mission' });
+  });
+
+  it('a plain save on a LEGACY home.json through the editor PUBLISHES and KEEPS the seeded photo', async () => {
+    // The end-to-end of the --deep High: open a legacy (photo-less) home.json, do a
+    // plain save (posts keyless mission.photo.alt), publish. Before the draft-read
+    // backfill, the base had no key → the prune dropped the alt → publish wrote a
+    // photo-less object (the seed lost). Now the draft base carries the backfilled
+    // key, so the alt edit MERGES onto it and the published object keeps the photo.
+    const homeScope = pageScope('home');
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+        const override = assembleOverrides([
+          ['tagline.en', 'New tagline'],
+          ['tagline.fr', 'Nouveau slogan'],
+          ['mission.readStoryLabel.en', 'Read'],
+          ['mission.readStoryLabel.fr', 'Lire'],
+          ['mission.photo.alt.en', 'Edited alt'],
+          ['mission.photo.alt.fr', 'Alt modifié'],
+          ['join.title.en', 'Join'],
+          ['join.title.fr', 'Rejoignez'],
+          ['join.subtitle.en', 'Sub'],
+          ['join.subtitle.fr', 'Sous'],
+          ['join.donateLabel.en', 'Donate'],
+          ['join.donateLabel.fr', 'Donner'],
+          ['join.volunteerLabel.en', 'Volunteer'],
+          ['join.volunteerLabel.fr', 'Bénévole'],
+          ['newsletter.title.en', 'News'],
+          ['newsletter.title.fr', 'Infos'],
+          ['newsletter.subtitle.en', 'NSub'],
+          ['newsletter.subtitle.fr', 'NSous'],
+          ['newsletter.socials.en', 'Follow'],
+          ['newsletter.socials.fr', 'Suivez'],
+        ]) as Json;
+        yield* TestClock.adjust('1 second');
+        yield* editor.editDocument(homeScope, override);
+        const publishExit = yield* Effect.exit(editor.publish(homeScope));
+        const live = yield* content.getPage('home');
+        return {
+          publishTag: publishExit._tag,
+          photoKey: String(live.mission.photo?.key),
+          photoAltEn: live.mission.photo?.alt.en,
+        };
+      }),
+      { [pageObjectKey('home')]: { body: legacyHomeJson } },
+    );
+    expect(result.publishTag).toBe('Success');
+    // The seeded key survived the plain save; the alt edit landed on it.
+    expect(result.photoKey).toBe('main/people.png');
+    expect(result.photoAltEn).toBe('Edited alt');
   });
 
   it('a plain home save (no upload) PUBLISHES and KEEPS the seeded photo', async () => {

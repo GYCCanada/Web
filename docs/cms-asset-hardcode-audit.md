@@ -1,15 +1,28 @@
-# CMS Sourcing Audit + Remediation Plan — GYC Site Assets & Copy
+# CMS Sourcing Audit + Remediation — GYC Site Assets & Copy
 
-_Audited 2026-06-19 against `main` @ c17478c. Every file:line below was re-verified against the working tree._
+> **STATUS: REMEDIATED by branch `cms/hardcode-remediation` (this PR).** Both
+> confirmed violations below are now fixed: the home mission photo is a CMS image
+> slot (`HomePage.mission.photo`, projected via `assetUrl`, section-skip render,
+> `/admin` upload, seeded `main/people.png` default so there's no day-one visual
+> change), and the six registration-form literals now route through `translate()`.
+> Two read-boundary backfills were added so neither the new field nor the new
+> translation keys vanish on an already-published `home.json` / `site.json`
+> (mirroring `backfillListItemIds`). The sections below are the ORIGINAL audit
+> (state of `main` @ c17478c) kept as the record of what was found and why — read
+> "should move to CMS" as "moved to CMS by this PR."
+
+_Audited 2026-06-19 against `main` @ c17478c; remediated on `cms/hardcode-remediation`._
 
 ## 1. Executive verdict
 
-**No — assets and copy are NOT yet fully CMS-sourced. The site is ~95% on the runtime-read CMS path, but two route files carry confirmed hardcodes:** the home page's "Mission" photo (`/main/people.png` + `alt="Mission"`) bypasses the CMS image path entirely, and the shared registration-form module renders six English JSX string literals that bypass the localization layer. Everything else is fully CMS-driven (or legitimately static chrome).
+_(original audit verdict — now remediated)_
 
-| File | Status |
+**At audit time: assets and copy were NOT yet fully CMS-sourced.** The site was ~95% on the runtime-read CMS path, but two route files carried confirmed hardcodes: the home page's "Mission" photo (`/main/people.png` + `alt="Mission"`) bypassed the CMS image path entirely, and the shared registration-form module rendered six English JSX string literals that bypassed the localization layer. Everything else was fully CMS-driven (or legitimately static chrome). **Both are fixed in this PR** — the two files below are now fully CMS-sourced.
+
+| File | Status (audit → now) |
 |------|--------|
-| `app/routes/($lang)+/_index.tsx` | **partially-cms** (1 asset + 1 copy violation) |
-| `app/routes/($lang)+/registration-form.tsx` | **partially-cms** (6 copy violations) |
+| `app/routes/($lang)+/_index.tsx` | partially-cms → **fully-cms** (mission photo now `page.mission.photo`) |
+| `app/routes/($lang)+/registration-form.tsx` | partially-cms → **fully-cms** (6 literals now `translate()`) |
 | `app/routes/($lang)+/_layout.tsx` | fully-cms |
 | `app/routes/($lang)+/about.tsx` | fully-cms |
 | `app/routes/($lang)+/contact.tsx` | fully-cms |
