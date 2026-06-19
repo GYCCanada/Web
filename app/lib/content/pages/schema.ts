@@ -268,6 +268,13 @@ export const HomePage = Schema.Struct({
   tagline: Text,
   mission: Schema.Struct({
     readStoryLabel: Text,
+    // The mission section's photo — an optional named image slot mirroring the
+    // Team page's `groupPhoto` / `portrait` (Feature A): a present photo carries a
+    // strict `{ key, alt }` (a valid `AssetKey` + both-locales alt), and an absent
+    // slot SECTION-SKIPS in the route (ADR 0008). Kept INSIDE `mission` so the photo
+    // travels with the read-story CTA it sits beside, not as a sibling top-level
+    // field (`make-impossible-states-unrepresentable`).
+    photo: Schema.optionalKey(ImageRef),
   }),
   join: Schema.Struct({
     title: Text,
@@ -431,4 +438,36 @@ export const DraftTeamPage = Schema.Struct({
   portrait: Schema.optionalKey(DraftImageRef),
 });
 export type DraftTeamPage = typeof DraftTeamPage.Type;
+
+/**
+ * The DRAFT variant of `HomePage` (Feature A pattern, extended to a NESTED image
+ * slot). Home has no id-only add-item flow, so every copy field stays strict — the
+ * lone reason home needs a draft variant at all is its `mission.photo` slot: an
+ * uploaded `key` must be able to land before its alt text (upload-first /
+ * fill-alt-second, ADR 0006), which a strict `ImageRef` inside `mission` would
+ * reject. So `mission.photo` relaxes to the lax `DraftImageRef`; everything else
+ * (`tagline`, `mission.readStoryLabel`, `join.*`, `newsletter.*`) is the strict
+ * `Text`, identical to `HomePage`. Unlike Team's two TOP-LEVEL image slots, home's
+ * single slot is nested one level under `mission`.
+ */
+export const DraftHomePage = Schema.Struct({
+  enabled: EnabledFlag,
+  tagline: Text,
+  mission: Schema.Struct({
+    readStoryLabel: Text,
+    photo: Schema.optionalKey(DraftImageRef),
+  }),
+  join: Schema.Struct({
+    title: Text,
+    subtitle: Text,
+    donateLabel: Text,
+    volunteerLabel: Text,
+  }),
+  newsletter: Schema.Struct({
+    title: Text,
+    subtitle: Text,
+    socials: Text,
+  }),
+});
+export type DraftHomePage = typeof DraftHomePage.Type;
 

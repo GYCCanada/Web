@@ -115,11 +115,13 @@ export default function Index() {
         <h3 className="text-5xl">{page.tagline}</h3>
       </section>
       <section className="flex flex-col gap-6 pt-16 text-5xl md:flex-row-reverse md:justify-between">
-        <img
-          src="/main/people.png"
-          alt="Mission"
-          className="aspect-auto max-md:w-full md:flex-1"
-        />
+        {page.mission.photo ? (
+          <img
+            src={page.mission.photo.src}
+            alt={page.mission.photo.alt}
+            className="aspect-auto max-md:w-full md:flex-1"
+          />
+        ) : null}
         <div className="flex flex-col gap-6 p-3 max-md:absolute max-md:top-0 md:flex-1">
           <h3 className="text-5xl max-md:hidden">{page.tagline}</h3>
           <div>

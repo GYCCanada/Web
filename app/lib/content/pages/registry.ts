@@ -22,6 +22,7 @@ import {
   DraftArchivePage,
   DraftFaqPage,
   DraftGivePage,
+  DraftHomePage,
   DraftTeamPage,
   FaqPage,
   GivePage,
@@ -190,7 +191,10 @@ export const PAGE_SPECS = {
   contact: pageSpec(ContactPage, defaultContactPage),
   volunteer: pageSpec(VolunteerPage, defaultVolunteerPage),
   archive: draftPageSpec(ArchivePage, DraftArchivePage, defaultArchivePage),
-  home: pageSpec(HomePage, defaultHomePage),
+  // Draft ≠ strict: the `mission.photo` slot's `alt` may be unfilled in the draft
+  // (upload first, fill alt second), so home wires the laxer `DraftHomePage`
+  // (ADR 0006) — exactly as team does for its image slots.
+  home: draftPageSpec(HomePage, DraftHomePage, defaultHomePage),
   // Draft ≠ strict: a present image's `alt` may be unfilled in the draft (upload
   // first, fill alt second), so team wires the laxer `DraftTeamPage` (ADR 0006).
   team: draftPageSpec(TeamPage, DraftTeamPage, defaultTeamPage),

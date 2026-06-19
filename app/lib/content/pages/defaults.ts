@@ -367,6 +367,17 @@ export const defaultHomePage: HomePage = Schema.decodeUnknownSync(HomePage)({
   },
   mission: {
     readStoryLabel: { en: 'Read our story', fr: 'Lire notre histoire' },
+    // Seed the existing mission art (`public/main/people.png`) under its managed
+    // AssetKey so the day-one render is byte-identical to the pre-migration
+    // hardcoded `<img src="/main/people.png">` — `assetUrl('main/people.png')`
+    // resolves to `/images/main/people.png`, which the `GET /images/*` route
+    // serves from the bundled `public/` tree until an admin upload overrides it.
+    // Unlike Team's omitted photos (uploaded at launch), home ALWAYS shows this
+    // photo today, so seeding it (rather than section-skipping) preserves behavior.
+    photo: {
+      key: 'main/people.png',
+      alt: { en: 'Mission', fr: 'Mission' },
+    },
   },
   join: {
     title: { en: 'Join the Movement', fr: 'Rejoignez le mouvement' },
