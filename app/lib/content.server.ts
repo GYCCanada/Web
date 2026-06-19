@@ -584,7 +584,13 @@ export const layer = Layer.effect(
             new Response(object.stream).text(),
           );
           const parsed = yield* parseJson(json);
-          return yield* decode(parsed);
+          // One-shot, idempotent read-boundary backfill (the per-object analogue of
+          // `backfillListItemIds`) — fills a structural gap a legacy published
+          // object leaves after a new optional field was added (home's
+          // `mission.photo`). Absent for specs with no such gap; for ABSENCE only,
+          // so a malformed value still reaches `decode` to be rejected.
+          const normalized = spec.normalize ? spec.normalize(parsed) : parsed;
+          return yield* decode(normalized);
         }).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning(`Content: could not read ${key}`, cause).pipe(

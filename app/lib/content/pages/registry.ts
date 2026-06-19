@@ -30,6 +30,7 @@ import {
   TeamPage,
   VolunteerPage,
 } from './schema';
+import { backfillHomeMissionPhoto } from './home-photo-backfill';
 import { type ListItemId } from '../schema';
 
 /**
@@ -150,6 +151,17 @@ export interface ObjectSpec<A, I> {
   readonly schema: Schema.Codec<A, I>;
   readonly draftSchema: Schema.Codec<unknown, unknown>;
   readonly default: A;
+  /**
+   * An optional one-shot, idempotent read-boundary normalization run over the
+   * parsed (untrusted) JSON BEFORE decode — the per-object analogue of the site
+   * `backfillListItemIds`. Fills a structural gap a legacy published object leaves
+   * after a new field was added (e.g. home's `mission.photo`); absent for objects
+   * with no such gap. For ABSENCE only (a malformed value is left for the decoder
+   * to reject), so it never masks a real error (`make-operations-idempotent`).
+   * Typed over `unknown` (the raw parsed JSON the read path hands it), narrowing
+   * defensively before it touches shape — it never trusts the input.
+   */
+  readonly normalize?: (parsed: unknown) => unknown;
 }
 
 /**
@@ -162,7 +174,8 @@ const draftPageSpec = <A, I>(
   schema: Schema.Codec<A, I>,
   draftSchema: Schema.Codec<unknown, unknown>,
   defaultValue: A,
-): ObjectSpec<A, I> => ({ schema, draftSchema, default: defaultValue });
+  normalize?: (parsed: unknown) => unknown,
+): ObjectSpec<A, I> => ({ schema, draftSchema, default: defaultValue, normalize });
 
 /**
  * Build a spec with NO laxer draft variant: the draft boundary IS the strict
@@ -193,8 +206,15 @@ export const PAGE_SPECS = {
   archive: draftPageSpec(ArchivePage, DraftArchivePage, defaultArchivePage),
   // Draft ≠ strict: the `mission.photo` slot's `alt` may be unfilled in the draft
   // (upload first, fill alt second), so home wires the laxer `DraftHomePage`
-  // (ADR 0006) — exactly as team does for its image slots.
-  home: draftPageSpec(HomePage, DraftHomePage, defaultHomePage),
+  // (ADR 0006) — exactly as team does for its image slots. `normalize` backfills
+  // the seeded photo onto a legacy `home.json` published before `mission.photo`
+  // existed, so the photo never vanishes on deploy (idempotent; for absence only).
+  home: draftPageSpec(
+    HomePage,
+    DraftHomePage,
+    defaultHomePage,
+    backfillHomeMissionPhoto,
+  ),
   // Draft ≠ strict: a present image's `alt` may be unfilled in the draft (upload
   // first, fill alt second), so team wires the laxer `DraftTeamPage` (ADR 0006).
   team: draftPageSpec(TeamPage, DraftTeamPage, defaultTeamPage),

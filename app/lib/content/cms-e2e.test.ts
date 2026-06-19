@@ -822,6 +822,48 @@ describe('per-page /admin editor via DraftEditor (page scope, ADR 0008/0006)', (
     expect(result.draftKey).toBe(String(result.key));
   });
 
+  it('a LEGACY published home.json (no mission.photo) is backfilled to the seeded photo on read', async () => {
+    // The regression Codex's Batch-1 review surfaced: a `home.json` PUBLISHED
+    // before `mission.photo` existed carries a `mission` with NO `photo` key. It
+    // decodes cleanly (the field is optional), so `getPage` returns it as-is and
+    // the seeded default NEVER applies — the photo would silently vanish. The
+    // read-boundary backfill (`spec.normalize`) fills the absent slot with the
+    // seed, so the public view still shows the photo with no migration/redeploy.
+    const legacyHomeJson = JSON.stringify({
+      enabled: true,
+      tagline: { en: 'Legacy tagline', fr: 'Ancien slogan' },
+      // `mission` WITHOUT a `photo` key — exactly what a pre-field publish wrote.
+      mission: { readStoryLabel: { en: 'Read', fr: 'Lire' } },
+      join: {
+        title: { en: 'Join', fr: 'Rejoignez' },
+        subtitle: { en: 'Sub', fr: 'Sous' },
+        donateLabel: { en: 'Donate', fr: 'Donner' },
+        volunteerLabel: { en: 'Volunteer', fr: 'Bénévole' },
+      },
+      newsletter: {
+        title: { en: 'News', fr: 'Infos' },
+        subtitle: { en: 'NSub', fr: 'NSous' },
+        socials: { en: 'Follow', fr: 'Suivez' },
+      },
+    });
+    const result = await run(
+      Effect.gen(function* () {
+        const content = yield* Content.Service;
+        const live = yield* content.getPage('home');
+        return {
+          taglineEn: live.tagline.en, // proves the LEGACY object is what was read
+          photoKey: String(live.mission.photo?.key),
+          photoAlt: live.mission.photo?.alt,
+        };
+      }),
+      { [pageObjectKey('home')]: { body: legacyHomeJson } },
+    );
+    // The legacy object was read (its tagline), AND its absent photo was backfilled.
+    expect(result.taglineEn).toBe('Legacy tagline');
+    expect(result.photoKey).toBe('main/people.png');
+    expect(result.photoAlt).toEqual({ en: 'Mission', fr: 'Mission' });
+  });
+
   it('a plain home save (no upload) PUBLISHES and KEEPS the seeded photo', async () => {
     // The home editor always renders the mission.photo alt `Bilingual`, so a plain
     // save posts `mission.photo.alt.en/.fr` with NO key. Unlike Team (whose default
