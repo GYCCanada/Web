@@ -507,6 +507,324 @@ describe('structural invariants', () => {
 });
 
 /**
+ * C4a — `ActiveWhen` + the `activeWhenEquals` `CrossFieldRule` member + the
+ * `rulesReferToExistingFields` integrity filter (registrar plan Decision 5). The
+ * filter closes BOTH rule kinds' reference drift at the decode boundary — a
+ * dangling `when`/`target`, a wrong `when` kind, an off-list trigger value, a
+ * cross-scope reference, a self-reference, and an activation cycle are all hard
+ * decode errors — and now also closes the PRE-EXISTING `requiredWhenEquals` gap.
+ */
+describe('cross-field rule integrity filter (Decision 5)', () => {
+  /** A small form with one literal, one array, one checkbox, and three text targets. */
+  const gatedFields = [
+    {
+      _tag: 'literal',
+      name: 'addBanquet',
+      label: text('Banquet?', 'Banquet?'),
+      requiredMessage: 'registration.form.gender.required',
+      options: [
+        { value: 'yes', label: text('Yes', 'Oui') },
+        { value: 'no', label: text('No', 'Non') },
+      ],
+    },
+    {
+      _tag: 'arrayOfLiteral',
+      name: 'workshops',
+      label: text('Workshops', 'Ateliers'),
+      requiredMessage: 'registration.form.merch.required',
+      options: [
+        { value: 'music', label: text('Music', 'Musique') },
+        { value: 'photo', label: text('Photo', 'Photo') },
+      ],
+    },
+    {
+      _tag: 'checkboxBoolean',
+      name: 'bringingGuest',
+      label: text('Guest?', 'Invité?'),
+      requiredMessage: 'registration.form.tos.required',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'seats',
+      label: text('Seats', 'Places'),
+      requiredMessage: 'registration.form.church.required',
+    },
+  ] as const;
+
+  const withRules = (rules: ReadonlyArray<unknown>) => ({
+    title: text('F', 'F'),
+    fields: gatedFields,
+    rules,
+  });
+
+  test('a well-formed rule of each predicate kind decodes', () => {
+    expect(
+      succeeds(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['yes'],
+            },
+            target: 'seats',
+          },
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'arrayIncludesAny',
+              when: 'workshops',
+              values: ['music'],
+            },
+            target: 'addBanquet',
+          },
+          {
+            _tag: 'activeWhenEquals',
+            predicate: { _tag: 'checkboxChecked', when: 'bringingGuest' },
+            target: 'workshops',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a dangling activeWhenEquals target fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['yes'],
+            },
+            target: 'doesNotExist',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a dangling activeWhenEquals "when" fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'doesNotExist',
+              equals: ['yes'],
+            },
+            target: 'seats',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('an off-option literalEquals trigger value fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['maybe'], // not an addBanquet option
+            },
+            target: 'seats',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a literalEquals predicate over a non-literal "when" fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'bringingGuest', // a checkboxBoolean, not a literal
+              equals: ['yes'],
+            },
+            target: 'seats',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('an arrayIncludesAny predicate over a non-array "when" fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'arrayIncludesAny',
+              when: 'addBanquet', // a literal, not an arrayOfLiteral
+              values: ['yes'],
+            },
+            target: 'seats',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a checkboxChecked predicate over a non-checkbox "when" fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: { _tag: 'checkboxChecked', when: 'addBanquet' }, // a literal
+            target: 'seats',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a self-referential rule (when === target) fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['yes'],
+            },
+            target: 'addBanquet',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('an activation cycle (A gates B gates A) fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['yes'],
+            },
+            target: 'workshops',
+          },
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'arrayIncludesAny',
+              when: 'workshops',
+              values: ['music'],
+            },
+            target: 'addBanquet',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('the PRE-EXISTING requiredWhenEquals gap is now closed (dangling target rejected)', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'requiredWhenEquals',
+            when: 'addBanquet',
+            equals: ['yes'],
+            target: 'doesNotExist',
+            message: 'registration.form.church.required',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a requiredWhenEquals naming an off-option trigger value is rejected', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'requiredWhenEquals',
+            when: 'addBanquet',
+            equals: ['maybe'], // not an addBanquet option
+            target: 'seats',
+            message: 'registration.form.church.required',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a requiredWhenEquals over the discriminator → a variant-branch target is same-scope (decodes)', () => {
+    // The decoder flattens the discriminator + every variant branch's fields
+    // into ONE struct, so the registration `type` → `dateOfBirth` rule IS
+    // same-scope. The full fixture exercises exactly this — it must still decode.
+    expect(succeeds(fullDefinitionJson)).toBe(true);
+  });
+
+  test('a rule whose "when" and "target" live in different scopes is rejected', () => {
+    // `when` is a top-level field; `target` is inside a nestedGroup — different
+    // decoded namespaces, so cross-scope activation is deferred (rejected in v1).
+    expect(
+      fails({
+        title: text('F', 'F'),
+        fields: [
+          {
+            _tag: 'literal',
+            name: 'addBanquet',
+            label: text('Banquet?', 'Banquet?'),
+            requiredMessage: 'registration.form.gender.required',
+            options: [
+              { value: 'yes', label: text('Yes', 'Oui') },
+              { value: 'no', label: text('No', 'Non') },
+            ],
+          },
+          {
+            _tag: 'nestedGroup',
+            name: 'extras',
+            label: text('Extras', 'Extras'),
+            fields: [
+              {
+                _tag: 'requiredText',
+                name: 'seats',
+                label: text('Seats', 'Places'),
+                requiredMessage: 'registration.form.church.required',
+              },
+            ],
+          },
+        ],
+        rules: [
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['yes'],
+            },
+            target: 'seats', // lives in `extras`, not the top-level scope
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+});
+
+/**
  * C2 — the `pricing` sibling on `FormDefinition` + its reference-integrity filter.
  *
  * `pricing` is `optionalKey` (Decision 3), so the back-compat guarantee is the

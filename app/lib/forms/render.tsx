@@ -159,7 +159,7 @@ function RuleGatedField({
   formId,
   children,
 }: {
-  rule: CrossFieldRule;
+  rule: Extract<CrossFieldRule, { _tag: 'requiredWhenEquals' }>;
   formId: string;
   children: React.ReactNode;
 }) {
@@ -199,7 +199,10 @@ function FieldControl({
   prefix: string;
   locale: Locale;
   formId: string;
-  gateRules?: ReadonlyMap<string, CrossFieldRule>;
+  gateRules?: ReadonlyMap<
+    string,
+    Extract<CrossFieldRule, { _tag: 'requiredWhenEquals' }>
+  >;
 }) {
   if (field._tag === 'nestedGroup') {
     return (
@@ -307,7 +310,10 @@ export function FormFields({
   // so an inactive field is ABSENT from the POST, not a present blank its codec
   // would reject (`derive-dont-sync`: the gate IS the rule).
   const gateRules = React.useMemo(() => {
-    const map = new Map<string, CrossFieldRule>();
+    const map = new Map<
+      string,
+      Extract<CrossFieldRule, { _tag: 'requiredWhenEquals' }>
+    >();
     for (const rule of definition.rules ?? []) {
       if (rule._tag === 'requiredWhenEquals') map.set(rule.target, rule);
     }
