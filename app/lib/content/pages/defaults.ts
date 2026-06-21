@@ -465,10 +465,15 @@ export const defaultTeamPage: TeamPage = Schema.decodeUnknownSync(TeamPage)({
  * The contact form's field graph (Branch 6.3) — the data-driven equivalent of the
  * hand-tuned `contact.tsx` schema, proven byte-equivalent by
  * `forms/equivalence.contact.test.ts`. `email`/`phone` are `optional: true`
- * (optional-at-key, non-empty-when-present) and the `method`-gated requirement is
- * the pair of `requiredWhenEquals` rules, exactly mirroring the oracle's
- * `Schema.optional(...)` + struct-level filter (`derive-dont-sync`: this object IS
- * the contact validation now, no hand-written schema beside it).
+ * (optional-at-key, non-empty-when-present). The `method`-gated behaviour is two
+ * orthogonal rule pairs (registrar plan Decision 5): an `activeWhenEquals` rule
+ * drives VISIBILITY (the field renders, and POSTs, only when `method` matches —
+ * absent otherwise, so its `optional: true` codec accepts the absence) and a
+ * `requiredWhenEquals` rule re-imposes PRESENCE server-side when shown. Before
+ * Decision 5 the `requiredWhenEquals` rule doubled as the visibility gate; that
+ * conflation is retired — the rules are now separate axes, behaviour-preserving
+ * (`derive-dont-sync`: this object IS the contact validation now, no hand-written
+ * schema beside it).
  */
 export const defaultContactForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
@@ -539,11 +544,29 @@ export const defaultContactForm: FormDefinition = Schema.decodeUnknownSync(
   ],
   rules: [
     {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'method',
+        equals: ['email', 'both'],
+      },
+      target: 'email',
+    },
+    {
       _tag: 'requiredWhenEquals',
       when: 'method',
       equals: ['email', 'both'],
       target: 'email',
       message: 'contact.form.email.required',
+    },
+    {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'method',
+        equals: ['phone', 'both'],
+      },
+      target: 'phone',
     },
     {
       _tag: 'requiredWhenEquals',
@@ -559,8 +582,10 @@ export const defaultContactForm: FormDefinition = Schema.decodeUnknownSync(
  * The volunteer form's field graph (Branch 6.4) — the data-driven equivalent of
  * the hand-tuned `volunteer.tsx` schema, proven byte-equivalent by
  * `forms/equivalence.volunteer.test.ts`. Like contact it carries the `method`
- * discriminator as a `literal` + the pair of `requiredWhenEquals` rules gating
- * `email`/`phone`; volunteer adds the always-required `age`/`location`/
+ * discriminator as a `literal` + the two orthogonal rule pairs gating
+ * `email`/`phone` (an `activeWhenEquals` rule for VISIBILITY, a
+ * `requiredWhenEquals` rule for server-side PRESENCE — registrar plan Decision 5);
+ * volunteer adds the always-required `age`/`location`/
  * `background`/`why` free-text fields (the latter two `multiline`). The fields
  * are listed in their rendered order (`volunteer.tsx` view order: name, method,
  * email/phone, age, location, background, why) so the migrated `<FormFields>`
@@ -688,11 +713,29 @@ export const defaultVolunteerForm: FormDefinition = Schema.decodeUnknownSync(
   ],
   rules: [
     {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'method',
+        equals: ['email', 'both'],
+      },
+      target: 'email',
+    },
+    {
       _tag: 'requiredWhenEquals',
       when: 'method',
       equals: ['email', 'both'],
       target: 'email',
       message: 'volunteer.form.email.required',
+    },
+    {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'method',
+        equals: ['phone', 'both'],
+      },
+      target: 'phone',
     },
     {
       _tag: 'requiredWhenEquals',

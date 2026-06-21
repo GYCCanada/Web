@@ -268,15 +268,16 @@ describe('FormFields renders a discriminated variant', () => {
   });
 });
 
-// The contact/volunteer `method`-gated `email`/`phone` (registration-launch
-// BLOCKER 1): both fields are `optional: true` and a pair of `requiredWhenEquals`
-// rules makes each required only when `method` is one of its trigger values. The
-// hand-tuned forms rendered the gated field CONDITIONALLY, so an inactive field
-// was ABSENT from the POST and its `optional: true` codec accepted the absence.
-// The generic renderer must reproduce that conditional VISIBILITY — otherwise the
-// always-rendered field POSTs a present blank (`phone=''`) its codec rejects as
-// `requiredMessage`. These tests pin that a gated field appears only when its
-// `when` value is active.
+// The contact/volunteer `method`-gated `email`/`phone` (registrar plan Decision 5):
+// both fields are `optional: true` and an `activeWhenEquals` rule makes each ACTIVE
+// — rendered, and so POSTed — only when `method` is one of its trigger values (a
+// sibling `requiredWhenEquals` re-imposes presence server-side, but no longer drives
+// visibility). The hand-tuned forms rendered the gated field CONDITIONALLY, so an
+// inactive field was ABSENT from the POST and its `optional: true` codec accepted the
+// absence. The generic renderer must reproduce that conditional VISIBILITY off the
+// activation rule — otherwise the always-rendered field POSTs a present blank
+// (`phone=''`) its codec rejects as `requiredMessage`. These tests pin that a gated
+// field appears only when its `when` value activates it.
 const methodGatedDef = asDefinition({
   title: text('F', 'F'),
   fields: [
@@ -315,11 +316,29 @@ const methodGatedDef = asDefinition({
   ],
   rules: [
     {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'method',
+        equals: ['email', 'both'],
+      },
+      target: 'email',
+    },
+    {
       _tag: 'requiredWhenEquals',
       when: 'method',
       equals: ['email', 'both'],
       target: 'email',
       message: 'contact.form.email.required',
+    },
+    {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'method',
+        equals: ['phone', 'both'],
+      },
+      target: 'phone',
     },
     {
       _tag: 'requiredWhenEquals',
@@ -331,7 +350,7 @@ const methodGatedDef = asDefinition({
   ],
 });
 
-describe('FormFields gates requiredWhenEquals targets on their when-field', () => {
+describe('FormFields gates activeWhenEquals targets on their when-field', () => {
   test('method=email renders email, hides phone (so phone is absent from the POST)', () => {
     const html = render(methodGatedDef, { defaultValue: { method: 'email' } });
     expect(html).toContain('name="email"');
@@ -350,9 +369,137 @@ describe('FormFields gates requiredWhenEquals targets on their when-field', () =
     expect(html).toContain('name="phone"');
   });
 
+  test('an inactive activeWhenEquals target is not rendered (no default selected)', () => {
+    // With no `method` chosen, neither gated field's predicate holds, so neither
+    // is rendered — the ungated siblings still are.
+    const html = render(methodGatedDef);
+    expect(html).not.toContain('name="email"');
+    expect(html).not.toContain('name="phone"');
+    expect(html).toContain('name="name"');
+    expect(html).toContain('name="method"');
+  });
+
   test('the always-present, ungated fields render regardless of method', () => {
     const html = render(methodGatedDef, { defaultValue: { method: 'phone' } });
     expect(html).toContain('name="name"');
     expect(html).toContain('name="method"');
+  });
+
+  // A `requiredWhenEquals` rule whose target carries NO `activeWhenEquals` rule no
+  // longer hides its field — after Decision 5 `requiredWhenEquals` is presence-only,
+  // never a visibility gate. This pins the retired conflation.
+  test('a requiredWhenEquals-only target stays visible (presence-only, not a gate)', () => {
+    const presenceOnlyDef = asDefinition({
+      title: text('F', 'F'),
+      fields: [
+        {
+          _tag: 'literal',
+          name: 'method',
+          label: text('Method', 'Méthode'),
+          options: [
+            { value: 'email', label: text('Email', 'Courriel') },
+            { value: 'phone', label: text('Phone', 'Téléphone') },
+          ],
+          requiredMessage: 'contact.form.contact-method.required',
+        },
+        {
+          _tag: 'requiredText',
+          name: 'phone',
+          label: text('Phone', 'Téléphone'),
+          optional: true,
+          requiredMessage: 'contact.form.phone.required',
+        },
+      ],
+      rules: [
+        {
+          _tag: 'requiredWhenEquals',
+          when: 'method',
+          equals: ['phone'],
+          target: 'phone',
+          message: 'contact.form.phone.required',
+        },
+      ],
+    });
+    // `method=email` ⇒ phone is NOT required, but it has no activation gate, so it
+    // still renders (visibility no longer derives from `requiredWhenEquals`).
+    const html = render(presenceOnlyDef, { defaultValue: { method: 'email' } });
+    expect(html).toContain('name="phone"');
+  });
+});
+
+// The activation predicate covers more than literal-equals: a `checkboxChecked`
+// gate (a boolean trigger) and an `arrayIncludesAny` gate (a multi-select trigger)
+// must each show their target when the predicate holds and hide it otherwise.
+const predicateGatedDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'checkboxBoolean',
+      name: 'wantsBanquet',
+      label: text('Add banquet', 'Ajouter banquet'),
+      requiredMessage: 'registration.form.tos.required',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'dietary',
+      label: text('Dietary needs', 'Régime'),
+      optional: true,
+      requiredMessage: 'registration.form.name.required',
+    },
+    {
+      _tag: 'arrayOfLiteral',
+      name: 'merch',
+      label: text('Merch', 'Articles'),
+      options: [
+        { value: 't-shirt', label: text('T-shirt', 'T-shirt') },
+        { value: 'hoodie', label: text('Hoodie', 'Pull') },
+      ],
+      requiredMessage: 'registration.form.merch.required',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'size',
+      label: text('Size', 'Taille'),
+      optional: true,
+      requiredMessage: 'registration.form.name.required',
+    },
+  ],
+  rules: [
+    {
+      _tag: 'activeWhenEquals',
+      predicate: { _tag: 'checkboxChecked', when: 'wantsBanquet' },
+      target: 'dietary',
+    },
+    {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'arrayIncludesAny',
+        when: 'merch',
+        values: ['t-shirt', 'hoodie'],
+      },
+      target: 'size',
+    },
+  ],
+});
+
+describe('FormFields gates checkboxChecked / arrayIncludesAny targets', () => {
+  test('a checkboxChecked target renders only when its checkbox is checked', () => {
+    const off = render(predicateGatedDef);
+    expect(off).not.toContain('name="dietary"');
+
+    const on = render(predicateGatedDef, {
+      defaultValue: { wantsBanquet: 'true' },
+    });
+    expect(on).toContain('name="dietary"');
+  });
+
+  test('an arrayIncludesAny target renders only when an option is selected', () => {
+    const none = render(predicateGatedDef);
+    expect(none).not.toContain('name="size"');
+
+    const selected = render(predicateGatedDef, {
+      defaultValue: { merch: ['t-shirt'] },
+    });
+    expect(selected).toContain('name="size"');
   });
 });
