@@ -2,6 +2,8 @@ import { Schema } from 'effect';
 
 import { Text } from '../content/schema';
 import { root } from '../localization/translations';
+import { PricingRules } from './pricing';
+import { FieldName, OptionValue } from './tokens';
 
 /**
  * The structural `FormDefinition` schema (ADR 0007, CONTEXT §Form definition;
@@ -74,28 +76,11 @@ export const MessageKey = Schema.NonEmptyString.check(messageKeyFilter).pipe(
 );
 export type MessageKey = typeof MessageKey.Type;
 
-/**
- * A field's submit-name — the key the browser POSTs and the path segment the
- * decoder addresses. Constrained to a JS-identifier-like token (`a-z`, `A-Z`,
- * `0-9`, `_`) so a hand-edited definition cannot smuggle a dotted path, a `[`, or
- * whitespace into a name the decoder interpolates into a form-data path
- * (`boundary-discipline`).
- */
-export const FieldName = Schema.NonEmptyString.check(
-  Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]*$/, { title: 'FieldName' }),
-).pipe(Schema.brand('FieldName'));
-export type FieldName = typeof FieldName.Type;
-
-/**
- * A `literal` / `arrayOfLiteral` option value — the token submitted when an
- * option is chosen (e.g. `"attendee"`, `"t-shirt"`, `"male"`). A constrained
- * token (no whitespace, the URL-safe-ish set) so it is safe in a radio `value`
- * and an off-list value is a hard decode error in the generated codec.
- */
-export const OptionValue = Schema.NonEmptyString.check(
-  Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: 'OptionValue' }),
-).pipe(Schema.brand('OptionValue'));
-export type OptionValue = typeof OptionValue.Type;
+// `FieldName` / `OptionValue` are defined in the leaf `tokens.ts` (shared with
+// `pricing.ts` without an import cycle) and re-exported here so every existing
+// importer (`decode`, `render`, the admin routes) keeps importing them from
+// `definition`. They are also imported above for use in this module's schemas.
+export { FieldName, OptionValue } from './tokens';
 
 /**
  * One selectable option of a `literal` / `arrayOfLiteral` field: its submitted
@@ -502,12 +487,119 @@ export type CrossFieldRule = typeof CrossFieldRule.Type;
 // ---------------------------------------------------------------------------
 
 /**
+ * The encoded shape a pricing-reference walk needs from each field: its `_tag`,
+ * its `name`, the `options` of a `literal` / `arrayOfLiteral`, and the nested
+ * `fields` of a `nestedGroup`. A loose structural mirror (the filter runs on the
+ * ENCODED `FormDefinition`, pre-brand, exactly like `variantsMatchOptions`).
+ */
+type EncodedFieldNode = {
+  readonly _tag: string;
+  readonly name: string;
+  readonly options?: ReadonlyArray<{ readonly value: string }>;
+  readonly fields?: ReadonlyArray<EncodedFieldNode>;
+};
+
+/**
+ * A pricing rule keyed to a field/option that does not exist — or to a field of
+ * the wrong kind — is a `derive-dont-sync` drift the SEPARATE-pricing-structure
+ * design (Decision 1) closes at the decode boundary, exactly as
+ * `variantsMatchOptions` closes the discriminator bijection. The filter walks the
+ * full field graph (top-level `fields`, recursively through `nestedGroup`, and
+ * every `variant` branch), builds `name → _tag` and `literal/array name →
+ * Set<optionValue>` indexes, then checks each rule:
+ *   - `choice` ⇒ its `field` is a `literal`, and every priced `option` is one of
+ *     that field's options;
+ *   - `multiChoice` ⇒ its `field` is an `arrayOfLiteral`, every priced `option`
+ *     in its options;
+ *   - `toggle` ⇒ its `field` is a `checkboxBoolean`.
+ * A rule naming a missing field, a kind mismatch, or an off-list option is a hard
+ * decode error — pricing drift becomes a decode-time impossibility.
+ */
+const pricingReferencesResolve = Schema.makeFilter<{
+  readonly fields: ReadonlyArray<EncodedFieldNode>;
+  readonly variant?: { readonly variants: ReadonlyArray<{ readonly fields: ReadonlyArray<EncodedFieldNode> }> };
+  readonly pricing?: {
+    readonly rules: ReadonlyArray<
+      | { readonly _tag: 'choice'; readonly field: string; readonly prices: ReadonlyArray<{ readonly option: string }> }
+      | { readonly _tag: 'multiChoice'; readonly field: string; readonly prices: ReadonlyArray<{ readonly option: string }> }
+      | { readonly _tag: 'toggle'; readonly field: string }
+    >;
+  };
+}>(
+  (def) => {
+    if (def.pricing === undefined) {
+      return undefined;
+    }
+
+    const kindByName = new Map<string, string>();
+    const optionsByName = new Map<string, ReadonlySet<string>>();
+
+    const walk = (nodes: ReadonlyArray<EncodedFieldNode>): void => {
+      for (const node of nodes) {
+        kindByName.set(node.name, node._tag);
+        if (
+          (node._tag === 'literal' || node._tag === 'arrayOfLiteral') &&
+          node.options !== undefined
+        ) {
+          optionsByName.set(
+            node.name,
+            new Set(node.options.map((option) => option.value)),
+          );
+        }
+        if (node._tag === 'nestedGroup' && node.fields !== undefined) {
+          walk(node.fields);
+        }
+      }
+    };
+
+    walk(def.fields);
+    for (const branch of def.variant?.variants ?? []) {
+      walk(branch.fields);
+    }
+
+    for (const rule of def.pricing.rules) {
+      const kind = kindByName.get(rule.field);
+      if (kind === undefined) {
+        return `pricing rule references unknown field "${rule.field}"`;
+      }
+      if (rule._tag === 'toggle') {
+        if (kind !== 'checkboxBoolean') {
+          return `toggle pricing rule "${rule.field}" must target a checkboxBoolean field, not "${kind}"`;
+        }
+        continue;
+      }
+      // `choice` ⇒ literal, `multiChoice` ⇒ arrayOfLiteral.
+      const expectedKind = rule._tag === 'choice' ? 'literal' : 'arrayOfLiteral';
+      if (kind !== expectedKind) {
+        return `${rule._tag} pricing rule "${rule.field}" must target a ${expectedKind} field, not "${kind}"`;
+      }
+      const options = optionsByName.get(rule.field) ?? new Set<string>();
+      for (const price of rule.prices) {
+        if (!options.has(price.option)) {
+          return `pricing rule "${rule.field}" prices unknown option "${price.option}"`;
+        }
+      }
+    }
+
+    return undefined;
+  },
+  { title: 'FormDefinition.pricingReferencesResolve' },
+);
+
+/**
  * The full structural definition of one site form (ADR 0007). `title` / `intro`
  * are the CMS-editable page copy carried over from the Branch 5.1 placeholder;
  * `fields` is the common field graph; `variant` is the optional discriminated
- * section; `rules` are the cross-field requirements. A form whose fields are not
- * yet authored (the post-migration default before its graph lands) carries an
- * empty `fields` and no `variant` / `rules`.
+ * section; `rules` are the cross-field requirements; `pricing` is the optional
+ * pricing dimension (Decision 1/3 — `optionalKey`, absence ⇒ unpriced). A form
+ * whose fields are not yet authored (the post-migration default before its graph
+ * lands) carries an empty `fields` and no `variant` / `rules` / `pricing`.
+ *
+ * `pricing` is `optionalKey` so every already-published `forms/*.json` (contact,
+ * volunteer, registration — all decode through this one schema) keeps decoding
+ * unchanged; the `pricingReferencesResolve` `.check` guards the keyed-structure
+ * design against drift at the boundary (a rule naming a missing field/option, or
+ * a kind mismatch, is a hard decode error).
  */
 export const FormDefinition = Schema.Struct({
   title: Text,
@@ -515,5 +607,6 @@ export const FormDefinition = Schema.Struct({
   fields: FieldList,
   variant: Schema.optionalKey(FormVariantSet),
   rules: Schema.optionalKey(Schema.Array(CrossFieldRule)),
-});
+  pricing: Schema.optionalKey(PricingRules),
+}).check(pricingReferencesResolve);
 export type FormDefinition = typeof FormDefinition.Type;

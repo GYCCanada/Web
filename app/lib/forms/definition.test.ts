@@ -505,3 +505,194 @@ describe('structural invariants', () => {
     ).toBe(true);
   });
 });
+
+/**
+ * C2 — the `pricing` sibling on `FormDefinition` + its reference-integrity filter.
+ *
+ * `pricing` is `optionalKey` (Decision 3), so the back-compat guarantee is the
+ * load-bearing one: every already-published `forms/*.json` (none carry pricing)
+ * keeps decoding unchanged. The `pricingReferencesResolve` filter then closes the
+ * SEPARATE-pricing-structure design's only drift surface (Decision 1) at the
+ * boundary — a rule naming a missing field, a kind mismatch, or an off-list option
+ * is a hard decode error, exactly the way `variantsMatchOptions` closes the
+ * discriminator bijection.
+ */
+describe('pricing sibling on FormDefinition (Decision 1/3)', () => {
+  /** A small priced form: a `literal`, an `arrayOfLiteral`, and a `checkboxBoolean`. */
+  const pricedFields = [
+    {
+      _tag: 'literal',
+      name: 'tShirtSize',
+      label: text('Size', 'Taille'),
+      requiredMessage: 'registration.form.gender.required',
+      options: [
+        { value: 'small', label: text('Small', 'Petit') },
+        { value: 'large', label: text('Large', 'Grand') },
+      ],
+    },
+    {
+      _tag: 'arrayOfLiteral',
+      name: 'workshops',
+      label: text('Workshops', 'Ateliers'),
+      requiredMessage: 'registration.form.merch.required',
+      options: [
+        { value: 'photography', label: text('Photo', 'Photo') },
+        { value: 'music', label: text('Music', 'Musique') },
+      ],
+    },
+    {
+      _tag: 'checkboxBoolean',
+      name: 'addBanquet',
+      label: text('Banquet', 'Banquet'),
+      requiredMessage: 'registration.form.tos.required',
+    },
+  ] as const;
+
+  const withPricing = (rules: ReadonlyArray<unknown>) => ({
+    title: text('Registration', 'Inscription'),
+    fields: pricedFields,
+    pricing: { currency: 'cad', base: 5000, rules },
+  });
+
+  test('an existing no-pricing definition still decodes (back-compat)', () => {
+    // The full Branch-6.1 fixture carries no `pricing` — proves optionalKey
+    // leaves every already-published forms/*.json decoding unchanged.
+    expect(succeeds(fullDefinitionJson)).toBe(true);
+    expect(
+      Schema.decodeUnknownSync(FormDefinition)(fullDefinitionJson).pricing,
+    ).toBeUndefined();
+  });
+
+  test('a pricing block whose rules all resolve decodes', () => {
+    expect(
+      succeeds(
+        withPricing([
+          {
+            _tag: 'choice',
+            field: 'tShirtSize',
+            prices: [{ option: 'large', amount: 500 }],
+          },
+          {
+            _tag: 'multiChoice',
+            field: 'workshops',
+            prices: [{ option: 'photography', amount: 1500 }],
+          },
+          { _tag: 'toggle', field: 'addBanquet', amount: 2500 },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a rule naming a field that does not exist fails decode', () => {
+    expect(
+      fails(
+        withPricing([
+          { _tag: 'toggle', field: 'doesNotExist', amount: 2500 },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a choice rule pricing an option the field does not offer fails decode', () => {
+    expect(
+      fails(
+        withPricing([
+          {
+            _tag: 'choice',
+            field: 'tShirtSize',
+            prices: [{ option: 'xxl', amount: 500 }], // not a tShirtSize option
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a choice rule targeting a non-literal field (kind mismatch) fails decode', () => {
+    expect(
+      fails(
+        withPricing([
+          {
+            _tag: 'choice',
+            field: 'addBanquet', // a checkboxBoolean, not a literal
+            prices: [{ option: 'small', amount: 500 }],
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a toggle rule targeting a non-checkbox field (kind mismatch) fails decode', () => {
+    expect(
+      fails(
+        withPricing([
+          { _tag: 'toggle', field: 'tShirtSize', amount: 2500 }, // a literal
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a rule may reference a field nested in a group', () => {
+    expect(
+      succeeds({
+        title: text('F', 'F'),
+        fields: [
+          {
+            _tag: 'nestedGroup',
+            name: 'extras',
+            label: text('Extras', 'Extras'),
+            fields: [
+              {
+                _tag: 'checkboxBoolean',
+                name: 'addBanquet',
+                label: text('Banquet', 'Banquet'),
+                requiredMessage: 'registration.form.tos.required',
+              },
+            ],
+          },
+        ],
+        pricing: {
+          currency: 'cad',
+          base: 0,
+          rules: [{ _tag: 'toggle', field: 'addBanquet', amount: 2500 }],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test('a rule may reference a field inside a variant branch', () => {
+    expect(
+      succeeds({
+        title: text('F', 'F'),
+        fields: [],
+        variant: {
+          discriminator: 'type',
+          requiredMessage: 'registration.form.type.required',
+          options: [
+            { value: 'attendee', label: text('A', 'A') },
+            { value: 'exhibitor', label: text('E', 'E') },
+          ],
+          variants: [
+            {
+              value: 'attendee',
+              label: text('A', 'A'),
+              fields: [
+                {
+                  _tag: 'checkboxBoolean',
+                  name: 'addBanquet',
+                  label: text('Banquet', 'Banquet'),
+                  requiredMessage: 'registration.form.tos.required',
+                },
+              ],
+            },
+            { value: 'exhibitor', label: text('E', 'E'), fields: [] },
+          ],
+        },
+        pricing: {
+          currency: 'cad',
+          base: 0,
+          rules: [{ _tag: 'toggle', field: 'addBanquet', amount: 2500 }],
+        },
+      }),
+    ).toBe(true);
+  });
+});

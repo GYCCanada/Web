@@ -4,7 +4,8 @@ import { Effect, Schema } from 'effect';
 import { Cents, CurrencyCode, PricingRule, PricingRules } from './pricing';
 
 /**
- * C1 — the money brands + the `PricingRule`/`PricingRules` schema.
+ * C1/C2 — the money brands, the `PricingRule`/`PricingRules` schema, and the
+ * `TimingWindow` early-bird/late modifiers.
  *
  * These tests pin the boundary guarantees the pure pricing evaluator (C3) builds
  * on:
@@ -13,7 +14,9 @@ import { Cents, CurrencyCode, PricingRule, PricingRules } from './pricing';
  *     `encode → JSON → decode` (`prove-it-works`);
  *   - the money brands are watertight — `Cents` rejects negative/float/NaN,
  *     `CurrencyCode` rejects any token but `cad`, and the `PricingRule` tag-set is
- *     CLOSED (`make-impossible-states-unrepresentable`, `boundary-discipline`).
+ *     CLOSED (`make-impossible-states-unrepresentable`, `boundary-discipline`);
+ *   - a `TimingWindow` can never invert (`from <= to`) and two windows can never
+ *     overlap — the `first-match` window selection (C3) stays order-independent.
  */
 
 const roundTrips = <A, I>(
@@ -57,7 +60,24 @@ const fullRulesJson = {
     },
     { _tag: 'toggle', field: 'addBanquet', amount: 2500 },
   ],
+  windows: [
+    {
+      id: 'earlyBirdWindow000000',
+      from: '2026-01-01',
+      to: '2026-03-01',
+      delta: -1000,
+    },
+    {
+      id: 'lateSurchargeWindow00',
+      from: '2026-06-01',
+      to: '2026-07-01',
+      delta: 1500,
+    },
+  ],
 } as const;
+
+const decodeWindows = (windows: ReadonlyArray<Record<string, unknown>>) =>
+  decodeRules({ currency: 'cad', base: 0, rules: [], windows })._tag;
 
 describe('PricingRules round-trip (encoded rules ARE the on-bucket JSON)', () => {
   it.effect(
@@ -142,6 +162,93 @@ describe('PricingRule — closed tag set', () => {
   test('a dotted / invalid field name is rejected (FieldName brand)', () => {
     expect(
       decodeRule({ _tag: 'toggle', field: 'add.banquet', amount: 100 })._tag,
+    ).toBe('Failure');
+  });
+});
+
+describe('TimingWindow — ordered, non-overlapping early-bird/late modifiers', () => {
+  test('two non-overlapping windows (a discount + a surcharge) decode', () => {
+    expect(decodeWindows([...fullRulesJson.windows])).toBe('Success');
+  });
+
+  test('an empty windows list decodes (no time-based pricing)', () => {
+    expect(decodeWindows([])).toBe('Success');
+  });
+
+  test('a window may carry a negative delta (early-bird discount)', () => {
+    expect(
+      decodeWindows([
+        {
+          id: 'earlyBirdWindow000000',
+          from: '2026-01-01',
+          to: '2026-03-01',
+          delta: -2500,
+        },
+      ]),
+    ).toBe('Success');
+  });
+
+  test('an inverted window (from after to) is rejected', () => {
+    expect(
+      decodeWindows([
+        {
+          id: 'invertedWindow0000000',
+          from: '2026-03-01',
+          to: '2026-01-01',
+          delta: -1000,
+        },
+      ]),
+    ).toBe('Failure');
+  });
+
+  test('two overlapping windows are rejected', () => {
+    expect(
+      decodeWindows([
+        {
+          id: 'firstWindow0000000000',
+          from: '2026-01-01',
+          to: '2026-04-01',
+          delta: -1000,
+        },
+        {
+          id: 'secondWindow000000000',
+          from: '2026-03-01', // starts before the first window's exclusive end
+          to: '2026-05-01',
+          delta: 1000,
+        },
+      ]),
+    ).toBe('Failure');
+  });
+
+  test('abutting windows (from === prev exclusive to) do NOT overlap', () => {
+    expect(
+      decodeWindows([
+        {
+          id: 'firstWindow0000000000',
+          from: '2026-01-01',
+          to: '2026-03-01',
+          delta: -1000,
+        },
+        {
+          id: 'secondWindow000000000',
+          from: '2026-03-01', // == prev `to`, which is exclusive ⇒ no shared instant
+          to: '2026-05-01',
+          delta: 1000,
+        },
+      ]),
+    ).toBe('Success');
+  });
+
+  test('a window with a non-calendar date is rejected (IsoDate brand)', () => {
+    expect(
+      decodeWindows([
+        {
+          id: 'badDateWindow00000000',
+          from: '2026-02-31', // not a real calendar date
+          to: '2026-03-01',
+          delta: -1000,
+        },
+      ]),
     ).toBe('Failure');
   });
 });
