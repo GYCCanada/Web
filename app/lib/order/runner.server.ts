@@ -2,6 +2,7 @@ export * as Order from './runner.server';
 
 import { Effect, Layer, Option } from 'effect';
 import {
+  ClusterError,
   MessageStorage,
   RunnerHealth,
   Runners,
@@ -13,6 +14,7 @@ import {
   ActorAddressResolverLayer,
   ClientLayer,
   Client,
+  MailboxError,
 } from 'effect-encore';
 
 import { Env } from '../env.server';
@@ -142,6 +144,23 @@ export type SenderServices =
   | Client
   | ActorAddressResolver
   | MessageStorage.MessageStorage;
+
+/**
+ * The error channel of `Entity.<op>.send` — the PERSISTENCE failures of writing
+ * a durable op row into the SQL mailbox (a SQL/transport fault, a full mailbox,
+ * a concurrent processing claim). The webhook (F3) treats a `send` failure as
+ * fatal — the durable settle row never LANDED, so it must fail the response and
+ * let Stripe retry — distinct from the POST-send `waitFor` observation, which is
+ * safely swallowed. Mirrors `Entity.settle.send`'s declared error set
+ * (`MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage`,
+ * `effect-encore` `actor.d.ts:230`); typed here so callers map it to a retryable
+ * 5xx without re-deriving the union or reaching into encore internals.
+ */
+export type SettleSendError =
+  | MailboxError
+  | ClusterError.PersistenceError
+  | ClusterError.MailboxFull
+  | ClusterError.AlreadyProcessingMessage;
 
 /**
  * G6 — the SENDER seam threaded into `makeAppLayer` (the `AppRuntime` request

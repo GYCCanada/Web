@@ -11,6 +11,7 @@ import {
   Result,
   Schema,
 } from 'effect';
+import { ClusterError, MessageStorage } from 'effect/unstable/cluster';
 import { TestClock } from 'effect/testing';
 import { RouterContextProvider } from 'react-router';
 import { isSuccess } from 'effect-encore';
@@ -1047,6 +1048,214 @@ describe('/api/stripe/webhook — settle drive is BOUNDED when the runner is dow
     // the dead runner — the durable `send` landed and reconciles on recovery.
     expect(await readStatus(runtime, args, order.orderId)).toBe('paid');
   }, 15000);
+});
+
+/**
+ * (F3) A webhook AppRuntime whose Order SENDER is wired over a FAULTY
+ * `MessageStorage`: it DELEGATES every method to the real `MessageStorageLive`
+ * (over a real shared sqlite FILE, so `Env.database` is genuinely Some and the
+ * `settleOrder` drive runs) EXCEPT `saveRequest`, which fails with a typed
+ * `PersistenceError` — modelling a SQL/mailbox fault on the durable `settle.send`
+ * write. `send` calls `mailbox.send → storage.saveRequest` (effect-encore
+ * `actor-mailbox.js`), so this fails the `send` with a `PersistenceError` (mapped
+ * by `Entity.settle.send` into `Order.SettleSendError`) BEFORE any durable row
+ * lands. The faulty sender is injected through `makeAppLayer`'s `senderLayer`
+ * test seam (mirroring the existing `paymentLayer` seam), shadowing the real
+ * `appSenderLayer` for this one runtime only.
+ */
+const faultySenderWebhookRuntime = (order: RegistrationOrder): RequestRuntime => {
+  const dbFile = tmpDbFile(order.orderId);
+  const storage = sharedStorageLayer(seed(order));
+  const config = ConfigProvider.layer(
+    ConfigProvider.fromEnv({ env: dbStripeEnv(dbFile) }),
+  );
+  // Decorate the real storage: every method delegates to `MessageStorageLive`
+  // (resolved from the underlying provide), but `saveRequest` fails — so the
+  // `settle.send` write fails with a `PersistenceError` while every other read
+  // (the runner has none here anyway) stays faithful.
+  const faultyStorage = Layer.effect(
+    MessageStorage.MessageStorage,
+    Effect.gen(function* () {
+      const real = yield* MessageStorage.MessageStorage;
+      return MessageStorage.MessageStorage.of({
+        ...real,
+        saveRequest: () =>
+          Effect.fail(
+            new ClusterError.PersistenceError({
+              cause: new Error('injected: settle.send mailbox write failed'),
+            }),
+          ),
+      });
+    }),
+  ).pipe(Layer.provide(Order.MessageStorageLive));
+
+  // Mirror `appSenderLayer`'s `orDie` on the real DB branch: `Env.database` IS Some
+  // here, so `MessageStorageLive`'s `DatabaseUnconfigured` gate cannot fire — `orDie`
+  // discharges it to keep the sender's error channel `never` (the seam `makeAppLayer`
+  // requires). The INJECTED `saveRequest` `PersistenceError` is in the per-op `send`
+  // channel, not the layer build, so it is untouched by `orDie`.
+  const appLayer = makeAppLayer(
+    storage,
+    undefined,
+    Order.senderLayer(faultyStorage).pipe(Layer.orDie),
+  ).pipe(Layer.provide(config)) as AppLayer;
+  return makeRequestRuntimeFromLayer(appLayer);
+};
+
+describe('/api/stripe/webhook — settle `send` persistence failure fails the response so Stripe retries (F3)', () => {
+  it('a completed paid event whose durable `settle.send` cannot persist returns a retryable 502', async () => {
+    // The `settle.send` write fails with a `PersistenceError` BEFORE the durable
+    // row lands. F3: this MUST NOT be swallowed into a 200 — with no durable
+    // settle the runner has nothing to reconcile (a lost-settle money hazard), so
+    // the webhook returns a retryable 502 and Stripe retries until the send lands.
+    const order = pendingOrder('ord-f3-sendfail', 15000);
+    const runtime = faultySenderWebhookRuntime(order);
+    const { action } = await import('../../routes/api.stripe-webhook');
+    const body = eventBody(
+      'checkout.session.completed',
+      order.orderId,
+      15000,
+    );
+    const signature = await signPayload(body, Math.floor(Date.now() / 1000));
+    const args = webhookArgs(runtime, body, signature);
+
+    const response = await action(args);
+    // Non-2xx — Stripe retries (the durable settle never persisted).
+    expect(response.status).toBe(502);
+    // The bucket DID flip paid (the receipt authority earned it before the drive);
+    // the F1 `canTransition` identity case makes the inevitable Stripe RETRY a safe
+    // no-op on the already-paid bucket, re-driving only the failed `send`.
+    expect(await readStatus(runtime, args, order.orderId)).toBe('paid');
+  });
+
+  it('an async_payment_failed event whose durable `settle.send` cannot persist also returns a retryable 502', async () => {
+    // The `async_payment_failed` path drives `settle` with `outcome: 'failed'`;
+    // its `send` persistence failure is fatal for the same reason — fail the
+    // response so Stripe retries. The bucket already flipped `failed`; the F1
+    // `markOrderFailed` identity case makes the retry a safe no-op.
+    const order = pendingOrder('ord-f3-failsend', 15000);
+    const runtime = faultySenderWebhookRuntime(order);
+    const { action } = await import('../../routes/api.stripe-webhook');
+    const body = eventBody(
+      'checkout.session.async_payment_failed',
+      order.orderId,
+      15000,
+    );
+    const signature = await signPayload(body, Math.floor(Date.now() / 1000));
+    const args = webhookArgs(runtime, body, signature);
+
+    const response = await action(args);
+    expect(response.status).toBe(502);
+    expect(await readStatus(runtime, args, order.orderId)).toBe('failed');
+  });
+});
+
+describe('/api/stripe/webhook — wait-timeout AFTER a successful `send` still 200s + converges (F3)', () => {
+  it('the durable `send` LANDS, the runner is down so the wait times out, yet the webhook 200s and the runner converges on recovery', async () => {
+    // The F3 split swallows ONLY the post-`send` `waitFor`/timeout. Here the
+    // `send` SUCCEEDS (the durable row lands in the shared mailbox) but NO runner
+    // consumes it, so the bounded `waitFor` times out. That is safe to 200: the
+    // durable row is persisted, so the runner reconciles it on recovery. This is
+    // the SAME runner-down stack as the G8 200-guarantee, asserted here for the
+    // `send`-succeeds-wait-fails half of the split — and we prove convergence by
+    // booting a runner against the SAME file afterward and observing the durable
+    // settle resolve to a terminal reply.
+    const order = pendingOrder('ord-f3-waittimeout', 15000);
+    const dbFile = tmpDbFile(order.orderId);
+    const storage = sharedStorageLayer(seed(order));
+    const config = ConfigProvider.layer(
+      ConfigProvider.fromEnv({ env: dbStripeEnv(dbFile) }),
+    );
+
+    const submissions = Layer.provideMerge(
+      Submissions.layer,
+      Layer.provideMerge(Content.layer, storage),
+    );
+    // The webhook AppRuntime over the REAL sender (durable send LANDS), no runner.
+    const webhookRuntime = makeRequestRuntimeFromLayer(
+      makeAppLayer(storage).pipe(Layer.provide(config)) as AppLayer,
+    );
+    // A side sender over the SAME file to anchor `arm` and later read the reply.
+    const sender = ManagedRuntime.make(
+      Order.senderLayer(Order.MessageStorageLive).pipe(
+        Layer.provide(Env.layer),
+        Layer.provide(config),
+      ),
+    );
+    // Anchor the entity at `pending` (the action's `arm`) before settling.
+    await sender.runPromise(
+      Order.Entity.arm.send({
+        orderId: order.orderId,
+        mode: order.mode,
+        amount: order.amount,
+        currency: order.currency,
+        receiptEmail: order.receiptEmail,
+        sessionId: order.sessionId,
+        registrantIds: order.registrantIds,
+        deadline: order.deadline,
+      }),
+    );
+
+    const { action } = await import('../../routes/api.stripe-webhook');
+    const body = eventBody('checkout.session.completed', order.orderId, 15000);
+    const signature = await signPayload(body, Math.floor(Date.now() / 1000));
+    const args = webhookArgs(webhookRuntime, body, signature);
+
+    try {
+      const started = Date.now();
+      const response = await action(args);
+      const elapsed = Date.now() - started;
+
+      // 200 (the bucket flip's status) — the post-send wait timed out but was
+      // swallowed, NOT propagated, because the durable `send` already landed.
+      expect(response.status).toBe(200);
+      expect(elapsed).toBeLessThan(8000);
+      expect(await readStatus(webhookRuntime, args, order.orderId)).toBe('paid');
+
+      // The durable `settle` row PERSISTED (the send succeeded): the reply is
+      // Pending while no runner consumes it — proving the row is in storage to
+      // reconcile, not lost.
+      const pending = await sender.runPromise(
+        Order.Entity.settle.peek({
+          orderId: order.orderId,
+          outcome: undefined,
+          sessionId: undefined,
+          paymentIntentId: undefined,
+        }),
+      );
+      expect(pending._tag).toBe('Pending');
+
+      // CONVERGENCE: boot a runner against the SAME file; it consumes the
+      // persisted `send` and resolves the durable settle to a terminal reply.
+      const runner = ManagedRuntime.make(
+        Order.fullRunnerLayer(Order.MessageStorageLive).pipe(
+          Layer.provide(submissions),
+          Layer.provide(Payment.testLayer()),
+          Layer.provide(Env.layer),
+          Layer.provide(config),
+        ),
+      );
+      await runner.runPromise(Effect.void);
+      try {
+        const settled = await sender.runPromise(
+          Order.Entity.settle.waitFor(
+            {
+              orderId: order.orderId,
+              outcome: undefined,
+              sessionId: undefined,
+              paymentIntentId: undefined,
+            },
+            { filter: (result) => result._tag !== 'Pending' },
+          ),
+        );
+        expect(settled._tag).toBe('Success');
+      } finally {
+        await runner.dispose();
+      }
+    } finally {
+      await sender.dispose();
+    }
+  }, 20000);
 });
 
 describe('/api/stripe/webhook — DB-less degrades to the bucket-only flip (G8 backward compat)', () => {
