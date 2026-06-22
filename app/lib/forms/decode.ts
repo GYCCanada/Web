@@ -172,6 +172,39 @@ const stringToBoolean = (message: MessageKey) =>
     )
     .annotate({ message });
 
+/**
+ * The non-negative-integer count codec (C9): the browser submits the count as a
+ * STRING, so this parses it to a real integer and runs the field's inclusive
+ * `min`/`max` bounds. An empty / absent value emits `requiredMessage` (a count was
+ * required but not entered); a non-numeric, non-integer, or out-of-range value
+ * emits `invalidMessage`. The decoded value is a real `number`, exactly what
+ * `price.ts`'s `quantity` rule multiplies — no raw-string handling downstream
+ * (`boundary-discipline`). Mirrors `stringToBoolean`'s string→typed transform.
+ */
+const numberFromString = (
+  requiredMessage: MessageKey,
+  invalidMessage: MessageKey,
+  min: number | undefined,
+  max: number | undefined,
+) => {
+  const bounds = [
+    Schema.isInt({ message: invalidMessage }),
+    Schema.isGreaterThanOrEqualTo(min ?? 0, { message: invalidMessage }),
+    ...(max !== undefined
+      ? [Schema.isLessThanOrEqualTo(max, { message: invalidMessage })]
+      : []),
+  ] as const;
+  return Schema.String.annotate({ message: invalidMessage })
+    .check(Schema.isMinLength(1, { message: requiredMessage }))
+    .pipe(
+      Schema.decodeTo(Schema.Number.check(...bounds), {
+        decode: SchemaGetter.transform((value) => Number(value)),
+        encode: SchemaGetter.transform((value) => String(value)),
+      }),
+    )
+    .annotateKey({ messageMissingKey: requiredMessage });
+};
+
 /** Required multi-select over a closed option set: an off-list element emits `message`. */
 const arrayOfLiteral = (
   options: ReadonlyArray<{ readonly value: string }>,
@@ -215,6 +248,13 @@ const fieldToRequiredSchema = (
       });
     case 'arrayOfLiteral':
       return arrayOfLiteral(field.options, field.requiredMessage);
+    case 'number':
+      return numberFromString(
+        field.requiredMessage,
+        field.invalidMessage,
+        field.min,
+        field.max,
+      );
     case 'nestedGroup':
       return Schema.Struct(buildStructFields(field.fields, activationTargets));
   }
@@ -257,7 +297,8 @@ const fieldToStructEntry = (
   if (
     (field._tag === 'requiredText' ||
       field._tag === 'email' ||
-      field._tag === 'url') &&
+      field._tag === 'url' ||
+      field._tag === 'number') &&
     field.optional === true
   ) {
     const invalidTypeMessage =

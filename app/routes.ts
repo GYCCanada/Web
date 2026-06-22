@@ -54,5 +54,6 @@ export default [
     route('admin', 'routes/admin/_index.tsx'),
     route('admin/content', 'routes/admin/content.tsx'),
     route('admin/pages/:page', 'routes/admin/pages.$page.tsx'),
+    route('admin/forms/:form', 'routes/admin/forms.$form.tsx'),
   ]),
 ] satisfies RouteConfig;

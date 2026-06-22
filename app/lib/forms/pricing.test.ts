@@ -59,6 +59,7 @@ const fullRulesJson = {
       ],
     },
     { _tag: 'toggle', field: 'addBanquet', amount: 2500 },
+    { _tag: 'quantity', field: 'tickets', unit: 500, max: 5 },
   ],
   windows: [
     {
@@ -131,7 +132,7 @@ describe('CurrencyCode — closed currency literal', () => {
 });
 
 describe('PricingRule — closed tag set', () => {
-  test('the three rule kinds decode at the PricingRule boundary', () => {
+  test('the four rule kinds decode at the PricingRule boundary', () => {
     expect(
       decodeRule({ _tag: 'choice', field: 'size', prices: [] })._tag,
     ).toBe('Success');
@@ -141,11 +142,24 @@ describe('PricingRule — closed tag set', () => {
     expect(
       decodeRule({ _tag: 'toggle', field: 'addBanquet', amount: 2500 })._tag,
     ).toBe('Success');
+    // `quantity` (C9): per-unit `unit` price + optional `max` cap on a `number` field.
+    expect(
+      decodeRule({ _tag: 'quantity', field: 'nights', unit: 100, max: 5 })._tag,
+    ).toBe('Success');
+    expect(
+      decodeRule({ _tag: 'quantity', field: 'nights', unit: 100 })._tag,
+    ).toBe('Success');
+  });
+
+  test('a quantity rule with a negative unit price is rejected (Cents brand)', () => {
+    expect(
+      decodeRule({ _tag: 'quantity', field: 'nights', unit: -100 })._tag,
+    ).toBe('Failure');
   });
 
   test('an unknown rule `_tag` is rejected', () => {
     expect(
-      decodeRule({ _tag: 'quantity', field: 'nights', unit: 100, max: 5 })._tag,
+      decodeRule({ _tag: 'bundle', field: 'nights', amount: 100 })._tag,
     ).toBe('Failure');
   });
 

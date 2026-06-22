@@ -80,6 +80,15 @@ const nonEmptyOptions = Schema.makeFilter<ReadonlyArray<unknown>>(
 
 const OptionList = Schema.Array(FieldOption).check(nonEmptyOptions);
 
+/**
+ * A non-negative integer bound for a `number` field (`min` / `max`): a count is
+ * never fractional and never below zero (`Schema.Int.check(isGreaterThanOrEqual
+ * To(0))`, the same brand idiom `pricing.ts`'s `Cents` uses). Quantity pricing
+ * multiplies a clamped count by a per-unit `Cents`, so a fractional or negative
+ * bound is meaningless (`make-impossible-states-unrepresentable`).
+ */
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
 // ---------------------------------------------------------------------------
 // FieldKind — the CLOSED set of field kinds
 // ---------------------------------------------------------------------------
@@ -95,7 +104,7 @@ type FieldChrome<Name, Txt> = {
   readonly label: Txt;
   readonly placeholder?: Txt;
 };
-type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
+type FieldKindShape<Name, Txt, Msg, Opt, Bool, Num> =
   | ({
       readonly _tag: 'requiredText';
       readonly optional?: Bool;
@@ -131,6 +140,14 @@ type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
       readonly requiredMessage: Msg;
     } & FieldChrome<Name, Txt>)
   | ({
+      readonly _tag: 'number';
+      readonly optional?: Bool;
+      readonly min?: Num;
+      readonly max?: Num;
+      readonly requiredMessage: Msg;
+      readonly invalidMessage: Msg;
+    } & FieldChrome<Name, Txt>)
+  | ({
       readonly _tag: 'arrayOfLiteral';
       readonly options: ReadonlyArray<{ readonly value: Opt; readonly label: Txt }>;
       readonly requiredMessage: Msg;
@@ -141,7 +158,9 @@ type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
       readonly label: Txt;
       readonly optional?: Bool;
       readonly presenceAnchor?: Name;
-      readonly fields: ReadonlyArray<FieldKindShape<Name, Txt, Msg, Opt, Bool>>;
+      readonly fields: ReadonlyArray<
+        FieldKindShape<Name, Txt, Msg, Opt, Bool, Num>
+      >;
     };
 
 /** The decoded `FieldKind` (brands load-bearing). */
@@ -150,7 +169,8 @@ export type FieldKind = FieldKindShape<
   Text,
   MessageKey,
   OptionValue,
-  boolean
+  boolean,
+  number
 >;
 /** The encoded `FieldKind` — the JSON shape (brands erased to plain strings). */
 type FieldKindEncoded = FieldKindShape<
@@ -158,7 +178,8 @@ type FieldKindEncoded = FieldKindShape<
   { readonly en: string; readonly fr: string },
   string,
   string,
-  boolean
+  boolean,
+  number
 >;
 
 /**
@@ -240,6 +261,13 @@ const fieldChrome = {
  *   - `checkboxBoolean` — a `true` / `false` / `on` checkbox-boolean; an off-token
  *     or absent value emits `requiredMessage`. `optional: true` makes an unchecked
  *     (absent) box valid (the volunteer single-checkboxes).
+ *   - `number`          — a non-negative integer count (a quantity field): an
+ *     absent/empty value emits `requiredMessage`, a non-integer / out-of-range
+ *     value emits `invalidMessage`. `optional: true` makes an absent key valid (a
+ *     count not entered); `min`/`max` are inclusive integer bounds. The
+ *     `quantity` pricing rule multiplies a `clamp(qty, 0, max)` by a per-unit
+ *     `Cents` (`price.ts`); the kind is what `pricingReferencesResolve` requires a
+ *     `quantity` rule's `field` to be.
  *   - `arrayOfLiteral`  — a multi-select over a closed `OptionList`; an off-list
  *     element or absent array emits `requiredMessage`.
  *   - `nestedGroup`     — a sub-struct of further `FieldKind`s (the `parent`,
@@ -301,6 +329,19 @@ export const FieldKind = Schema.TaggedUnion({
     ...fieldChrome,
     optional: Schema.optionalKey(Schema.Boolean),
     requiredMessage: MessageKey,
+  },
+  number: {
+    ...fieldChrome,
+    optional: Schema.optionalKey(Schema.Boolean),
+    // Inclusive integer bounds the quantity is clamped/validated against. Both
+    // are non-negative integers (a count is never below zero, never fractional);
+    // `optionalKey` so a bound is omitted when unconstrained on that side. The
+    // `from <= to` ordering is not asserted here (a single-sided bound is the
+    // common case); `price()`'s `clamp(qty, 0, max)` is total regardless.
+    min: Schema.optionalKey(NonNegativeInt),
+    max: Schema.optionalKey(NonNegativeInt),
+    requiredMessage: MessageKey,
+    invalidMessage: MessageKey,
   },
   arrayOfLiteral: {
     ...fieldChrome,
@@ -542,7 +583,8 @@ type EncodedFieldNode = {
  *     that field's options;
  *   - `multiChoice` ⇒ its `field` is an `arrayOfLiteral`, every priced `option`
  *     in its options;
- *   - `toggle` ⇒ its `field` is a `checkboxBoolean`.
+ *   - `toggle` ⇒ its `field` is a `checkboxBoolean`;
+ *   - `quantity` ⇒ its `field` is a `number` (C9 — the per-unit count rule).
  * A rule naming a missing field, a kind mismatch, or an off-list option is a hard
  * decode error — pricing drift becomes a decode-time impossibility.
  */
@@ -554,6 +596,7 @@ const pricingReferencesResolve = Schema.makeFilter<{
       | { readonly _tag: 'choice'; readonly field: string; readonly prices: ReadonlyArray<{ readonly option: string }> }
       | { readonly _tag: 'multiChoice'; readonly field: string; readonly prices: ReadonlyArray<{ readonly option: string }> }
       | { readonly _tag: 'toggle'; readonly field: string }
+      | { readonly _tag: 'quantity'; readonly field: string }
     >;
   };
 }>(
@@ -596,6 +639,12 @@ const pricingReferencesResolve = Schema.makeFilter<{
       if (rule._tag === 'toggle') {
         if (kind !== 'checkboxBoolean') {
           return `toggle pricing rule "${rule.field}" must target a checkboxBoolean field, not "${kind}"`;
+        }
+        continue;
+      }
+      if (rule._tag === 'quantity') {
+        if (kind !== 'number') {
+          return `quantity pricing rule "${rule.field}" must target a number field, not "${kind}"`;
         }
         continue;
       }

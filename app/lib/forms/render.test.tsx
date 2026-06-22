@@ -196,6 +196,31 @@ describe('FormFields renders each field kind', () => {
   });
 });
 
+describe('FormFields renders a number kind (C9)', () => {
+  const numberDef = asDefinition({
+    title: text('R', 'R'),
+    fields: [
+      {
+        _tag: 'number',
+        name: 'tickets',
+        label: text('Tickets', 'Billets'),
+        min: 1,
+        max: 10,
+        requiredMessage: 'registration.form.gender.required',
+        invalidMessage: 'registration.form.merch.required',
+      },
+    ],
+  });
+
+  test('a number field renders a numeric input carrying its name + bounds', () => {
+    const html = render(numberDef);
+    expect(html).toContain('name="tickets"');
+    expect(html).toContain('type="number"');
+    expect(html).toContain('min="1"');
+    expect(html).toContain('max="10"');
+  });
+});
+
 const variantDef = asDefinition({
   title: text('F', 'F'),
   fields: [

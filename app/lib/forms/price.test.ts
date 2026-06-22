@@ -502,3 +502,43 @@ describe('priceRegistrant — the four orthogonality combos (C4c)', () => {
     ).toBe(5000);
   });
 });
+
+describe('priceRegistrant — quantity rule (C9)', () => {
+  /** A `number` count field + a `quantity` rule (unit 500, cap 5). */
+  const quantityDefinition = Schema.decodeUnknownSync(FormDefinition)({
+    title: text('Registration', 'Inscription'),
+    fields: [
+      {
+        _tag: 'number',
+        name: 'tickets',
+        label: text('Tickets', 'Billets'),
+        min: 0,
+        max: 10,
+        requiredMessage: 'registration.form.gender.required',
+        invalidMessage: 'registration.form.merch.required',
+      },
+    ],
+    pricing: {
+      currency: 'cad',
+      base: 1000,
+      rules: [{ _tag: 'quantity', field: 'tickets', unit: 500, max: 5 }],
+    },
+  });
+
+  const at = (tickets: number): number =>
+    cents(priceRegistrant(quantityDefinition, { tickets }, 0));
+
+  test('the entered count multiplies the per-unit price (base + qty*unit)', () => {
+    expect(at(0)).toBe(1000); // base only
+    expect(at(2)).toBe(2000); // 1000 + 2*500
+    expect(at(5)).toBe(3500); // 1000 + 5*500
+  });
+
+  test("a count above the rule's max is CLAMPED (no unbounded charge)", () => {
+    expect(at(8)).toBe(3500); // clamp(8, 0, 5) = 5 → 1000 + 5*500
+  });
+
+  test('a non-numeric / absent count contributes 0 (unfilled optional)', () => {
+    expect(cents(priceRegistrant(quantityDefinition, {}, 0))).toBe(1000);
+  });
+});

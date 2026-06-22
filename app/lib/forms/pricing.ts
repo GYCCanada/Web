@@ -12,9 +12,10 @@ import { FieldName, OptionValue } from './tokens';
  * top-level field instead of widening every option-bearing kind.
  *
  * This module ships the money brands, the `PricingRule`/`PricingRules` schema,
- * and the `TimingWindow` early-bird/late modifiers (C2). The `quantity` rule +
- * `number` kind arrive in C9; the schema here is the pure-pricing core with zero
- * Stripe and zero consumers (the pure evaluator that reads it lands in C3).
+ * and the `TimingWindow` early-bird/late modifiers (C2). The `quantity` rule (a
+ * `number` kind, C9) clamps its entered count to `[0, max]` and multiplies by a
+ * per-item `unit`; the schema here is the pure-pricing core with zero Stripe (the
+ * pure evaluator that reads it lives in `price.ts`, C3).
  */
 
 /**
@@ -39,15 +40,30 @@ export type CurrencyCode = typeof CurrencyCode.Type;
 const OptionPrice = Schema.Struct({ option: OptionValue, amount: Cents });
 
 /**
+ * A non-negative integer cap on a priced quantity (the same `Schema.Int.check(...)`
+ * brand idiom as `Cents`): a quantity rule that clamps its priced count at `max`
+ * (a per-form ticket cap) never multiplies an unbounded count by the unit price.
+ */
+const QuantityMax = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
+/**
  * A pricing rule keyed to one field. The tag matches the targeted `FieldKind`'s
  * decoded shape: `choice` (a `literal` — the selected option adds), `multiChoice`
  * (an `arrayOfLiteral` — each selected option adds), `toggle` (a `checkboxBoolean`
- * — `true` adds). The `quantity` rule (a `number` kind) lands in C9.
+ * — `true` adds), `quantity` (a `number` — the entered count times `unit` adds,
+ * the count clamped to `[0, max]` so a malicious/huge quantity cannot mint an
+ * unbounded charge, C9). `unit` is the per-item price; `max` is an optional cap
+ * (`optionalKey`, absence ⇒ uncapped above zero).
  */
 export const PricingRule = Schema.TaggedUnion({
   choice: { field: FieldName, prices: Schema.Array(OptionPrice) }, // literal — selected option adds
   multiChoice: { field: FieldName, prices: Schema.Array(OptionPrice) }, // arrayOfLiteral — each adds
   toggle: { field: FieldName, amount: Cents }, // checkboxBoolean — true adds
+  quantity: {
+    field: FieldName,
+    unit: Cents,
+    max: Schema.optionalKey(QuantityMax),
+  }, // number — clamp(qty, 0, max) * unit adds
 });
 export type PricingRule = typeof PricingRule.Type;
 

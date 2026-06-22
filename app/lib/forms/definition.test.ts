@@ -1017,6 +1017,110 @@ describe('pricing sibling on FormDefinition (Decision 1/3)', () => {
   });
 });
 
+describe('number FieldKind + quantity pricing rule (C9)', () => {
+  /** A non-negative-integer count field with inclusive bounds. */
+  const ticketsField = {
+    _tag: 'number',
+    name: 'tickets',
+    label: text('Tickets', 'Billets'),
+    min: 1,
+    max: 10,
+    requiredMessage: 'registration.form.gender.required',
+    invalidMessage: 'registration.form.merch.required',
+  } as const;
+
+  test('a number kind round-trips losslessly through encode → JSON → decode', () => {
+    const value = Schema.decodeUnknownSync(FormDefinition)({
+      title: text('Registration', 'Inscription'),
+      fields: [ticketsField],
+    });
+    return roundTrips(FormDefinition, value).pipe(
+      Effect.map((round) => {
+        expect(round).toEqual(value);
+      }),
+      Effect.runPromise,
+    );
+  });
+
+  test('a number kind with no bounds and optional:true decodes', () => {
+    expect(
+      succeeds({
+        title: text('R', 'R'),
+        fields: [
+          {
+            _tag: 'number',
+            name: 'tickets',
+            label: text('Tickets', 'Billets'),
+            optional: true,
+            requiredMessage: 'registration.form.gender.required',
+            invalidMessage: 'registration.form.merch.required',
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  test('a fractional / negative min bound is rejected (NonNegativeInt)', () => {
+    for (const min of [-1, 1.5]) {
+      expect(
+        fails({
+          title: text('R', 'R'),
+          fields: [{ ...ticketsField, min }],
+        }),
+      ).toBe(true);
+    }
+  });
+
+  test('a quantity rule targeting the number field resolves and decodes', () => {
+    expect(
+      succeeds({
+        title: text('R', 'R'),
+        fields: [ticketsField],
+        pricing: {
+          currency: 'cad',
+          base: 0,
+          rules: [{ _tag: 'quantity', field: 'tickets', unit: 500, max: 5 }],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test('a quantity rule targeting a non-number field is a hard decode error', () => {
+    expect(
+      fails({
+        title: text('R', 'R'),
+        fields: [
+          {
+            _tag: 'requiredText',
+            name: 'name',
+            label: text('Name', 'Nom'),
+            requiredMessage: 'contact.form.name.required',
+          },
+        ],
+        pricing: {
+          currency: 'cad',
+          base: 0,
+          rules: [{ _tag: 'quantity', field: 'name', unit: 500 }],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test('a quantity rule naming a missing field is a hard decode error', () => {
+    expect(
+      fails({
+        title: text('R', 'R'),
+        fields: [ticketsField],
+        pricing: {
+          currency: 'cad',
+          base: 0,
+          rules: [{ _tag: 'quantity', field: 'nope', unit: 500 }],
+        },
+      }),
+    ).toBe(true);
+  });
+});
+
 describe('party section on FormDefinition (Decision 2b)', () => {
   // These fixtures reuse EXISTING valid TranslationKeys for the payer/selector
   // message chrome — they exercise the schema MECHANICS, independent of which

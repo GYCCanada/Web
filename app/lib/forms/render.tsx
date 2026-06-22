@@ -96,6 +96,20 @@ function LeafField({
           <FieldErrors />
         </TextField>
       );
+    case 'number':
+      return (
+        <TextField name={name}>
+          <Label>{label}</Label>
+          <TextField.Input
+            type="number"
+            inputMode="numeric"
+            min={field.min ?? 0}
+            max={field.max}
+            placeholder={placeholder}
+          />
+          <FieldErrors />
+        </TextField>
+      );
     case 'literal':
       return (
         <RadioGroup name={name}>

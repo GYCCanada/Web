@@ -979,3 +979,67 @@ describe('activeWhenEquals decode rows — optionalText target (optional ∧ pri
     ).toBe(true);
   });
 });
+
+describe('number kind (C9)', () => {
+  const numberDef = asDefinition({
+    title: text('R', 'R'),
+    fields: [
+      {
+        _tag: 'number',
+        name: 'tickets',
+        label: text('Tickets', 'Billets'),
+        min: 1,
+        max: 10,
+        requiredMessage: 'registration.form.gender.required',
+        invalidMessage: 'registration.form.merch.required',
+      },
+    ],
+  });
+
+  test('a valid in-range string decodes to a real integer', () => {
+    const result = decodeForm(numberDef, { tickets: '3' });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) expect(result.success['tickets']).toBe(3);
+  });
+
+  test('empty / absent emit the required key (a count was required)', () => {
+    for (const payload of [{ tickets: '' }, {}]) {
+      const errors = errorsFor(numberDef, payload);
+      expect(errors?.fieldErrors['tickets']).toEqual([
+        'registration.form.gender.required',
+      ]);
+    }
+  });
+
+  test('non-integer / out-of-range emit the invalid key', () => {
+    // 'abc' (NaN), '1.5' (non-integer), '0' (below min), '99' (above max).
+    for (const value of ['abc', '1.5', '0', '99']) {
+      const errors = errorsFor(numberDef, { tickets: value });
+      expect(errors?.fieldErrors['tickets']).toEqual([
+        'registration.form.merch.required',
+      ]);
+    }
+  });
+
+  test('optional:true number — an absent key decodes (absence valid)', () => {
+    const optionalNumberDef = asDefinition({
+      title: text('R', 'R'),
+      fields: [
+        {
+          _tag: 'number',
+          name: 'extras',
+          label: text('Extras', 'Extras'),
+          optional: true,
+          requiredMessage: 'registration.form.gender.required',
+          invalidMessage: 'registration.form.merch.required',
+        },
+      ],
+    });
+    expect(Result.isSuccess(decodeForm(optionalNumberDef, {}))).toBe(true);
+    // A PRESENT value still runs its codec (a non-integer rejects).
+    const errors = errorsFor(optionalNumberDef, { extras: '1.5' });
+    expect(errors?.fieldErrors['extras']).toEqual([
+      'registration.form.merch.required',
+    ]);
+  });
+});

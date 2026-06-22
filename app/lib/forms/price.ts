@@ -54,6 +54,18 @@ const contributionOf = (rule: PricingRule, decoded: DecodedForm): number => {
       // A `checkboxBoolean` decodes to a real `boolean`; the amount adds iff true.
       return decoded[rule.field] === true ? rule.amount : 0;
     }
+    case 'quantity': {
+      // A `number` decodes to a real integer; the entered count is CLAMPED to
+      // `[0, max]` (max absent ⇒ no upper bound above zero) before multiplying by
+      // the per-item `unit`, so a smuggled huge/negative count can never mint an
+      // unbounded or negative charge (`make-impossible-states-unrepresentable`).
+      // A non-numeric/absent value (an unfilled optional count) contributes 0.
+      const value = decoded[rule.field];
+      if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+      const capped = rule.max === undefined ? value : Math.min(value, rule.max);
+      const clamped = Math.max(0, capped);
+      return clamped * rule.unit;
+    }
   }
 };
 
