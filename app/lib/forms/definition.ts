@@ -1,9 +1,9 @@
 import { Schema } from 'effect';
 
 import { Text } from '../content/schema';
-import { root } from '../localization/translations';
+import { PartySection } from './party';
 import { PricingRules } from './pricing';
-import { FieldName, OptionValue } from './tokens';
+import { FieldName, MessageKey, OptionValue } from './tokens';
 
 /**
  * The structural `FormDefinition` schema (ADR 0007, CONTEXT §Form definition;
@@ -50,37 +50,14 @@ import { FieldName, OptionValue } from './tokens';
 // Leaf brands — message keys, field names, literal option tokens
 // ---------------------------------------------------------------------------
 
-/** The closed set of valid translation keys, consulted at decode time. */
-const TRANSLATION_KEYS: ReadonlySet<string> = new Set(Object.keys(root.en));
-
-const messageKeyFilter = Schema.makeFilter<string>(
-  (key) =>
-    TRANSLATION_KEYS.has(key)
-      ? undefined
-      : `MessageKey must be a known TranslationKey; "${key}" is not in translations`,
-  { title: 'MessageKey' },
-);
-
-/**
- * A form-validation error message: a real `TranslationKey`, validated at the
- * boundary against the live `translations` object (`derive-dont-sync`). The
- * generic decoder (Branch 6.2) emits these keys verbatim on each failure path, so
- * an off-list key would render blank in `FieldErrors` — it is rejected here
- * instead (`make-impossible-states-unrepresentable`). The brand keeps the
- * guarantee load-bearing past the decoder; the generic decoder (Branch 6.2)
- * hands a decoded `MessageKey` to `translate()` knowing the boundary already
- * proved it is a real `TranslationKey`.
- */
-export const MessageKey = Schema.NonEmptyString.check(messageKeyFilter).pipe(
-  Schema.brand('MessageKey'),
-);
-export type MessageKey = typeof MessageKey.Type;
-
-// `FieldName` / `OptionValue` are defined in the leaf `tokens.ts` (shared with
-// `pricing.ts` without an import cycle) and re-exported here so every existing
-// importer (`decode`, `render`, the admin routes) keeps importing them from
-// `definition`. They are also imported above for use in this module's schemas.
-export { FieldName, OptionValue } from './tokens';
+// `FieldName` / `OptionValue` / `MessageKey` are defined in the leaf `tokens.ts`
+// (shared with `pricing.ts` AND `party.ts` without an import cycle — `party`
+// keys its chrome off `MessageKey`, so a `definition ↔ party` mutual import
+// would otherwise hit a module-init temporal-dead-zone on the brand) and
+// re-exported here so every existing importer (`decode`, `render`, the admin
+// routes, the party-scope spike) keeps importing them from `definition`. They
+// are also imported above for use in this module's schemas.
+export { FieldName, MessageKey, OptionValue } from './tokens';
 
 /**
  * One selectable option of a `literal` / `arrayOfLiteral` field: its submitted
@@ -857,13 +834,56 @@ const rulesReferToExistingFields = Schema.makeFilter<{
 );
 
 /**
+ * The party-scope integrity biconditional (registrar plan Decision 2b.2): a
+ * `group`-offering form MUST author a payer block, and a `perRegistrant`-only
+ * form MUST NOT — otherwise the authored payer is either missing (a `group` form
+ * with no receipt-recipient chrome) or dead (a `perRegistrant`-only form with
+ * meaningless payer copy). Folded into the combined `FormDefinition.check`
+ * (composed, not chained — Risk 6) so it accumulates alongside the pricing/rule
+ * integrity walks. Runs on the ENCODED `party` (pre-brand), exactly like the
+ * other `FormDefinition` filters; a definition with no `party` is inert (the
+ * shared schema — contact/volunteer/registration — must all keep decoding).
+ *
+ * The biconditional is `'group' ∈ Object.keys(party.billingMode.options) ⟺
+ * party.payer !== undefined`. Enforcement that `party` itself is registration-only
+ * is a CONSUMER concern (only the registration route reads it), NOT a per-form
+ * schema guard — all three forms share this one schema with no `FormId` context,
+ * mirroring the `variant` precedent (Decision 2b, OQ2).
+ */
+const partyPayerBiconditional = Schema.makeFilter<{
+  readonly party?: {
+    readonly billingMode: { readonly options: Record<string, unknown> };
+    readonly payer?: unknown;
+  };
+}>(
+  (def) => {
+    if (def.party === undefined) {
+      return undefined;
+    }
+    const offersGroup = 'group' in def.party.billingMode.options;
+    const hasPayer = def.party.payer !== undefined;
+    if (offersGroup && !hasPayer) {
+      return 'a party offering the "group" billing mode must author a payer block';
+    }
+    if (!offersGroup && hasPayer) {
+      return 'a party that does not offer the "group" billing mode must not author a payer block';
+    }
+    return undefined;
+  },
+  { title: 'FormDefinition.partyPayerBiconditional' },
+);
+
+/**
  * The full structural definition of one site form (ADR 0007). `title` / `intro`
  * are the CMS-editable page copy carried over from the Branch 5.1 placeholder;
  * `fields` is the common field graph; `variant` is the optional discriminated
  * section; `rules` are the cross-field requirements; `pricing` is the optional
- * pricing dimension (Decision 1/3 — `optionalKey`, absence ⇒ unpriced). A form
+ * pricing dimension (Decision 1/3 — `optionalKey`, absence ⇒ unpriced); `party`
+ * is the optional CMS-authored party section (Decision 2b — the billing-mode
+ * allow-list + payer chrome; `optionalKey`, absence ⇒ single-submission). A form
  * whose fields are not yet authored (the post-migration default before its graph
- * lands) carries an empty `fields` and no `variant` / `rules` / `pricing`.
+ * lands) carries an empty `fields` and no `variant` / `rules` / `pricing` /
+ * `party`.
  *
  * `pricing` is `optionalKey` so every already-published `forms/*.json` (contact,
  * volunteer, registration — all decode through this one schema) keeps decoding
@@ -883,5 +903,10 @@ export const FormDefinition = Schema.Struct({
   variant: Schema.optionalKey(FormVariantSet),
   rules: Schema.optionalKey(Schema.Array(CrossFieldRule)),
   pricing: Schema.optionalKey(PricingRules),
-}).check(pricingReferencesResolve, rulesReferToExistingFields);
+  party: Schema.optionalKey(PartySection),
+}).check(
+  pricingReferencesResolve,
+  rulesReferToExistingFields,
+  partyPayerBiconditional,
+);
 export type FormDefinition = typeof FormDefinition.Type;

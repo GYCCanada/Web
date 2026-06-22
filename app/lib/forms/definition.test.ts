@@ -1,7 +1,9 @@
 import { describe, expect, it, test } from 'effect-bun-test';
-import { Effect, Schema } from 'effect';
+import { Effect, Result, Schema } from 'effect';
 
-import { FieldKind, FormDefinition } from './definition';
+import { deepMerge } from '../content/admin-form';
+import { FieldKind, FormDefinition, MessageKey } from './definition';
+import { PartySection } from './party';
 
 /**
  * Branch 6.1 — the structural `FormDefinition` schema + closed kind-set.
@@ -1011,6 +1013,167 @@ describe('pricing sibling on FormDefinition (Decision 1/3)', () => {
           rules: [{ _tag: 'toggle', field: 'addBanquet', amount: 2500 }],
         },
       }),
+    ).toBe(true);
+  });
+});
+
+describe('party section on FormDefinition (Decision 2b)', () => {
+  // The new `registration.party.*` MessageKey tokens do not ship until C7a (a
+  // deploy — proven absent by the party-scope spike), so these fixtures reuse
+  // EXISTING valid TranslationKeys for the payer/selector message chrome. C6.5
+  // proves only the schema mechanics; the authored block lands in C7a.
+  const groupOptions = {
+    group: text('Pay for everyone', 'Payer pour tous'),
+  };
+  const bothOptions = {
+    group: text('Pay for everyone', 'Payer pour tous'),
+    perRegistrant: text('Everyone pays their own', 'Chacun paie'),
+  };
+  const perRegistrantOptions = {
+    perRegistrant: text('Everyone pays their own', 'Chacun paie'),
+  };
+  const billingMode = (options: unknown) => ({
+    label: text('How are you paying?', 'Comment payez-vous ?'),
+    requiredMessage: 'registration.form.email.required',
+    options,
+  });
+  const payer = {
+    label: text('Who is paying?', 'Qui paie ?'),
+    nameField: {
+      label: text('Name', 'Nom'),
+      requiredMessage: 'registration.form.name.required',
+    },
+    emailField: {
+      label: text('Email', 'Courriel'),
+      requiredMessage: 'registration.form.email.required',
+      invalidMessage: 'registration.form.email.error',
+    },
+  };
+  const withParty = (party: unknown) => ({
+    title: text('Registration', 'Inscription'),
+    fields: [],
+    party,
+  });
+
+  test('a group-offering party (with payer) round-trips losslessly', () => {
+    const decoded = Schema.decodeUnknownSync(PartySection)({
+      intro: text('Tell us how you are paying', 'Dites-nous comment vous payez'),
+      billingMode: billingMode(groupOptions),
+      payer,
+    });
+    const codec = Schema.fromJsonString(PartySection);
+    const restored = Schema.decodeUnknownSync(codec)(
+      Schema.encodeUnknownSync(codec)(decoded),
+    );
+    expect(restored).toEqual(decoded);
+  });
+
+  test('a party is optional — a definition with no party decodes (backfill-safe)', () => {
+    const minimal = Schema.decodeUnknownSync(FormDefinition)({
+      title: text('Contact', 'Contact'),
+      fields: [],
+    });
+    expect(minimal.party).toBeUndefined();
+  });
+
+  test('a group-only options set (the allow-list case) decodes — no phantom perRegistrant', () => {
+    const decoded = Schema.decodeUnknownSync(FormDefinition)(
+      withParty({ billingMode: billingMode(groupOptions), payer }),
+    );
+    expect(decoded.party?.billingMode.options.group).toBeDefined();
+    expect(decoded.party?.billingMode.options.perRegistrant).toBeUndefined();
+  });
+
+  test('nonEmptyOptions: a billing mode offering zero modes is rejected', () => {
+    expect(fails(withParty({ billingMode: billingMode({}), payer }))).toBe(true);
+    expect(fails(withParty({ billingMode: billingMode({}) }))).toBe(true);
+  });
+
+  test('biconditional: group ∈ options without a payer is rejected', () => {
+    expect(fails(withParty({ billingMode: billingMode(groupOptions) }))).toBe(
+      true,
+    );
+    expect(fails(withParty({ billingMode: billingMode(bothOptions) }))).toBe(
+      true,
+    );
+  });
+
+  test('biconditional: a perRegistrant-only party WITH a payer is rejected (dead authored payer)', () => {
+    expect(
+      fails(withParty({ billingMode: billingMode(perRegistrantOptions), payer })),
+    ).toBe(true);
+  });
+
+  test('biconditional: a perRegistrant-only party with no payer decodes', () => {
+    expect(
+      succeeds(withParty({ billingMode: billingMode(perRegistrantOptions) })),
+    ).toBe(true);
+  });
+
+  test('biconditional: a both-modes party (offers group) WITH a payer decodes', () => {
+    expect(
+      succeeds(withParty({ billingMode: billingMode(bothOptions), payer })),
+    ).toBe(true);
+  });
+
+  // ── Graduated de-risk spikes (registrar plan C6.5 gate-green) ──────────────
+  // These two mechanics are the load-bearing authoring + token constraints the
+  // party-scope re-design (Decision 2b) depends on. They formerly lived in the
+  // standalone party-scope-spike.test.ts against hand-built `Json` literals;
+  // graduated here to drive the REAL `PartySection`/`BillingModeSelector.options`
+  // encoded shape and the REAL `MessageKey`, per the spec's gate-green list.
+
+  test('SPIKE 1 — a label edit on the REAL encoded billingMode.options round-trips through deepMerge, siblings survive (incl. group-only)', () => {
+    // The base is the ACTUAL encoded shape of PartySection.billingMode.options —
+    // not a hand-built literal. Edits land on `options.<mode>.<locale>`, the path
+    // the /admin authoring channel walks, and object-branch recursion must keep
+    // the untouched sibling locale + the other mode intact.
+    const both = Schema.encodeUnknownSync(PartySection)(
+      Schema.decodeUnknownSync(PartySection)({
+        billingMode: billingMode(bothOptions),
+        payer,
+      }),
+    );
+    const baseOptions = both.billingMode.options;
+
+    // edit ONLY group's English label (path billingMode.options.group.en)
+    const merged = deepMerge(baseOptions, { group: { en: 'One person pays' } }) as {
+      group: { en: string; fr: string };
+      perRegistrant: { en: string; fr: string };
+    };
+    expect(merged.group.en).toBe('One person pays'); // the edit landed
+    expect(merged.group.fr).toBe('Payer pour tous'); // French sibling survived
+    expect(merged.perRegistrant.en).toBe('Everyone pays their own'); // other mode intact
+    expect(merged.perRegistrant.fr).toBe('Chacun paie');
+
+    // the group-ONLY allow-list case: editing the lone mode's French label lands,
+    // and no phantom perRegistrant is conjured (the absent key stays absent).
+    const groupOnly = Schema.encodeUnknownSync(PartySection)(
+      Schema.decodeUnknownSync(PartySection)({
+        billingMode: billingMode(groupOptions),
+        payer,
+      }),
+    );
+    const mergedGroupOnly = deepMerge(groupOnly.billingMode.options, {
+      group: { fr: 'Payer pour le groupe' },
+    }) as { group: { en: string; fr: string }; perRegistrant?: unknown };
+    expect(mergedGroupOnly.group.en).toBe('Pay for everyone');
+    expect(mergedGroupOnly.group.fr).toBe('Payer pour le groupe');
+    expect('perRegistrant' in mergedGroupOnly).toBe(false);
+  });
+
+  test('SPIKE 2 — a new registration.party.* token is REJECTED by the REAL MessageKey until it ships in translations.ts', () => {
+    // The C7a tokens are not yet registered, so the brand boundary must reject
+    // them: a CMS edit cannot introduce a new key, only localize a registered one.
+    const decoded = Schema.decodeUnknownResult(MessageKey)(
+      'registration.party.billingMode.required',
+    );
+    expect(Result.isFailure(decoded)).toBe(true);
+    // total boundary anchor — an already-registered token still decodes.
+    expect(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(MessageKey)('registration.form.email.required'),
+      ),
     ).toBe(true);
   });
 });
