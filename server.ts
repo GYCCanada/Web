@@ -16,6 +16,7 @@ import {
 import { imageKeyFromPath } from './app/lib/images.server.ts';
 import { Storage } from './app/lib/storage.server.ts';
 import { Submissions } from './app/lib/forms/submissions.server.ts';
+import { Payment } from './app/lib/payment.server.ts';
 import { Order } from './app/lib/order/runner.server.ts';
 
 declare module 'react-router' {
@@ -286,7 +287,14 @@ const OrderRunnerLive = Layer.unwrap(
     // impossibility (a build failure here is a real defect) and keeps the
     // runner's build-error channel clean.
     return Order.fullRunnerLayer(Order.MessageStorageLive).pipe(
+      // The runner's bucket-authority writes come from `Submissions`; the
+      // `refund` handler (G7) ALSO issues the Stripe refund, so `Payment` is
+      // provided here too (self-contained `defaultLayer`s — both gate on their
+      // own `Env` reads). When `Env.stripe` is None `Payment` is inert and a
+      // `refund` op would die `PaymentDisabled`, but no sender reaches `refund`
+      // without a configured Stripe, so the runner still builds cleanly.
       Layer.provide(Submissions.defaultLayer),
+      Layer.provide(Payment.defaultLayer),
       Layer.orDie,
     );
   }),

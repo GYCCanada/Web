@@ -14,6 +14,7 @@ import {
 import { formatSchemaResult, parseSchema } from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
 import { Mailer } from '../mailer.server';
+import { Order } from '../order/runner.server';
 import { Payment } from '../payment.server';
 import { Toast } from '../toast.server';
 
@@ -127,6 +128,46 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
 
     const env = yield* Env.Service;
     const payment = yield* Payment.Service;
+
+    // The durable Order lifecycle anchor (order-workflow G7.1). After the action
+    // synchronously mints + freezes a `RegistrationOrder` (the freeze stays at
+    // this boundary — UNCHANGED below), it `send`s the Order `arm` op to record
+    // the entity into existence at `pending`: a durable, fire-and-forget anchor
+    // that does NOT block the redirect/mail handoff and does NOT re-create the
+    // session. Gated on `Env.database` Some — a DB-less deploy skips the send and
+    // the bucket path is byte-identically unchanged (the runner that consumes the
+    // mailbox only exists when a DB is configured). A `send` fault is NOT allowed
+    // to fail the registration: the bucket order is ALREADY durable (the
+    // authority) and the webhook still reconciles it, so an arm-send failure is
+    // logged and swallowed — the anchor is complementary to the bucket, never a
+    // gate on it. Idempotency STRENGTHENS: a verbatim retry re-`send`s `arm` for
+    // the SAME `orderId` ⇒ encore's primaryKey dedup collapses it to no second
+    // entity, complementing the existing bucket-overwrite idempotency.
+    const armOrder = (
+      order: RegistrationOrder,
+    ): Effect.Effect<void, never, Order.SenderServices> =>
+      Option.isNone(env.database) ?
+        Effect.void
+      : Order.Entity.arm
+          .send({
+            orderId: order.orderId,
+            mode: order.mode,
+            amount: order.amount,
+            currency: order.currency,
+            receiptEmail: order.receiptEmail,
+            sessionId: order.sessionId,
+            registrantIds: order.registrantIds,
+            deadline: order.deadline,
+          })
+          .pipe(
+            Effect.asVoid,
+            Effect.catchCause((cause) =>
+              Effect.logError(
+                `Order.arm send failed for ${order.orderId} (bucket order is durable; webhook still reconciles)`,
+                cause,
+              ),
+            ),
+          );
 
     const definition = yield* content.getForm('registration');
 
@@ -294,6 +335,10 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
             registrantIds: stored.map((registrant) => registrant.id),
           };
           yield* submissions.persistOrder('registration', order);
+          // Anchor the durable Order entity at `pending` (G7.1) — fire-and-forget
+          // after the freeze, gated on `Env.database` Some, never blocking the
+          // redirect.
+          yield* armOrder(order);
           // Stamp each party registrant `pending` on its OWN submission envelope
           // (plan :695) so a registrant record carries its payment lifecycle, not
           // just the order. The webhook (C8) flips these to `paid`/`failed` in
@@ -347,6 +392,10 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
             registrantIds: [stored[index]!.id],
           };
           yield* submissions.persistOrder('registration', order);
+          // Anchor the durable Order entity for THIS perRegistrant order (G7.1) —
+          // one `arm` send per minted order (N per request), each keyed by its
+          // own `<fingerprint>:<index>` orderId.
+          yield* armOrder(order);
           // Stamp THIS registrant `pending` on its own submission envelope (plan
           // :695) — one registrant per perRegistrant order. The webhook flips it
           // `paid`/`failed` in lock-step.

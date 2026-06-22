@@ -1,8 +1,21 @@
+import { tmpdir } from 'node:os';
+
 import { describe, expect, it } from 'bun:test';
-import { ConfigProvider, DateTime, Effect, Layer, Option, Schema } from 'effect';
+import {
+  ConfigProvider,
+  DateTime,
+  Effect,
+  Layer,
+  ManagedRuntime,
+  Option,
+  Schema,
+} from 'effect';
+import { Env } from '../env.server';
 import { RouterContextProvider } from 'react-router';
+import { isSuccess } from 'effect-encore';
 
 import { defaultRegistrationForm } from '../content/pages/defaults';
+import { Content } from '../content.server';
 import { formObjectKey } from '../content/pages/registry';
 import { formValidationError } from '../effect/errors';
 import {
@@ -12,6 +25,7 @@ import {
   type RequestRuntime,
 } from '../effect/runtime';
 import type { RouteArgs } from '../effect/router-context';
+import { Order } from '../order/runner.server';
 import { type CreateCheckoutSessionCall, Payment } from '../payment.server';
 import { type ObjectHead, NotFound, Storage, StorageError } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
@@ -19,6 +33,7 @@ import { layerTest } from '../storage.test-helper';
 import { FormDefinition } from './definition';
 import { RegistrationOrder } from './order';
 import { registrationAction } from './registration-action';
+import { Submissions } from './submissions.server';
 import { submissionSchema } from './submission';
 import type { Submission } from './submission';
 
@@ -887,5 +902,218 @@ describe('registrationAction — perRegistrant checkout (registrar C7.5)', () =>
 
     expect(result.status).toBe('error');
     expect(calls.length).toBe(0);
+  });
+});
+
+/**
+ * order-workflow G7.1 — the action `send`s the durable Order `arm` op for EACH
+ * minted order. This is proven end-to-end through the REAL cross-runtime seam
+ * (order-workflow §1): a SENDER side (the action's `makeAppLayer` graph, wired
+ * with `Env.database` Some so `Order.appSenderLayer` builds the real sender over
+ * the shared sqlite FILE) and a RUNNER side (the `ServerLive` analog — the
+ * in-process Sharding runner that consumes the mailbox + runs the `arm`
+ * handler). The two graphs coordinate ONLY through (a) the shared sqlite FILE
+ * (the `cluster_messages`/`cluster_replies` rows) and (b) the shared bucket (the
+ * one Map-backed `Storage` BOTH the action's `Submissions` and the runner's
+ * `Submissions` read) — exactly the production topology, where both share the
+ * external bucket + the DB file.
+ *
+ * The assertion: after the action mints + freezes the order(s) and `send`s
+ * `arm`, the runner consumes the send, the `arm` handler read-backs the bucket
+ * order (the SHARED bucket), and a sender's `waitFor` observes the `arm` reply
+ * terminal Success — proving the action actually dispatched the durable anchor.
+ */
+
+/** A SINGLE shared Map-backed `Storage` layer (one instance across BOTH graphs). */
+const sharedStorageLayer = (
+  seed: Record<string, { body: string }> = {},
+): Layer.Layer<Storage.Service> => {
+  const entries = new Map<string, { body: string; contentType: string }>();
+  for (const [key, object] of Object.entries(seed)) {
+    entries.set(key, { body: object.body, contentType: 'application/json' });
+  }
+  return Layer.sync(Storage.Service, () =>
+    Storage.Service.of({
+      get: Effect.fn('Storage.get')(function* (key: string) {
+        const object = entries.get(key);
+        if (object === undefined) return yield* new NotFound({ key });
+        return {
+          stream: new Response(object.body).body ?? new ReadableStream<Uint8Array>(),
+          contentType: object.contentType,
+          size: new TextEncoder().encode(object.body).byteLength,
+        };
+      }),
+      put: Effect.fn('Storage.put')((key: string, body: string | Uint8Array, contentType: string) =>
+        Effect.sync(() => {
+          entries.set(key, { body: String(body), contentType });
+        }),
+      ),
+      head: Effect.fn('Storage.head')((key: string) =>
+        Effect.sync(() =>
+          entries.has(key)
+            ? Option.some<ObjectHead>({
+                size: 0,
+                contentType: 'application/json',
+                lastModified: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+                etag: `"${key}"`,
+              })
+            : Option.none<ObjectHead>(),
+        ),
+      ),
+      list: Effect.fn('Storage.list')((prefix?: string) =>
+        Effect.sync(() =>
+          [...entries.keys()]
+            .filter((key) => prefix === undefined || key.startsWith(prefix))
+            .map((key) => ({
+              key,
+              size: 0,
+              lastModified: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+            })),
+        ),
+      ),
+      delete: Effect.fn('Storage.delete')((key: string) =>
+        Effect.sync(() => {
+          entries.delete(key);
+        }),
+      ),
+    }),
+  );
+};
+
+const tmpDbFile = (suffix: string): string =>
+  `${tmpdir()}/gyc-order-action-${process.pid}-${Date.now()}-${suffix}.sqlite`;
+
+/** The DB+stripe-enabled env: a sqlite FILE on disk (NOT `:memory:` — the two graphs share it). */
+const dbStripeEnv = (dbFile: string): Record<string, string> => ({
+  ...STRIPE_ENABLED_ENV,
+  DATABASE_URL: dbFile,
+});
+
+/**
+ * Drive a registration POST through a DB-enabled action graph (the sender) over
+ * a shared sqlite FILE + shared bucket, with a live runner graph consuming the
+ * mailbox, then return the runner-side `waitFor` outcome for each minted order's
+ * `arm` op. Resolves to the orders minted + the per-order arm reply tags.
+ */
+const runActionAndAwaitArms = async (
+  body: URLSearchParams,
+  seed: Record<string, { body: string }>,
+): Promise<{ orders: ReadonlyArray<RegistrationOrder>; armTags: ReadonlyArray<string> }> => {
+  const dbFile = tmpDbFile('arms');
+  const storage = sharedStorageLayer(seed);
+  const config = ConfigProvider.layer(
+    ConfigProvider.fromEnv({ env: dbStripeEnv(dbFile) }),
+  );
+
+  // The runner graph (ServerLive analog): the FULL runner over the shared FILE +
+  // the arm/settle/… handlers, with `Submissions` over the SHARED bucket so the
+  // `arm` handler's bucket read-back sees the order the action wrote.
+  const runnerLayer = Order.fullRunnerLayer(Order.MessageStorageLive).pipe(
+    Layer.provide(
+      Layer.provideMerge(
+        Submissions.layer,
+        Layer.provideMerge(Content.layer, storage),
+      ),
+    ),
+    Layer.provide(Payment.testLayer()),
+    Layer.provide(Env.layer),
+    Layer.provide(config),
+  );
+  const runner = ManagedRuntime.make(runnerLayer);
+
+  // The sender graph that reads the arm replies (the webhook analog), over the
+  // SAME file — a SEPARATE sender build (distinct SqlClient).
+  const sender = ManagedRuntime.make(
+    Order.senderLayer(Order.MessageStorageLive).pipe(
+      Layer.provide(Env.layer),
+      Layer.provide(config),
+    ),
+  );
+
+  try {
+    // Boot the runner so its mailbox-poll fiber consumes the shared file.
+    await runner.runPromise(Effect.void);
+
+    // The action graph (the AppRuntime sender analog): the real `makeAppLayer`
+    // over the SHARED bucket + the DB env, so `Order.appSenderLayer` builds the
+    // real sender and `armOrder` dispatches over the shared file.
+    const actionRuntime = makeRequestRuntimeFromLayer(
+      makeAppLayer(storage, Payment.testLayer()).pipe(
+        Layer.provide(config),
+      ) as AppLayer,
+    );
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
+    await action(makeRegistrationArgs(actionRuntime, body)).catch(() => {});
+
+    const orders = await listOrders(
+      actionRuntime,
+      makeRegistrationArgs(actionRuntime, body),
+    );
+
+    // For each minted order, the runner-side `arm` reply observed terminal. The
+    // `arm` payload-input requires every key (encore's mapped type re-requires
+    // them — `id` ignores all but `orderId`, but the INPUT shape is full), so the
+    // `waitFor` payload is reconstructed from the minted order.
+    const armTags = await Promise.all(
+      orders.map((entry) =>
+        sender.runPromise(
+          Order.Entity.arm.waitFor(
+            {
+              orderId: entry.order.orderId,
+              mode: entry.order.mode,
+              amount: entry.order.amount,
+              currency: entry.order.currency,
+              receiptEmail: entry.order.receiptEmail,
+              sessionId: entry.order.sessionId,
+              registrantIds: entry.order.registrantIds,
+              deadline: entry.order.deadline,
+            },
+            { filter: (r) => isSuccess(r) },
+          ),
+        ).then((r) => r._tag),
+      ),
+    );
+
+    return { orders: orders.map((e) => e.order), armTags };
+  } finally {
+    await runner.dispose();
+    await sender.dispose();
+  }
+};
+
+describe('registrationAction — durable Order arm send (order-workflow G7.1)', () => {
+  it('group: the action sends ONE arm op that the runner anchors to Success', async () => {
+    const { orders, armTags } = await runActionAndAwaitArms(
+      groupBody(2),
+      pricedRegistrationObject(),
+    );
+    // Exactly ONE order minted (group), and its `arm` op resolved Success on the
+    // runner — the action dispatched the durable anchor.
+    expect(orders.length).toBe(1);
+    expect(armTags).toEqual(['Success']);
+  });
+
+  it('perRegistrant: the action sends N arm ops, each anchored to Success', async () => {
+    const { orders, armTags } = await runActionAndAwaitArms(
+      perRegistrantBody(3),
+      pricedRegistrationObject(),
+    );
+    // THREE orders minted (one per registrant), each `arm` op resolved Success —
+    // the N-per-request fan-out (Risk 6) each anchored its own entity.
+    expect(orders.length).toBe(3);
+    expect(armTags).toEqual(['Success', 'Success', 'Success']);
+  });
+
+  it('zero-amount (unpriced form): no order minted ⇒ no arm op sent', async () => {
+    // An unpriced form mints NO order, so there is nothing to anchor — the arm
+    // send is per-order, so zero orders ⇒ zero sends (no spurious entity).
+    const { orders, armTags } = await runActionAndAwaitArms(groupBody(2), {});
+    expect(orders.length).toBe(0);
+    expect(armTags).toEqual([]);
   });
 });

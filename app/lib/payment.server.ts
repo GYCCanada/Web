@@ -15,7 +15,11 @@ import {
   DEFAULT_API_BASE_URL,
   Webhooks,
 } from '@distilled.cloud/stripe';
-import { PostCheckoutSessions } from '@distilled.cloud/stripe/Operations';
+import {
+  GetCheckoutSessionsSession,
+  PostCheckoutSessions,
+  PostRefunds,
+} from '@distilled.cloud/stripe/Operations';
 
 import type { Cents, CurrencyCode } from './forms/pricing';
 import { Env } from './env.server';
@@ -120,6 +124,19 @@ export interface CreatedSession {
   readonly url: string;
 }
 
+/**
+ * The issued refund — the `refundId` Stripe minted and the `paymentIntentId` it
+ * was issued against (resolved FROM the order's Checkout Session, since the
+ * frozen `RegistrationOrder` stores only `sessionId`). The durable Order
+ * `refund` op (G7) does not need the SDK's full refund object back; it freezes
+ * the order `refunded` off its OWN authority (the bucket transition), so the
+ * refund identifiers are all a caller needs for an audit trail.
+ */
+export interface CreatedRefund {
+  readonly refundId: string;
+  readonly paymentIntentId: string;
+}
+
 /** The verified, parsed webhook event (distilled's open `StripeEvent` shape). */
 export type StripeEvent = Webhooks.StripeEvent;
 
@@ -149,6 +166,24 @@ export class Service extends Context.Service<
       readonly metadata: Readonly<Record<string, string>>;
       readonly idempotencyKey: string;
     }) => Effect.Effect<CreatedSession, PaymentError | PaymentDisabled>;
+    /**
+     * Issue a refund for one frozen order against the Checkout Session it was
+     * minted from. `PostRefunds` refunds a `payment_intent`/`charge`, but the
+     * frozen `RegistrationOrder` stores only its `sessionId` (`order.ts`), so
+     * this resolves the PaymentIntent FROM the session FIRST
+     * (`GetCheckoutSessionsSession`) and then refunds `amount` (minor units —
+     * the order's FROZEN total, never re-derived) against it. `idempotencyKey`
+     * rides the `Idempotency-Key` HEADER (never the body), so a verbatim retry
+     * of the durable `refund` op replays the first refund rather than issuing a
+     * second. Fails `PaymentDisabled` when stripe is unconfigured; `PaymentError`
+     * on any SDK/transport failure (including a session that carries no resolvable
+     * PaymentIntent — an unpaid/expired session has nothing to refund).
+     */
+    readonly createRefund: (params: {
+      readonly sessionId: string;
+      readonly amount: Cents;
+      readonly idempotencyKey: string;
+    }) => Effect.Effect<CreatedRefund, PaymentError | PaymentDisabled>;
     /**
      * Verify `signature` against the RAW `rawBody` (HMAC-SHA256 over the exact
      * bytes Stripe sent — never reserialized JSON) and parse the event. Fails
@@ -198,15 +233,41 @@ export const layer = Layer.effect(
     // Capture the requirement-free operation handle once (yield-first): the
     // `Credentials` + `HttpClient` deps are satisfied by this layer's context.
     const postCheckoutSessions = yield* PostCheckoutSessions;
+    // The session-retrieve + refund handles, captured yield-first alongside
+    // `postCheckoutSessions` so the `Credentials` + `HttpClient` deps resolve at
+    // layer build, not per call (the same discipline as the create-session op).
+    const getCheckoutSession = yield* GetCheckoutSessionsSession;
+    const postRefunds = yield* PostRefunds;
 
     if (Option.isNone(env.stripe)) {
       return Service.of({
         createCheckoutSession: () => Effect.fail(new PaymentDisabled()),
+        createRefund: () => Effect.fail(new PaymentDisabled()),
         constructEvent: () => Effect.fail(new PaymentDisabled()),
       });
     }
 
     const config = env.stripe.value;
+
+    // The distilled operations declare an EMPTY typed-error channel (the SDK
+    // surfaces idempotency/invalid-request failures at runtime via the request
+    // cause, not in the static type), so every call catches the whole `Cause`
+    // and collapses it into ONE user-facing `PaymentError` — a server-frozen
+    // amount/order means any failure is an upstream/transport fault, not a user
+    // field. `Cause.squash` recovers the raw SDK error for logging.
+    const squashToPaymentError = (
+      cause: Cause.Cause<never>,
+    ): Effect.Effect<never, PaymentError> => {
+      const squashed = Cause.squash(cause);
+      const message =
+        typeof squashed === 'object' &&
+        squashed !== null &&
+        'message' in squashed &&
+        typeof (squashed as { readonly message?: unknown }).message === 'string'
+          ? (squashed as { readonly message: string }).message
+          : undefined;
+      return Effect.fail(new PaymentError({ message, cause: squashed }));
+    };
 
     const createCheckoutSession = Effect.fn('Payment.createCheckoutSession')(
       function* (params: {
@@ -249,25 +310,7 @@ export const layer = Layer.effect(
             metadata: { ...params.metadata },
           },
           { idempotencyKey: params.idempotencyKey },
-        ).pipe(
-          // The operation's static error channel is empty (the SDK reports
-          // idempotency/invalid-request failures at runtime, not in the type), so
-          // catch the whole `Cause` and squash it into ONE `PaymentError` — a
-          // server-frozen amount means any failure is an upstream/transport fault,
-          // not a user field. `Cause.squash` recovers the raw SDK error.
-          Effect.catchCause((cause) => {
-            const squashed = Cause.squash(cause);
-            const message =
-              typeof squashed === 'object' &&
-              squashed !== null &&
-              'message' in squashed &&
-              typeof (squashed as { readonly message?: unknown }).message ===
-                'string'
-                ? (squashed as { readonly message: string }).message
-                : undefined;
-            return Effect.fail(new PaymentError({ message, cause: squashed }));
-          }),
-        );
+        ).pipe(Effect.catchCause((cause) => squashToPaymentError(cause)));
 
         // A `mode: 'payment'` session ALWAYS carries a hosted `url` (the redirect
         // target); a `null` is an upstream Stripe contract violation, so it dies
@@ -287,6 +330,50 @@ export const layer = Layer.effect(
       },
     );
 
+    const createRefund = Effect.fn('Payment.createRefund')(function* (params: {
+      readonly sessionId: string;
+      readonly amount: Cents;
+      readonly idempotencyKey: string;
+    }) {
+      // (1) Resolve the PaymentIntent FROM the session — `PostRefunds` cannot
+      // take a `sessionId`, and the frozen order stores only that. A retrieve is
+      // a GET (no idempotency key needed; it is naturally idempotent).
+      const session = yield* getCheckoutSession({
+        session: params.sessionId,
+      }).pipe(Effect.catchCause((cause) => squashToPaymentError(cause)));
+
+      // The session's `payment_intent` is typed `unknown` (it may be a bare id
+      // string or — only when expanded, which we do NOT request — an object). For
+      // a settled `mode: 'payment'` session it is the PaymentIntent id string; a
+      // session with no resolvable PaymentIntent (unpaid/expired — nothing was
+      // ever charged) has nothing to refund, a `PaymentError` (the `refund`
+      // handler's `paid`-state guard already keeps this off the happy path, so
+      // reaching it is an upstream inconsistency, not a user field).
+      const paymentIntentId = session.payment_intent;
+      if (typeof paymentIntentId !== 'string' || paymentIntentId === '') {
+        return yield* new PaymentError({
+          message: `Checkout Session ${params.sessionId} carries no PaymentIntent to refund`,
+        });
+      }
+
+      // (2) Refund the FROZEN order amount (minor units) against the resolved
+      // PaymentIntent. `idempotencyKey` rides the HEADER so a verbatim retry of
+      // the durable `refund` op replays the first refund.
+      const refund = yield* postRefunds(
+        {
+          payment_intent: paymentIntentId,
+          amount: params.amount,
+          reason: 'requested_by_customer',
+        },
+        { idempotencyKey: params.idempotencyKey },
+      ).pipe(Effect.catchCause((cause) => squashToPaymentError(cause)));
+
+      return {
+        refundId: refund.id,
+        paymentIntentId,
+      } satisfies CreatedRefund;
+    });
+
     const constructEvent = Effect.fn('Payment.constructEvent')(function* (
       rawBody: string,
       signature: string | null | undefined,
@@ -303,7 +390,7 @@ export const layer = Layer.effect(
       );
     });
 
-    return Service.of({ createCheckoutSession, constructEvent });
+    return Service.of({ createCheckoutSession, createRefund, constructEvent });
   }),
 ).pipe(
   Layer.provide(FetchHttpClient.layer),
@@ -329,6 +416,13 @@ export interface CreateCheckoutSessionCall {
   readonly idempotencyKey: string;
 }
 
+/** The argument record `createRefund` was last called with — what a test asserts. */
+export interface CreateRefundCall {
+  readonly sessionId: string;
+  readonly amount: Cents;
+  readonly idempotencyKey: string;
+}
+
 /**
  * A network-free `Payment` test double (`Layer.succeed(Service, fake)`). The
  * registrar checkout tests (C7/C7.5) provide this to prove the create-session
@@ -344,6 +438,7 @@ export interface CreateCheckoutSessionCall {
  */
 export const testLayer = (options?: {
   readonly calls?: Array<CreateCheckoutSessionCall>;
+  readonly refundCalls?: Array<CreateRefundCall>;
   readonly event?: StripeEvent;
 }): Layer.Layer<Service> =>
   Layer.succeed(
@@ -364,6 +459,22 @@ export const testLayer = (options?: {
           return {
             sessionId: `cs_test_${params.idempotencyKey}`,
             url: `https://checkout.stripe.test/${params.idempotencyKey}`,
+          };
+        }),
+      // The refund double records each call and returns a deterministic refund
+      // whose id + resolved PaymentIntent derive from the session + idempotency
+      // key (so a retry with the same key yields the same fake refund — the
+      // idempotency contract is observable in tests, no network).
+      createRefund: (params) =>
+        Effect.sync(() => {
+          options?.refundCalls?.push({
+            sessionId: params.sessionId,
+            amount: params.amount,
+            idempotencyKey: params.idempotencyKey,
+          });
+          return {
+            refundId: `re_test_${params.idempotencyKey}`,
+            paymentIntentId: `pi_test_${params.sessionId}`,
           };
         }),
       constructEvent: () => Effect.succeed(options?.event ?? {}),

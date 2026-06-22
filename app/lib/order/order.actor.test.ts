@@ -7,6 +7,7 @@ import { Cents, CurrencyCode } from '../forms/pricing';
 import {
   canTransition,
   OrderState,
+  RefundNotAllowed,
   type BucketStatus,
 } from './order.actor';
 
@@ -89,6 +90,17 @@ describe('canTransition (Order lifecycle predicate)', () => {
       if (to === 'paid' || to === 'refunded') continue;
       expect(canTransition('paid', to)).toBe(false);
     }
+  });
+});
+
+describe('RefundNotAllowed (G7 — the typed non-refundable guard)', () => {
+  test('is a tagged error carrying the orderId + the offending bucket status', () => {
+    // The status field is the BUCKET literal — `failed` (a bucket-only terminal,
+    // never an actor-State value) is a legitimate non-refundable source.
+    const error = new RefundNotAllowed({ orderId: 'ord-1', status: 'failed' });
+    expect(error._tag).toBe('Order.RefundNotAllowed');
+    expect(error.orderId).toBe('ord-1');
+    expect(error.status).toBe('failed');
   });
 });
 

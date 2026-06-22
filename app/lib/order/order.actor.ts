@@ -6,7 +6,8 @@ import { IsoDate, ListItemId } from '../content/schema';
 import { BillingMode } from '../forms/party';
 import { Cents, CurrencyCode } from '../forms/pricing';
 import { Submissions } from '../forms/submissions.server';
-import type { RegistrationOrder } from '../forms/order';
+import { RegistrationOrder } from '../forms/order';
+import { Payment } from '../payment.server';
 import { NotFound, StorageError } from '../storage.server';
 
 import { Actor } from 'effect-encore';
@@ -149,6 +150,24 @@ export class SettleFailed extends Schema.TaggedErrorClass<SettleFailed>()(
 ) {}
 
 /**
+ * The persisted Failure reply the `refund` op resolves to when the order is NOT
+ * in a refundable state (`make-impossible-states-unrepresentable`): a refund is
+ * legal ONLY from `paid` (`paid → refunded`, the G4 transition table), so a
+ * `refund` against a `pending`/`cancelled`/`expired`/`refunded`/`failed` order
+ * is a typed domain failure — NOT a Stripe call. It carries the `orderId` and
+ * the offending `status` so the operator entrypoint (the manual `/admin`
+ * trigger) can report WHY the refund was refused. Distinct from `PaymentError`
+ * (an actual Stripe/transport fault): this never reaches Stripe.
+ */
+export class RefundNotAllowed extends Schema.TaggedErrorClass<RefundNotAllowed>()(
+  'Order.RefundNotAllowed',
+  // The offending status is the BUCKET status (the authority the guard reads),
+  // so it carries the full closed 6-literal — `failed` included — not the
+  // 5-state actor view: a `failed` order is a legitimate non-refundable source.
+  { orderId: Schema.String, status: RegistrationOrder.fields.status },
+) {}
+
+/**
  * The Order durable entity. Definition only — handler bodies (the bucket
  * transitions + Stripe calls) land in G6/G7. Every op is `persisted: true` (the
  * durable SQL mailbox is the coordination seam between the action sender, the
@@ -182,6 +201,11 @@ export const Order = Actor.fromEntity(
     refund: {
       payload: OrderIdPayload,
       success: Schema.Void,
+      // A `refund` against a non-`paid` order resolves to a typed
+      // `RefundNotAllowed` Failure (make-impossible-states) — the only
+      // transition reachable FROM `paid` (G4 table). The Stripe call only fires
+      // on the `paid` happy path (G7 handler).
+      error: RefundNotAllowed,
       persisted: true,
       id: (p: { readonly orderId: string }) => p.orderId,
     },
@@ -324,6 +348,7 @@ export const handlers = Actor.toLayer(
   Order,
   Effect.gen(function* () {
     const submissions = yield* Submissions.Service;
+    const payment = yield* Payment.Service;
     const address = yield* Actor.CurrentAddress;
     const orderId = address.entityId;
 
@@ -378,15 +403,43 @@ export const handlers = Actor.toLayer(
         dieOnBucketFault(
           submissions.markOrderExpired(ORDER_FORM, orderId).pipe(Effect.asVoid),
         ),
-      // `refund` (`paid → refunded`): the bucket transition (the authority) is
-      // wired now; the additive Stripe refund call (`Payment.createRefund`) + the
-      // `RefundNotAllowed` guard land in G7 BEFORE this flip. `markOrderRefunded`
-      // (G5) already refuses to refund a non-`paid` order, so the flip alone is
-      // safe — G7 only adds the money side and the typed pre-guard.
+      // `refund` (`paid → refunded`): the ONLY transition reachable FROM `paid`
+      // (G4 table). The handler (1) reads the order back from the bucket
+      // authority (NEVER re-deriving the amount — the freeze discipline,
+      // Decision 6), (2) GUARDS `status === 'paid'`: a non-`paid` order resolves
+      // to a typed `RefundNotAllowed` Failure WITHOUT touching Stripe
+      // (make-impossible-states); (3) issues the Stripe refund against the FROZEN
+      // amount + the order's `sessionId` (`Payment.createRefund` resolves the
+      // PaymentIntent from the session, since the order stores only a
+      // `sessionId`), keyed by a deterministic `idempotencyKey` so a verbatim
+      // re-send replays the first refund; (4) flips the bucket `refunded`
+      // (`markOrderRefunded`, G5 — itself never-downgrade-guarded and idempotent)
+      // and mirrors it into State. A Stripe/transport fault (`PaymentError` /
+      // `PaymentDisabled`) is a DEFECT, not a domain outcome (the typed failure
+      // channel is `RefundNotAllowed` alone): it dies, leaving the op unresolved
+      // so the operator retry re-issues against the same idempotency key.
       refund: () =>
-        dieOnBucketFault(
-          submissions.markOrderRefunded(ORDER_FORM, orderId).pipe(Effect.asVoid),
-        ),
+        Effect.gen(function* () {
+          const order = yield* dieOnBucketFault(
+            submissions.getOrder(ORDER_FORM, orderId),
+          );
+          if (order.status !== 'paid') {
+            return yield* new RefundNotAllowed({
+              orderId,
+              status: order.status,
+            });
+          }
+          yield* payment
+            .createRefund({
+              sessionId: order.sessionId,
+              amount: order.amount,
+              idempotencyKey: `registration:refund:${orderId}`,
+            })
+            .pipe(Effect.orDie);
+          yield* dieOnBucketFault(
+            submissions.markOrderRefunded(ORDER_FORM, orderId).pipe(Effect.asVoid),
+          );
+        }),
     });
   }),
 );
