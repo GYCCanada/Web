@@ -18,6 +18,7 @@ import { Storage } from './app/lib/storage.server.ts';
 import { Submissions } from './app/lib/forms/submissions.server.ts';
 import { Payment } from './app/lib/payment.server.ts';
 import { Order } from './app/lib/order/runner.server.ts';
+import { OrderSweep } from './app/lib/order/sweep.server.ts';
 
 declare module 'react-router' {
   interface RouterContextProvider {
@@ -286,13 +287,31 @@ const OrderRunnerLive = Layer.unwrap(
     // `DatabaseUnconfigured` gate cannot fire; `orDie` reflects the
     // impossibility (a build failure here is a real defect) and keeps the
     // runner's build-error channel clean.
-    return Order.fullRunnerLayer(Order.MessageStorageLive).pipe(
-      // The runner's bucket-authority writes come from `Submissions`; the
-      // `refund` handler (G7) ALSO issues the Stripe refund, so `Payment` is
-      // provided here too (self-contained `defaultLayer`s — both gate on their
-      // own `Env` reads). When `Env.stripe` is None `Payment` is inert and a
-      // `refund` op would die `PaymentDisabled`, but no sender reaches `refund`
-      // without a configured Stripe, so the runner still builds cleanly.
+    // The runner (consumer) AND the deadline-sweep fiber (a SENDER of
+    // `Order.expire`), both in this long-lived `Layer.launch`-ed graph. The
+    // sweep needs `Order.SenderServices` (`Client | ActorAddressResolver |
+    // MessageStorage`) — which `fullRunnerLayer` already carries in its output
+    // (the handlers' `toLayer` keeps the client/storage services) — so
+    // `provideMerge` wires the sweep's sender requirement from the same runner
+    // build, over the SAME shared sqlite FILE the runner polls. A `send` from
+    // the sweep lands in the rows the runner consumes; the two never coordinate
+    // through anything but the durable DB (the two-runtime topology).
+    // `provideMerge` (not `merge`): the sweep fiber REQUIRES the runner's sender
+    // output (`Client | ActorAddressResolver | MessageStorage`), so the runner
+    // must PROVIDE it to the fiber — `merge` would leave the fiber's requirement
+    // unsatisfied. `provideMerge` feeds `fullRunnerLayer`'s output into the
+    // fiber AND keeps the runner's services in the result (so `Layer.launch`
+    // builds the runner too). Both end up needing `Submissions` (the fiber's
+    // `listOrders` + the handlers' bucket writes), discharged once below.
+    return OrderSweep.fiberLayer().pipe(
+      Layer.provideMerge(Order.fullRunnerLayer(Order.MessageStorageLive)),
+      // The runner's bucket-authority writes come from `Submissions`; the sweep
+      // ALSO reads orders through `Submissions` (`listOrders`). The `refund`
+      // handler (G7) ALSO issues the Stripe refund, so `Payment` is provided
+      // here too (self-contained `defaultLayer`s — both gate on their own `Env`
+      // reads). When `Env.stripe` is None `Payment` is inert and a `refund` op
+      // would die `PaymentDisabled`, but no sender reaches `refund` without a
+      // configured Stripe, so the runner still builds cleanly.
       Layer.provide(Submissions.defaultLayer),
       Layer.provide(Payment.defaultLayer),
       Layer.orDie,

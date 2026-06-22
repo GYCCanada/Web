@@ -1,9 +1,14 @@
 export * as Submissions from './submissions.server';
 
-import { Clock, Context, DateTime, Effect, Layer, Schema } from 'effect';
+import { Clock, Context, DateTime, Effect, Layer, Option, Schema } from 'effect';
 
 import { Content } from '../content.server';
-import { type FormId, orderKey, submissionKey } from '../content/pages/registry';
+import {
+  type FormId,
+  orderKey,
+  ordersPrefix,
+  submissionKey,
+} from '../content/pages/registry';
 import {
   deterministicListItemId,
   IsoDate,
@@ -144,6 +149,23 @@ export class Service extends Context.Service<
       form: FormId,
       orderId: string,
     ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
+    /**
+     * List every frozen order of a form (the objects under `ordersPrefix(form)`
+     * = `submissions/<form>/orders/`), decoding each back to a
+     * `RegistrationOrder`. The deadline sweep (order-workflow G9) lists the
+     * pending orders past their `deadline` to `expire` them; this is the read
+     * half (the sweep filters + dispatches). The `orders/` prefix nests UNDER the
+     * form's submission root but the registrant submissions sit one level up
+     * (`submissions/<form>/<id>.json`, NOT under `orders/`), so this returns
+     * orders ONLY — never a registrant record. A stored order ALWAYS decodes (it
+     * was written by `persistOrder` from this same schema), so a decode failure
+     * is bucket corruption and dies (mirroring `getOrder`), never a soft skip
+     * that would silently drop an order from the sweep. `StorageError` on a
+     * bucket-list fault.
+     */
+    readonly listOrders: (
+      form: FormId,
+    ) => Effect.Effect<readonly RegistrationOrder[], StorageError>;
     /**
      * Flip the order at `submissions/<form>/orders/<orderId>.json` to `paid` AND
      * stamp each registrant submission it names (`registrantIds`) `paid` in
@@ -359,6 +381,40 @@ export const layer = Layer.effect(
       return yield* Schema.decodeUnknownEffect(
         Schema.fromJsonString(RegistrationOrder),
       )(text).pipe(Effect.orDie);
+    });
+
+    // List every frozen order under `ordersPrefix(form)` and decode each. The
+    // sweep (G9) reads this to find pending orders past their deadline. A stored
+    // order ALWAYS decodes (written by `persistOrder` from this same schema), so
+    // a decode failure is bucket corruption and dies — never a soft skip that
+    // would silently drop an order from the sweep. The `orders/` prefix returns
+    // ORDERS ONLY (registrant submissions sit one level up, not under it).
+    const decodeOrder = Schema.decodeUnknownEffect(
+      Schema.fromJsonString(RegistrationOrder),
+    );
+    const listOrders = Effect.fn('Submissions.listOrders')(function* (
+      form: FormId,
+    ) {
+      const listed = yield* storage.list(ordersPrefix(form));
+      const orders = yield* Effect.forEach(listed, (object) =>
+        Effect.gen(function* () {
+          const stored = yield* storage.get(object.key);
+          const text = yield* Effect.promise(() =>
+            new Response(stored.stream).text(),
+          );
+          return yield* decodeOrder(text).pipe(Effect.orDie);
+        }).pipe(
+          Effect.map(Option.some<RegistrationOrder>),
+          // An order LISTED then `get`-missed is a benign TOCTOU race (it was
+          // deleted between the list and the read) — skip it rather than failing
+          // the whole sweep, keeping the channel `StorageError` (the list/get
+          // bucket fault), never `NotFound`.
+          Effect.catchTag('Storage.NotFound', () => Effect.succeedNone),
+        ),
+      );
+      return orders.flatMap((order) =>
+        Option.isSome(order) ? [order.value] : [],
+      );
     });
 
     // Read-flip-persist over BOTH the order AND the registrant submissions it names
@@ -614,6 +670,7 @@ export const layer = Layer.effect(
       persistOrder,
       setRegistrantPayment,
       getOrder: readOrder,
+      listOrders,
       markOrderPaid,
       markOrderFailed,
       markOrderCancelled,

@@ -381,13 +381,39 @@ export const handlers = Actor.toLayer(
       // flips the bucket to `failed` (`Submissions.markOrderFailed`, preserving
       // the existing webhook behavior — no regression, Decision 7) and FAILS the
       // op with `SettleFailed`, so the durable reply is a Failure.
+      //
+      // ## Late-payment-on-expired (G9, Open Question 4 — reject-and-log default)
+      //
+      // A `checkout.session.completed` can race a deadline `expire`: the sweep
+      // flips the order `expired` and THEN a late paid event arrives. The bucket
+      // `markOrderPaid` guard is permissive (any non-`paid` → `paid`), so calling
+      // it unconditionally would silently RESURRECT an `expired`/`cancelled`/
+      // `refunded`/`failed` order to `paid` — a money/support hazard. The G4
+      // transition table (`canTransition`) is the authority: `paid` is reachable
+      // ONLY from `pending` (or idempotently from `paid`). So the paid arm reads
+      // the bucket status FIRST and, when the transition is ILLEGAL (a late settle
+      // on a terminal order), LOGS and leaves the order untouched (the plan
+      // default — honor-vs-auto-refund is a product decision surfaced for the
+      // operator, see flags). The op still resolves Success (a no-op), so the
+      // webhook's `waitFor` terminates without a spurious failure — the bucket
+      // authority stays at its terminal state, unchanged.
       settle: ({ operation }) =>
         (operation.outcome ?? 'paid') === 'failed' ?
           dieOnBucketFault(
             submissions.markOrderFailed(ORDER_FORM, orderId).pipe(Effect.asVoid),
           ).pipe(Effect.flatMap(() => new SettleFailed({ orderId })))
-        : dieOnBucketFault(
-            submissions.markOrderPaid(ORDER_FORM, orderId).pipe(Effect.asVoid),
+        : dieOnBucketFault(submissions.getOrder(ORDER_FORM, orderId)).pipe(
+            Effect.flatMap((order) =>
+              canTransition(order.status, 'paid') ?
+                dieOnBucketFault(
+                  submissions.markOrderPaid(ORDER_FORM, orderId).pipe(Effect.asVoid),
+                )
+                // A late paid settle on a terminal (`expired`/`cancelled`/
+                // `refunded`/`failed`) order — reject-and-log, do NOT resurrect.
+              : Effect.logWarning(
+                  `Order.settle (paid) ignored for ${orderId}: order is already terminal at '${order.status}' (late-payment-on-expired guard — not resurrecting to paid)`,
+                ),
+            ),
           ),
       // `cancel` (`pending → cancelled`) / `expire` (`pending → expired`): the
       // operator-abandon and deadline-lapse terminals. Each is a pure bucket
