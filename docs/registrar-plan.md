@@ -51,12 +51,41 @@ verdict** (Claude review §"What the plan got RIGHT"; Codex-main review head-to-
 Keep from Codex: the **money brands** (branded minor units + one form-level currency) and the
 **single pure shared evaluator** — just key the evaluator off the separate rules.
 
-### Decision 2 — Multi-registrant payment cardinality: **registrant chooses group vs per-registrant at checkout; one order record per resulting intent, keyed off the request fingerprint + chosen mode**
+### Decision 2 — Multi-registrant payment cardinality: **registrant chooses group vs per-registrant at checkout; one order record per resulting Checkout Session, keyed off the request fingerprint + chosen mode**
+
+> **Checkout-Session note (shipped runtime — read this first).** This Decision (and the
+> whole plan below) was authored against a bare **PaymentIntent** flow. The runtime shipped
+> on a **hosted Stripe Checkout Session** instead (B1): a created PaymentIntent still needs
+> a payment method + a client-side confirmation, so the old `createIntent` path discarded the
+> client secret, redirected to success, and left the order `pending` with NO money collected
+> (the round-1 `--deep` BLOCKER). The Checkout Session moves card collection + the charge onto
+> Stripe's hosted page. Substitute throughout: **Checkout Session** for "PaymentIntent",
+> **`sessionId`** for "intentId", **`checkout.session.completed` / `checkout.session.async_payment_failed`**
+> for "`payment_intent.succeeded` / `payment_intent.payment_failed`", and **`PostCheckoutSessions`**
+> (`@distilled.cloud/stripe/Operations`) for `PostPaymentIntents`. The receipt recipient rides
+> `customer_email` (not `receipt_email`), and `client_reference_id` + `metadata.orderId` carry
+> the order linkage the webhook reconciles by. Shipped boundary: `app/lib/payment.server.ts`
+> (`createCheckoutSession` + `constructEvent`), `app/lib/forms/registration-action.ts` (the
+> checkout branch + redirect), `app/routes/api.stripe-webhook.ts` (the reconcile).
+>
+> **Cardinality handoff (the NEW perRegistrant decision):**
+> - **`group`** ⇒ ONE Checkout Session for the party sum. The browser is **redirected** (303)
+>   to that one session's hosted `url` — a single browser pays once for the whole party. This is
+>   complete today (`registration-action.ts:333-334`).
+> - **`perRegistrant`** ⇒ N sessions, one per registrant, each frozen on that registrant's own
+>   price + email. **Shipped TODAY:** the action mints N sessions + persists N pending orders, then
+>   collects every session `url` into `sessionUrls` and **redirects only to the FIRST**
+>   (`registration-action.ts:299, :333-334`). A single browser cannot start N hosted pages, so
+>   registrants 2..N are handed no `url` and sit **stranded `pending`** — a **KNOWN OPEN GAP**, not
+>   the finished design. The **intended FOLLOW-UP fix** is to email each registrant their OWN
+>   Checkout `url` (a payment-links fan-out) so 2..N reach their session; that email mechanism is
+>   **not yet implemented** (no checkout-url email exists anywhere in the tree). Until it lands,
+>   perRegistrant only fully completes the first registrant's payment.
 
 > **Note:** the *placement* of the mode selector + payer + labels is re-designed in **Decision 2b
 > (REPLACEMENT)** — they are a CMS-authored `party` section on `FormDefinition`, not a `billingModes`
 > field on `PricingRules` and not a route-static selector. This Decision 2 keeps the **cardinality
-> mechanics** (one-vs-N intents, fingerprint+mode idempotency keys, the order record); read it through
+> mechanics** (one-vs-N Checkout Sessions, fingerprint+mode idempotency keys, the order record); read it through
 > the 2b lens (the allow-list is `party.billingMode.options`; the group payer is the nominated
 > `party.payer`, not `registrants[0]`).
 
@@ -64,12 +93,12 @@ Keep from Codex: the **money brands** (branded minor units + one form-level curr
 a per-form hard-coded flag) — the party picks "pay for everyone" (`group`) vs "everyone pays their
 own" (`perRegistrant`). The form *constrains* which modes are offered (the authored
 `party.billingMode.options`, default group-only; Decision 2b), but the selection rides in the
-submission. `group` ⇒ one PaymentIntent for the party sum + one order record;
-`perRegistrant` ⇒ one PaymentIntent + one order record per registrant. The Stripe idempotency key
+submission. `group` ⇒ one Checkout Session for the party sum + one order record;
+`perRegistrant` ⇒ one Checkout Session + one order record per registrant. The Stripe idempotency key
 derives from the **request fingerprint + the chosen mode (+ registrant index for perRegistrant)**:
 `registration:checkout:${requestFingerprint}:${mode}` (group) or
 `…:${requestFingerprint}:perRegistrant:${index}` — NOT from any registrant's submission id, and
-distinct per mode so a retry that switches mode doesn't collide on a stale intent.
+distinct per mode so a retry that switches mode doesn't collide on a stale session.
 **Rejected (CMS-authored per-form `billingMode`):** the org would hard-code one cardinality per
 form; but who pays is the *registrant's* call (a youth group leader paying for 8 vs 8 individuals
 each paying themselves), so it belongs on the submission, gated by what the form allows.
@@ -79,13 +108,13 @@ it blocks the "each pays their own" path the org wants configurable.
 The per-registrant ids are `deterministicListItemId('registration:${sha256(JSON.stringify(payload))}:${index}')`
 (`registration-action.ts:125-134`) — the fingerprint hashes the *entire* registrant array. Editing
 or reordering ANY registrant changes the fingerprint → registrant[0]'s id changes → the "group id"
-changes → the idempotency key changes → Stripe mints a *new* intent for a charge that may already
+changes → the idempotency key changes → Stripe mints a *new* session for a charge that may already
 be in flight.
 **Rationale & mechanics:** the request fingerprint is *already* the stability anchor the persist
-loop relies on (`registration-action.ts:125`). Key each PaymentIntent off it directly:
+loop relies on (`registration-action.ts:125`). Key each Checkout Session off it directly:
 `registration:checkout:${requestFingerprint}:${mode}` (group) / `…:${requestFingerprint}:perRegistrant:${index}`.
 A verbatim retry re-derives the same fingerprint →
-same key → Stripe replays the first intent (no double-charge); a genuinely-new submission (any
+same key → Stripe replays the first session (no double-charge); a genuinely-new submission (any
 payload change) gets a new fingerprint → a new checkout, which is correct (the price may differ).
 `price()` is computed **per registrant** (Decision 4). For `group`, the per-registrant prices are
 **summed** and the sum is frozen onto a single order record
@@ -93,7 +122,7 @@ payload change) gets a new fingerprint → a new checkout, which is correct (the
 `registrantIds` = the whole party). For `perRegistrant`, each registrant's own price is frozen onto
 its own order record (`…/orders/${requestFingerprint}:${index}.json`,
 `orderId = ${requestFingerprint}:${index}`, `registrantIds` = the one id). Either way the amount is
-frozen at create-intent time (Decision 7). The order record is a new bucket object — it does not
+frozen at create-session time (Decision 7). The order record is a new bucket object — it does not
 exist today (confirmed: registration owns only the `{registrants:[]}` shell and one Submission per
 registrant). The webhook flips the matching order record AND its registrant submission(s)' `payment`
 to `paid`. The chosen `mode` is persisted on each registrant's `PaymentState` so the webhook and any
@@ -123,7 +152,7 @@ future read-back know which order(s) to reconcile.
 
 **`optionalKey`, not required** — dodges the backfill hazard at the schema level (`registry.ts:232` is `pageSpec`, strict, no `normalize`). A required `party` fails decode on the published contact/volunteer/registration docs (all share `FormDefinition`). `optionalKey` mirrors `variant`/`rules` exactly: **absence ⇒ no party section** (contact/volunteer are single-submission, will always omit it; legacy published `registration.json` keeps decoding until re-authored).
 
-**Generalizes-but-registration-is-the-only-consumer:** the *schema* is general (any form could author a `party`); the *consumers* are registration-specific (only the registration route has the `{ registrants: [...] }` repeater and fans out per-registrant intents). Same split as `variant`: general schema, registration-only structural use.
+**Generalizes-but-registration-is-the-only-consumer:** the *schema* is general (any form could author a `party`); the *consumers* are registration-specific (only the registration route has the `{ registrants: [...] }` repeater and fans out per-registrant Checkout Sessions). Same split as `variant`: general schema, registration-only structural use.
 
 #### 2b.2 — The PAYER model: a `mode`-discriminated DECODED party, payer present iff `group` (impossible states unrepresentable)
 
@@ -147,7 +176,7 @@ type Payer = { readonly name: string; readonly email: string };
 
 **[MAJOR fix — authored `payer` is `optionalKey` + an integrity filter, not always-required]** Both source designs made the authored `payer` a *required* sub-struct of `PartySection`, then admitted the "group ⇒ payer authored" integrity filter was dead (always true). That accepts a representable-but-meaningless state: authored payer copy on a `perRegistrant`-only form. **Fix:** `payer: Schema.optionalKey(PayerFields)` on `PartySection`, and add the real biconditional to the combined `FormDefinition.check`: **`'group' ∈ billingMode.options  ⟺  party.payer present`**. A `perRegistrant`-only form authors no payer block; a `group`-offering form must. This restores the invariant and earns the filter its keep (it composes into the single accumulating `.check` the plan already introduces in C4a — Risk 6).
 
-**How payer email feeds `receipt_email`:** the decoded `group`-arm `payer.email` is frozen onto `RegistrationOrder.receiptEmail` (`Schema.String`, required — see the RegistrationOrder schema above) at create-intent (Decision 7 step 3), then threaded to `PostPaymentIntents.receipt_email` (`:517`). In `group` there is ONE order ⇒ `receiptEmail = payer.email`. In `perRegistrant` there is no party payer ⇒ order_i `receiptEmail = registrants[i].email`. The freeze discipline is unchanged; only the *source* moves.
+**How payer email feeds the receipt recipient:** the decoded `group`-arm `payer.email` is frozen onto `RegistrationOrder.receiptEmail` (`Schema.String`, required — see the RegistrationOrder schema above) at create-session (Decision 7 step 3), then threaded to the Checkout Session's **`customer_email`** (shipped: `payment.server.ts` `createCheckoutSession({ receiptEmail })` → `customer_email`; the Checkout-era replacement for the bare-intent `PostPaymentIntents.receipt_email`). In `group` there is ONE order ⇒ `receiptEmail = payer.email`. In `perRegistrant` there is no party payer ⇒ order_i `receiptEmail = registrants[i].email`. The freeze discipline is unchanged; only the *source* moves.
 
 #### 2b.3 — Email relaxation: a SHELL/UI item (NOT a one-field data edit — `--deep` BLOCKER)
 
@@ -284,12 +313,12 @@ All three derive from the single decoded `party._tag` (`derive-dont-sync` preser
 | consequence | reads | derivation | layer |
 |---|---|---|---|
 | **(i) email-required** | `party._tag` | `group` ⇒ **payer** email required (shell), registrant emails optional; `perRegistrant` ⇒ every **registrant** email required (shell `requireRegistrantEmails`) | shell decode (2b.4) |
-| **(ii) payment cardinality** | `party._tag` as loop count | `group` ⇒ 1 `priceGroup` order/intent; `perRegistrant` ⇒ N `priceRegistrant` orders/intents | C7/C7.5 |
-| **(iii) receipt routing** | `party._tag` + the frozen email *value* | `group` ⇒ `receipt_email = party.payer.email`; `perRegistrant` ⇒ intent_i `receipt_email = registrants[i].email` | create-intent, frozen onto `RegistrationOrder.receiptEmail` |
+| **(ii) payment cardinality** | `party._tag` as loop count | `group` ⇒ 1 `priceGroup` order/session (browser redirected to its hosted `url`); `perRegistrant` ⇒ N `priceRegistrant` orders/sessions — **TODAY the action redirects only to the FIRST session's `url` (`:333-334`); registrants 2..N are stranded `pending` (KNOWN GAP)**. The intended follow-up emails each registrant their own Checkout `url` (not yet implemented). | C7/C7.5 |
+| **(iii) receipt routing** | `party._tag` + the frozen email *value* | `group` ⇒ session `customer_email = party.payer.email`; `perRegistrant` ⇒ session_i `customer_email = registrants[i].email` | create-session, frozen onto `RegistrationOrder.receiptEmail` |
 
-`price()` stays oblivious to receipt routing (email is a `createIntent` param, invisible to `priceRegistrant`/`priceGroup`). `RegistrationOrder.receiptEmail` stays a required frozen `Schema.String` (every order written with it — never `optionalKey`, guarding the backfill hazard).
+`price()` stays oblivious to receipt routing (email is a `createCheckoutSession` param — the session's `customer_email` — invisible to `priceRegistrant`/`priceGroup`). `RegistrationOrder.receiptEmail` stays a required frozen `Schema.String` (every order written with it — never `optionalKey`, guarding the backfill hazard).
 
-**Idempotency-fingerprint note (both reviews flagged the regression to silence):** `party.payer.email` is a new submitted field, so it enters `JSON.stringify(submission.payload)` → the request fingerprint (`registration-action.ts:125`). This is *fine* — a verbatim retry is the same payload ⇒ same fingerprint ⇒ same idempotency key ⇒ Stripe replays the first intent. The freeze discipline is unchanged; the fingerprint surface merely grew by the payer fields. Stated so it is not an unexamined gap.
+**Idempotency-fingerprint note (both reviews flagged the regression to silence):** `party.payer.email` is a new submitted field, so it enters `JSON.stringify(submission.payload)` → the request fingerprint (`registration-action.ts:125`). This is *fine* — a verbatim retry is the same payload ⇒ same fingerprint ⇒ same idempotency key ⇒ Stripe replays the first Checkout Session. The freeze discipline is unchanged; the fingerprint surface merely grew by the payer fields. Stated so it is not an unexamined gap.
 
 #### Final effect-v4 schemas
 
@@ -613,7 +642,7 @@ The Decision 7 sequence (Decision 7 above) is amended at three slots; the rest s
 
 - **Step 3 (persist the order record + freeze `receiptEmail`)** — `group` ⇒ `receiptEmail = decoded.party.payer.email` (the nominated payer, possibly a non-attendee); `perRegistrant` ⇒ order_i `receiptEmail = registrants[i].email`. The payer block is consulted ONLY in the `group` arm (structurally absent in `perRegistrant`).
 
-- **Step 4 (create intents)** — `receipt_email` is read from the **frozen** `order.receiptEmail`, never re-read from form data. Idempotency keys unchanged (`registration:checkout:${requestFingerprint}:${mode}` / `…:perRegistrant:${index}`). The payer fields are now part of the fingerprinted payload (retry-stable; see 2b.6 note).
+- **Step 4 (create Checkout Sessions)** — the session's `customer_email` is read from the **frozen** `order.receiptEmail`, never re-read from form data. Idempotency keys unchanged (`registration:checkout:${requestFingerprint}:${mode}` / `…:perRegistrant:${index}`). The payer fields are now part of the fingerprinted payload (retry-stable; see 2b.6 note). The action collects every minted session `url` into `sessionUrls` and **redirects** the browser (303) to **`sessionUrls[0]`** (`registration-action.ts:333-334`). For `group` that one `url` is the whole party's payment, so it completes. For `perRegistrant` it is only the FIRST registrant's session — registrants 2..N are stranded `pending` (a single browser cannot start N hosted pages). The intended follow-up emails each registrant their own Checkout `url` (Decision 2 Checkout-Session note); that email fan-out is **not yet implemented**.
 
 Branch on `decoded.party._tag` (the single discriminant) at steps 2/3/4 for cardinality + receipt routing.
 
@@ -709,8 +738,8 @@ export type PaymentState = typeof PaymentState.Type;
 // 'perRegistrant' there is one order per registrant keyed `${requestFingerprint}:${index}`.
 export const RegistrationOrder = Schema.Struct({
   orderId: Schema.String,                                  // group: fingerprint; perRegistrant: fingerprint:index
-  intentId: Schema.String,
-  amount: Cents,                                           // FROZEN at create-intent time
+  sessionId: Schema.String,                                // the Stripe Checkout Session id (NOT a bare PaymentIntent) — the webhook reconciles by metadata.orderId
+  amount: Cents,                                           // FROZEN at create-session time
   currency: CurrencyCode,
   receiptEmail: Schema.String,                            // FROZEN — group: party.payer.email (nominated); perRegistrant: registrants[i].email (Decision 2b)
   status: Schema.Literals(['pending', 'paid', 'failed', 'expired']),
@@ -847,25 +876,36 @@ needs the import to resolve. Commit body notes the Apache-2.0 (package.json, aut
 README-MIT discrepancy.
 **Deps:** C1 (`CurrencyCode`). Parallel-safe with C2–C4 but sequenced after for a clean stack.
 
-### C6 — `feat(payment): Payment Context.Service over distilled (createIntent + constructEvent) + typed errors`
+### C6 — `feat(payment): Payment Context.Service over distilled (createCheckoutSession + constructEvent) + typed errors`
+
+> **SHIPPED on hosted Checkout, not a bare intent.** Per the Checkout-Session note (Decision 2),
+> the service exposes `createCheckoutSession` (NOT `createIntent`): a bare PaymentIntent needs a
+> client-side confirmation the old path dropped, so the registrar mints a **hosted Checkout Session**
+> instead and redirects the browser to its `url`. The text below is updated to that shipped shape;
+> the authoritative boundary is `app/lib/payment.server.ts`.
 
 **Files:** NEW `app/lib/payment.server.ts` (`Payment` `Context.Service` mirroring
-`submissions.server.ts:68-94` house pattern; `createIntent(amount: Cents, currency: CurrencyCode,
-receiptEmail: string, metadata, idempotencyKey): Effect<{intentId, clientSecret}, PaymentError | PaymentDisabled>`
-(the `receiptEmail` param threads to `PostPaymentIntents.receipt_email` `:517`, Decision 2b) and
+`submissions.server.ts:68-94` house pattern; `createCheckoutSession({ amount: Cents, currency: CurrencyCode,
+receiptEmail: string, productName: string, successUrl: string, cancelUrl: string, metadata, idempotencyKey }):
+Effect<{sessionId, url}, PaymentError | PaymentDisabled>`
+(the `receiptEmail` param threads to the Checkout Session's `customer_email`; `metadata.orderId`
++ `client_reference_id` carry the order linkage, Decision 2b) and
 `constructEvent(rawBody, signature): Effect<StripeEvent, PaymentWebhookError | PaymentDisabled>`;
 layer reads `Env.stripe`, `None` ⇒ methods fail `PaymentDisabled` mirroring `SendgridDisabled`;
 `Some` ⇒ builds the distilled layer over `FetchHttpClient` + `Credentials` and runs
-`PostPaymentIntents(input, { idempotencyKey })`, mapping distilled's tagged errors
-[`CardError`/`InvalidRequestError`/`IdempotencyError`/`UnknownStripeError`] via `Effect.catchTags`
-to one `PaymentError extends Schema.TaggedErrorClass`). NEW `app/lib/payment.server.test.ts`.
+`PostCheckoutSessions(input, { idempotencyKey })` (`@distilled.cloud/stripe/Operations`), collapsing
+the SDK's runtime failure `Cause` (the operation's static error channel is empty) into one
+`PaymentError extends Schema.TaggedErrorClass`). NEW `app/lib/payment.server.test.ts`.
 **Shape:** `amount` is raw integer minor units (the `Cents` brand guarantees integer ≥0 — no
-dollar→cents helper); `idempotencyKey` is the **second arg**, never the body. `clientSecret` is
-`Redacted.value()`'d once here at the boundary. `constructEvent` wraps
+dollar→cents helper) carried in a single inline `price_data` line item (`mode: 'payment'`, `quantity: 1`);
+`idempotencyKey` rides the request's `Idempotency-Key` **HEADER**, never the body. The returned hosted
+`url` is the only thing the caller redirects to; `sessionId` is frozen onto the order for the webhook
+to reconcile by. `constructEvent` wraps
 `Webhooks.constructEvent({ payload, signature, secret: webhookSecret })` (HMAC over raw body, 300s
 tolerance, `Redacted` secret).
-**Gate-green:** a `Payment.testLayer` (`Layer.succeed(Payment.Service, fake)`) proves `createIntent`
-returns a fake intent with **no network**; a disabled-env layer proves `PaymentDisabled`. Typechecks
+**Gate-green:** a `Payment.testLayer` (`Layer.succeed(Payment.Service, fake)`) proves `createCheckoutSession`
+returns a fake `{ sessionId, url }` (derived from the `idempotencyKey`, so a retry yields the same fake
+session) with **no network**; a disabled-env layer proves `PaymentDisabled`. Typechecks
 against distilled's exported operation/error types.
 **Deps:** C1 (`Cents`/`CurrencyCode`), C5 (env + dep).
 
@@ -886,14 +926,14 @@ The party scope is a `FormDefinition` schema SECTION + a route-owned shell decod
 - **Gate-green:** data + token edit, provable in isolation. Tests: *absent* registrant email decodes valid; present-blank still rejects at the codec (the shell drop is C7); present-malformed rejects `invalidMessage`; the new `party` block round-trips; the new MessageKey tokens resolve.
 - **Deps:** C6.5 (the `party` schema the authored block decodes against).
 
-### C7 (re-cut) — `feat(payment): party-aware shell decode + group checkout (frozen payer receiptEmail) + one intent`
-- **Files:** EDIT `decode.ts` (**export `email` + `requiredString`** — the named migrate-callers edit; the shell is the new caller). NEW `app/lib/forms/registration-shell.ts` (`registrationShellSchema` — the **group arm + no-party legacy arm** only: `payerCodec`, `nonEmptyParty`, the chosen-mode codec via `Schema.optionalKey(...).pipe(Schema.withDecodingDefaultKey(Effect.succeed(allowed[0])))`; **the `group`-arm blank-registrant-email drop** — normalize `registrants[i].email === '' ⇒ absent` BEFORE the per-registrant codec, so an un-filled non-leader email decodes valid, 2b.3). EDIT `registration-action.ts` (decode via `registrationShellSchema`; `group` ⇒ `priceGroup`, freeze `order.receiptEmail = decoded.party.payer.email`, one intent). EDIT `registration-form.tsx` (render the CMS-authored mode selector + payer block from `definition.party.*` `Text` above the registrants repeater; **mandatory lockstep** — add `party` to BOTH `RegistrationFormShape` `:112` AND the runtime shell, plus a **party seed** in `makeDefaultRegistrant`'s sibling; **the "I'm paying" shortcut (OQ3):** a client-side affordance in the group payer block copying a chosen registrant's name+email into the `party.payer` inputs — convenience only, server still decodes + freezes `party.payer.{name,email}`, NO schema change). Extend the render-parity sets with the `party.*` submit-names.
+### C7 (re-cut) — `feat(payment): party-aware shell decode + group checkout (frozen payer receiptEmail) + one Checkout Session + redirect`
+- **Files:** EDIT `decode.ts` (**export `email` + `requiredString`** — the named migrate-callers edit; the shell is the new caller). NEW `app/lib/forms/registration-shell.ts` (`registrationShellSchema` — the **group arm + no-party legacy arm** only: `payerCodec`, `nonEmptyParty`, the chosen-mode codec via `Schema.optionalKey(...).pipe(Schema.withDecodingDefaultKey(Effect.succeed(allowed[0])))`; **the `group`-arm blank-registrant-email drop** — normalize `registrants[i].email === '' ⇒ absent` BEFORE the per-registrant codec, so an un-filled non-leader email decodes valid, 2b.3). EDIT `registration-action.ts` (decode via `registrationShellSchema`; `group` ⇒ `priceGroup`, freeze `order.receiptEmail = decoded.party.payer.email`, one Checkout Session, **redirect (303) to its hosted `url`**). EDIT `registration-form.tsx` (render the CMS-authored mode selector + payer block from `definition.party.*` `Text` above the registrants repeater; **mandatory lockstep** — add `party` to BOTH `RegistrationFormShape` `:112` AND the runtime shell, plus a **party seed** in `makeDefaultRegistrant`'s sibling; **the "I'm paying" shortcut (OQ3):** a client-side affordance in the group payer block copying a chosen registrant's name+email into the `party.payer` inputs — convenience only, server still decodes + freezes `party.payer.{name,email}`, NO schema change). Extend the render-parity sets with the `party.*` submit-names.
 - **Gate-green:** group checkout end-to-end via `Payment.testLayer`; party authoring round-trips through `deepMerge` (the struct-of-optionalKey label edit lands on only `options.group.en`); group blank-payer-email fails at `party.payer.email`; **a NEW action-level test through `parseSubmission`** — a `group` submission whose non-leader registrant renders `email: ''` SUCCEEDS (proves the shell blank-drop end-to-end on the real rendered payload, not just the schema — the `--deep` BLOCKER); the "I'm paying" affordance copies a registrant's values and the decoded payer matches; empty party fails; Stripe-disabled skips.
 - **Deps:** C3/C4c (`priceGroup`), C6 (`Payment`), C6.5 + C7a (party schema + optional-at-key email + tokens).
 
 ### C7.5 (re-cut) — `feat(payment): perRegistrant cardinality + per-registrant email re-imposition + allow-list + receipt fan-out`
-- **Files:** EDIT `app/lib/content/pages/defaults.ts` (**author the `perRegistrant` option** onto `defaultRegistrationForm.party.billingMode.options` — C7a authored group-only; this is where the second mode becomes offered, AFTER the server branch exists, fixing the C7-standalone hazard). EDIT `registration-shell.ts` (widen to the **mode union** via `buildModeUnion`: add the `perRegistrant` arm + `requireRegistrantEmails`; keep the absent-mode default + present-off-list reject). EDIT `registration-action.ts` (branch on `decoded.party._tag`: `perRegistrant` ⇒ N orders/intents keyed `:${index}`, `receipt_email = registrants[i].email`). EDIT `registration-form.tsx` (show the selector only when ≥2 modes authored; show the payer block only when the live mode is `group`).
-- **Gate-green:** allow-list (present `perRegistrant` on a group-only form rejects at decode; both accepts); absent mode on a 2-mode form decodes to the first authored arm with its requirements intact; cardinality (3 perRegistrant ⇒ 3 orders/intents/keys); receipt routing (intent_i `=== registrants[i].email`, group intent `=== payer.email`); email orthogonality (perRegistrant blank registrant email fails, group blank non-leader passes, group blank payer fails).
+- **Files:** EDIT `app/lib/content/pages/defaults.ts` (**author the `perRegistrant` option** onto `defaultRegistrationForm.party.billingMode.options` — C7a authored group-only; this is where the second mode becomes offered, AFTER the server branch exists, fixing the C7-standalone hazard). EDIT `registration-shell.ts` (widen to the **mode union** via `buildModeUnion`: add the `perRegistrant` arm + `requireRegistrantEmails`; keep the absent-mode default + present-off-list reject). EDIT `registration-action.ts` (branch on `decoded.party._tag`: `perRegistrant` ⇒ N orders/Checkout Sessions keyed `:${index}`, session `customer_email = registrants[i].email`; collect each session `url` into `sessionUrls` and **redirect (303) to `sessionUrls[0]` only** (`:333-334`) — a single browser cannot start N hosted pages, so registrants 2..N are stranded `pending` (KNOWN GAP; the per-registrant email fan-out that would hand them their `url` is the intended follow-up, NOT yet implemented — Decision 2 Checkout note)). EDIT `registration-form.tsx` (show the selector only when ≥2 modes authored; show the payer block only when the live mode is `group`).
+- **Gate-green:** allow-list (present `perRegistrant` on a group-only form rejects at decode; both accepts); absent mode on a 2-mode form decodes to the first authored arm with its requirements intact; cardinality (3 perRegistrant ⇒ 3 orders/sessions/keys); receipt routing (session_i `customer_email === registrants[i].email`, group session `customer_email === payer.email`); email orthogonality (perRegistrant blank registrant email fails, group blank non-leader passes, group blank payer fails).
 - **Deps:** C7.
 
 ### C8 (webhook), C9 (quantity kind + pricing CMS authoring) — unchanged
@@ -908,14 +948,17 @@ The party scope is a `FormDefinition` schema SECTION + a route-owned shell decod
 `admin/login`, outside `:lang?`). EDIT `app/routes.ts`. EDIT `app/lib/forms/submissions.server.ts`
 (`markOrderPaid` flips order `paid` + each registrant submission `paid`, no-op if already paid).
 The route: `const raw = await request.text()` **before any parse**; `Payment.constructEvent(raw, sig)`;
-narrow `event.type === 'payment_intent.succeeded'` / `'payment_intent.payment_failed'`; decode
-`event.data.object` for `id` + `metadata.orderId` + `amount`; re-read the order; **verify
-`event.amount === order.amount`** before marking paid; mark `paid`/`failed`; return 200. Unverified
+narrow `event.type === 'checkout.session.completed'` / `'checkout.session.async_payment_failed'`; decode
+the session object (`event.data.object`) for `id` + `metadata.orderId` + `amount_total` (minor units)
++ `payment_status`; on a completed session require `payment_status === 'paid'` (a `no_payment_required`
+/ `unpaid` completion is not a settlement ⇒ 200 ack, order stays pending); re-read the order; **verify
+`session.amount_total === order.amount`** before marking paid; mark `paid`/`failed`; return 200. Unverified
 ⇒ 400; unknown event types ⇒ 200 ignore; `Env.stripe` `None` ⇒ 503.
-**Gate-green:** forged-signature body → 400; valid `succeeded` with matching amount flips order +
-all registrants to `paid`; **amount-mismatch event → rejected, order stays pending**; replaying the
-same event is idempotent (stays `paid`, mirrors the `c8c4abd` idempotency fix); `payment_failed` →
-`failed`. WebCrypto HMAC runs in Bun with no network.
+**Gate-green:** forged-signature body → 400; a `checkout.session.completed` with `payment_status: 'paid'`
++ matching `amount_total` flips order + all registrants to `paid`; **amount-mismatch event → rejected,
+order stays pending**; a `paid`-but-`no_payment_required`/`unpaid` completion → 200, order stays pending;
+replaying the same event is idempotent (stays `paid`, mirrors the `c8c4abd` idempotency fix);
+`checkout.session.async_payment_failed` → `failed`. WebCrypto HMAC runs in Bun with no network.
 **Deps:** C6 (`constructEvent`), C7 (order record + `payment` state).
 
 ### C9 — `feat(forms): number FieldKind + quantity pricing rule + CMS pricing authoring surface`
@@ -945,7 +988,7 @@ the recurring backfill hazard).
 | decision | Claude said | Codex said | **FINAL + why** |
 |---|---|---|---|
 | **Pricing location** | separate `PricingRules` keyed by field/option + decode-time integrity filter | inline `price` on `FieldOption` + `priceWhenTrue` on `checkboxBoolean` | **Separate `PricingRules` (Claude).** `FieldOption` is reused by the variant discriminator (`definition.ts:459`) where a price is meaningless ⇒ inline is a `make-impossible-states-unrepresentable` violation; separate + `variantsMatchOptions`-style filter is the codebase's own idiom and adds one field, not N. Keep Codex's money brands + pure shared evaluator. |
-| **Payment cardinality** | per-registrant intents (C6 said `price(definition, registrant)`) | one per group, key = registrant[0]'s submission id | **Mode-dependent (Decision 2b supersedes "always group"): `group` = ONE intent for the party sum; `perRegistrant` = N intents.** Keyed off the request fingerprint + `:${mode}` (+ `:${index}` for perRegistrant), NOT a registrant submission id (unstable: `sha256(whole payload)` shifts on any edit ⇒ double-charge). Amount frozen onto the order record. |
+| **Payment cardinality** | per-registrant Checkout Sessions (C6 said `price(definition, registrant)`) | one per group, key = registrant[0]'s submission id | **Mode-dependent (Decision 2b supersedes "always group"): `group` = ONE Checkout Session for the party sum (browser redirected to it — complete); `perRegistrant` = N Checkout Sessions, but the action TODAY redirects only to the FIRST (`:333-334`) so registrants 2..N are stranded `pending` (KNOWN GAP; emailing each their own `url` is the not-yet-implemented follow-up).** Keyed off the request fingerprint + `:${mode}` (+ `:${index}` for perRegistrant), NOT a registrant submission id (unstable: `sha256(whole payload)` shifts on any edit ⇒ double-charge). Amount frozen onto the order record. |
 | **`pricing` required vs optional** | `optionalKey`, absence = unpriced | required + `normalize` backfill | **`optionalKey` (Claude).** `variant`/`rules` are already `optionalKey` (`:516-517`); required makes the `normalize` hook load-bearing and breaks any decode that bypasses it. Removes the hazard instead of papering it. |
 | **Conditional model** | `activeWhenEquals` as a new `CrossFieldRule` member (literal-equals only) | per-field `activeWhen` predicate union (literal/array/checkbox) on field chrome | **New `CrossFieldRule` member (Claude's home) carrying Codex's richer `ActiveWhen` predicate union.** Rule-home keeps the closed `FieldKind` + recursive mirror type untouched (`subtract-before-you-add`) and reuses the existing renderer/decoder indices; Codex's predicate union is needed for checkbox + array triggers. One shared `isActive`, three consumers; retire `requiredWhenEquals`-as-visibility. |
 | **Timing window boundaries** | inclusive `[from, to]` | half-open `[from, to)` | **Half-open `[from, to)` (Codex).** Composes at boundaries with no double-counting; pair with the non-overlap decode filter so first-match is total. |
@@ -985,7 +1028,7 @@ the recurring backfill hazard).
      `variant`), but ONLY the registration route + `FORM_SPECS.registration` consume it — the public
      `<FormFields>` renderer ignores a `party` it doesn't own, and contact/volunteer simply never
      author one (an authored `party` on them is inert, not a payment path, since only the registration
-     route fans out intents). No per-form schema guard; the consumer is the boundary. (This matches
+     route fans out Checkout Sessions). No per-form schema guard; the consumer is the boundary. (This matches
      the `variant` precedent exactly: general schema, registration-only structural use.)
    - **"I'm paying" shortcut** — *resolved: YES.* Spec into **C7**: a "I'm one of the registrants /
      I'm paying" affordance in the `group` payer block that copies a chosen registrant's name+email
@@ -1020,7 +1063,7 @@ the recurring backfill hazard).
    request fingerprint being stable across verbatim retries (it is — `sha256(payload)`,
    `registration-action.ts:125`) and changing for genuinely-new submissions. Any priced form MUST
    use the deterministic-id persist path; a hypothetical single-record priced form (fresh random id
-   per submit) would re-create an intent on retry — documented as an invariant the checkout enforces.
+   per submit) would re-create a Checkout Session on retry — documented as an invariant the checkout enforces.
 4. **Latent submission-`payment` backfill on read-back.** Adding `payment` to the envelope is
    `optionalKey`-safe for *decode*, but any future consumer that *reads* `submission.payment` on a
    legacy object must tolerate absence (treat as `unpriced`). The future registrar index (the
@@ -1060,4 +1103,4 @@ the recurring backfill hazard).
 `app/routes.ts:24-58`;
 `package.json:9-15,21,28,58-60`;
 distilled SDK `@distilled.cloud/stripe@0.26.1` (Apache-2.0):
-`src/operations/PostPaymentIntents.ts`, `src/webhooks.ts`, `src/credentials.ts`, `src/errors.ts`.
+`src/operations/PostCheckoutSessions.ts` (the hosted-Checkout operation the registrar ships, via `@distilled.cloud/stripe/Operations`), `src/webhooks.ts`, `src/credentials.ts`, `src/errors.ts`.

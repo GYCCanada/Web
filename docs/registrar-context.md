@@ -7,8 +7,8 @@
 
 Build a **registrar**: accept any form type via the CMS (radio, checkbox, input) —
 but these fields can have **consequences to the total price**. There's also
-**timing** (early-bird, etc.). Integrate **Stripe** (PaymentIntents + webhooks) via
-the Effect-native distilled SDK.
+**timing** (early-bird, etc.). Integrate **Stripe** (hosted **Checkout Sessions** +
+webhooks) via the Effect-native distilled SDK.
 
 So the registrar = the existing data-driven form engine + a **pricing dimension**
 (field choices → price deltas) + **time-window modifiers** (early bird) +
@@ -78,8 +78,12 @@ grep). The registrar is greenfield ON TOP of this engine.
    - `src/client.ts` — `makeAPI`, Stripe error matching, request options
      (idempotencyKey, apiVersion, Stripe-Account). Uses `effect/Schema`,
      `effect/Redacted` — the **v4/smol module layout, matching our effect version**.
-   - `src/operations/PostPaymentIntents.ts` — `PostPaymentIntents({ amount, currency,
-     ... })`; amount in minor units, typed input Schema.
+   - `src/operations/PostCheckoutSessions.ts` — `PostCheckoutSessions({ mode,
+     line_items, customer_email, success_url, cancel_url, ... })`; the **hosted
+     Checkout** redirect flow the registrar ships (`@distilled.cloud/stripe/Operations`),
+     a single inline `price_data` line item carrying the server-frozen amount in minor
+     units, typed input Schema. (The package also exposes `PostPaymentIntents` for the
+     bare-intent flow; the registrar does NOT use it — see the Checkout note in §4 below.)
    - `src/webhooks.ts` — `verifySignature` / `constructEvent` (HMAC, timestamp
      tolerance `DEFAULT_WEBHOOK_TOLERANCE_SECONDS = 300`, raw-body discipline). Typed
      `StripeWebhookSignatureError` / `StripeWebhookPayloadParseError`.
@@ -114,12 +118,23 @@ grep). The registrar is greenfield ON TOP of this engine.
    price delta or an override tier. Evaluated against submit time (server clock,
    `Clock`), not client time. How do windows compose with per-field deltas? Tiered
    base price vs. additive discount?
-4. **Payment integration.** PaymentIntent created server-side for the computed amount
-   (idempotency key derived from the submission id — ties to the existing persist
-   idempotency). Webhook (`payment_intent.succeeded`) confirms + marks the Submission
-   paid. The Submission stays the source of truth; payment status is a field on it.
-   Order of operations: persist submission (pending) → create intent → client confirms
-   → webhook marks paid. Failure/abandonment handling.
+4. **Payment integration.** A hosted Stripe **Checkout Session** created server-side
+   for the computed amount (idempotency key derived from the request fingerprint +
+   mode — ties to the existing persist idempotency). The card is collected + charged
+   ON Stripe's hosted page (NOT a bare PaymentIntent confirmed client-side — that path
+   discarded the client secret and "succeeded" with no money collected, the round-1
+   `--deep` BLOCKER). The browser is **redirected** to the session's hosted `url`; the
+   `checkout.session.completed` webhook (and `checkout.session.async_payment_failed`)
+   confirms + marks the Submission/order paid (or failed). The Submission stays the
+   source of truth; payment status is a `PaymentState` on it + a frozen order record.
+   Order of operations: persist submission (pending) → create Checkout Session → freeze
+   order → redirect to the hosted page → webhook marks paid. Failure/abandonment
+   handling. **Cardinality TODAY:** `group` mints ONE session and redirects to its `url`
+   (complete). `perRegistrant` mints N sessions + persists N pending orders, but the action
+   redirects only to the FIRST (`registration-action.ts:333-334`) — registrants 2..N are
+   stranded `pending` (a single browser cannot start N hosted pages). This is a **KNOWN OPEN
+   GAP**; the intended follow-up emails each registrant their own Checkout `url`, but that
+   email fan-out is **not yet implemented**. (See the registrar plan's Checkout note.)
 5. **CMS authoring + the backfill hazard.** Pricing rules are CMS-editable data on the
    form object → `/admin` editor surface + the legacy-object read-boundary backfill so
    adding pricing to a published `forms/registration.json` doesn't break decode.
