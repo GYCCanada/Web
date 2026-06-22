@@ -55,6 +55,20 @@ const success = {
   description: 'registration.form.success.description',
 } as const;
 
+/** The perRegistrant "links sent" toast copy (mirrors `registration-route.ts`). */
+const perRegistrantSuccess = {
+  title: 'registration.checkout.perRegistrant.success.title',
+  description: 'registration.checkout.perRegistrant.success.description',
+} as const;
+
+/**
+ * The required `RegistrationActionConfig` slots a test that only exercises the
+ * group / legacy paths doesn't care about — a no-op `notifyPaymentLink` and the
+ * shared `perRegistrantSuccess` copy. The perRegistrant block overrides
+ * `notifyPaymentLink` with a spy to assert the per-registrant mail fan-out.
+ */
+const noopPaymentLink = (): Effect.Effect<void> => Effect.void;
+
 /**
  * One valid `exhibitor` registrant in conform bracket notation
  * (`registrants[i].field`) — the simpler variant (base name/email/phone +
@@ -165,7 +179,9 @@ describe('registrationAction', () => {
         Effect.sync(() => {
           notified = submissions;
         }),
+      notifyPaymentLink: noopPaymentLink,
       success,
+      perRegistrantSuccess,
     });
 
     const args = makeRegistrationArgs(runtime, registrantsBody(2));
@@ -276,7 +292,12 @@ describe('registrationAction', () => {
     );
 
     const runtime = makeRequestRuntimeFromLayer(makeAppLayer(sharedStorage));
-    const action = registrationAction({ notify: () => Effect.void, success });
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
 
     // Attempt 1: a group of 3 where the 2nd registrant's put fails mid-loop.
     failPutsAfter = 1; // registrant #0 persists; #1's put fails → loop aborts.
@@ -326,7 +347,12 @@ describe('registrationAction', () => {
   it('the same submission re-derives the SAME record ids (deterministic, content-addressed)', async () => {
     const ids = async (): Promise<ReadonlyArray<string>> => {
       const runtime = makeRequestRuntimeFromLayer(makeAppLayer(layerTest({})));
-      const action = registrationAction({ notify: () => Effect.void, success });
+      const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
       const body = registrantsBody(2);
       await action(makeRegistrationArgs(runtime, body)).catch(() => {});
       const stored = await listRegistrations(
@@ -348,7 +374,9 @@ describe('registrationAction', () => {
         Effect.fail(
           formValidationError({ formErrors: ['registration.form.error'] }),
         ),
+      notifyPaymentLink: noopPaymentLink,
       success,
+      perRegistrantSuccess,
     });
 
     const args = makeRegistrationArgs(runtime, registrantsBody(2));
@@ -487,7 +515,12 @@ describe('registrationAction — group checkout (registrar C7)', () => {
         Payment.testLayer({ calls }),
       ),
     );
-    const action = registrationAction({ notify: () => Effect.void, success });
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
     const args = makeRegistrationArgs(runtime, groupBody(2));
 
     let thrown: unknown;
@@ -548,7 +581,12 @@ describe('registrationAction — group checkout (registrar C7)', () => {
         Payment.testLayer({ calls }),
       ),
     );
-    const action = registrationAction({ notify: () => Effect.void, success });
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
     const body = groupBody(2, (i): Record<string, string> =>
       i === 1 ? { email: '' } : {},
     );
@@ -574,7 +612,12 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
     );
-    const action = registrationAction({ notify: () => Effect.void, success });
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
     const body = new URLSearchParams(
       Object.assign({}, exhibitorFields(0), {
         'party.payer.name': 'Group Leader',
@@ -593,7 +636,12 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
     );
-    const action = registrationAction({ notify: () => Effect.void, success });
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
     const body = new URLSearchParams({ ...partyPayerFields });
     const result = await action(makeRegistrationArgs(runtime, body));
 
@@ -606,7 +654,12 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     // `Payment.layer` is wired but the action never calls it — the inert RegFox-era
     // path: persist + notify + redirect, with NO order written.
     const runtime = makeRequestRuntimeFromLayer(makeAppLayer(layerTest({})));
-    const action = registrationAction({ notify: () => Effect.void, success });
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
     const args = makeRegistrationArgs(runtime, registrantsBody(2));
 
     let thrown: unknown;
@@ -639,7 +692,12 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
     );
-    const action = registrationAction({ notify: () => Effect.void, success });
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
     const args = makeRegistrationArgs(runtime, groupBody(2));
 
     let thrown: unknown;
@@ -679,17 +737,20 @@ const perRegistrantBody = (count: number): URLSearchParams =>
   );
 
 /**
- * Registrar C7.5 — the `perRegistrant` cardinality: the decoded `party._tag` drives
- * a fan-out, one Checkout Session + one frozen order PER registrant (Decision 2b.6),
- * each keyed `<fingerprint>:<index>` and frozen on that registrant's OWN price +
- * email (the receipt routing). The browser is redirected (303) to the FIRST
- * session's hosted url — a single browser can only begin one checkout, and each
- * order reconciles independently off its own `checkout.session.completed`. Plus the
- * email orthogonality: a perRegistrant blank registrant email FAILS at decode
- * (re-imposition), where a group blank non-leader passes (proven in the C7 block).
+ * Registrar C7.5 + round-2 --deep BLOCKER fix — the `perRegistrant` cardinality:
+ * the decoded `party._tag` drives a fan-out, one Checkout Session + one frozen
+ * order PER registrant (Decision 2b.6), each keyed `<fingerprint>:<index>` and
+ * frozen on that registrant's OWN price + email (the receipt routing). The action
+ * does NOT redirect (a single browser can only begin one of N hosted checkouts —
+ * redirecting to the first stranded registrants 2..N forever); instead each
+ * registrant is MAILED their own hosted Checkout url via `notifyPaymentLink`, and
+ * the visitor lands on an HONEST "links sent — check your email" success toast.
+ * Each order reconciles independently off its own `checkout.session.completed`.
+ * Plus the email orthogonality: a perRegistrant blank registrant email FAILS at
+ * decode (re-imposition), where a group blank non-leader passes (the C7 block).
  */
 describe('registrationAction — perRegistrant checkout (registrar C7.5)', () => {
-  it('mints N sessions + N frozen orders (3 registrants ⇒ 3), keyed + receipt-routed per registrant', async () => {
+  it('mints N sessions + N orders, MAILS each registrant their own link, and redirects to the "links sent" toast (NOT a Stripe url)', async () => {
     const calls: Array<CreateCheckoutSessionCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(
@@ -697,7 +758,24 @@ describe('registrationAction — perRegistrant checkout (registrar C7.5)', () =>
         Payment.testLayer({ calls }),
       ),
     );
-    const action = registrationAction({ notify: () => Effect.void, success });
+    // Spy the per-registrant payment-link mail: capture the registrant email + the
+    // hosted url each call routes to. This is the `Mailer`-bound hook the route
+    // module wires to `mailer.send({ to: registrant.email, ... })`; here we observe
+    // it directly to assert one mail per registrant with THAT registrant's url.
+    const mailed: Array<{ email: string; url: string }> = [];
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: ({ submission, url }) =>
+        Effect.sync(() => {
+          const email = submission.payload['email'];
+          mailed.push({
+            email: typeof email === 'string' ? email : '',
+            url,
+          });
+        }),
+      success,
+      perRegistrantSuccess,
+    });
     const args = makeRegistrationArgs(runtime, perRegistrantBody(3));
 
     let thrown: unknown;
@@ -706,15 +784,34 @@ describe('registrationAction — perRegistrant checkout (registrar C7.5)', () =>
     } catch (error) {
       thrown = error;
     }
-    // The action redirects (303) to the FIRST registrant's hosted Checkout url.
+    // The action does NOT redirect to Stripe — it redirects (302) to the form with
+    // the "payment links sent" success toast (perRegistrant cannot fan a single
+    // browser out to N hosted checkouts, so it mails the links instead).
     expect(thrown).toBeInstanceOf(Response);
-    expect((thrown as Response).status).toBe(303);
-    const firstByIndex = [...calls].sort((a, b) =>
-      a.idempotencyKey.localeCompare(b.idempotencyKey),
-    )[0]!;
-    expect((thrown as Response).headers.get('location')).toBe(
-      `https://checkout.stripe.test/${firstByIndex.idempotencyKey}`,
+    const response = thrown as Response;
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('/2026/form');
+    // Crucially NOT a Stripe checkout url.
+    expect(response.headers.get('location')).not.toContain(
+      'checkout.stripe.test',
     );
+    expect(response.headers.get('set-cookie')).toContain('toast');
+
+    // (a0) Exactly THREE payment-link mails were sent — one per registrant — each
+    // routed to ITS OWN registrant email and carrying THAT session's hosted url.
+    expect(mailed.length).toBe(3);
+    const mailedEmails = mailed.map((m) => m.email).sort();
+    expect(mailedEmails).toEqual([
+      'booth0@example.com',
+      'booth1@example.com',
+      'booth2@example.com',
+    ]);
+    // Every mailed url is one of the N minted hosted session urls, and the set of
+    // mailed urls is exactly the set of minted urls (no url stranded / duplicated).
+    const mintedUrls = calls
+      .map((call) => `https://checkout.stripe.test/${call.idempotencyKey}`)
+      .sort();
+    expect(mailed.map((m) => m.url).sort()).toEqual(mintedUrls);
 
     // (a) Exactly THREE create-session calls — one per registrant.
     expect(calls.length).toBe(3);
@@ -765,7 +862,12 @@ describe('registrationAction — perRegistrant checkout (registrar C7.5)', () =>
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
     );
-    const action = registrationAction({ notify: () => Effect.void, success });
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
     // Registrant #1 renders `email: ''` — in perRegistrant the shell re-imposes
     // presence on EVERY registrant, so this rejects (the orthogonal opposite of the
     // group blank-drop, which passes).

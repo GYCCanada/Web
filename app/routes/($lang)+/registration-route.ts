@@ -3,6 +3,7 @@ import { Effect } from 'effect';
 import { formValidationError } from '~/lib/effect/errors';
 import { registrationAction } from '~/lib/forms/registration-action';
 import type { Submission } from '~/lib/forms/submission';
+import { translate } from '~/lib/localization/localization';
 import { Mailer } from '~/lib/mailer.server';
 
 /**
@@ -60,8 +61,47 @@ export const action = registrationAction({
         });
       }
     }),
+  // The perRegistrant Checkout-link mail (round-2 --deep BLOCKER): each registrant
+  // is mailed THEIR OWN hosted Checkout url, routed to THEIR email (the `to`
+  // override on the shared Mailer boundary) with a localized name + url body. The
+  // session+order are already durable + `pending`, so a send failure surfaces a
+  // form-level error WITHOUT losing them (persist-then-notify) — the visitor can
+  // retry, and each session still reconciles on its own webhook regardless.
+  notifyPaymentLink: ({ submission, url, locale }) =>
+    Effect.gen(function* () {
+      const mailer = yield* Mailer.Service;
+      const name = str(submission.payload, 'name');
+      const email = str(submission.payload, 'email');
+      const result = yield* Effect.exit(
+        mailer.send({
+          to: email,
+          subject: translate(
+            locale,
+            'registration.checkout.perRegistrant.email.subject',
+          ),
+          content: translate(
+            locale,
+            'registration.checkout.perRegistrant.email.body',
+            { name, url },
+          ),
+        }),
+      );
+      if (result._tag === 'Failure') {
+        yield* Effect.logError(
+          'Error sending registration payment-link email',
+          result.cause,
+        );
+        return yield* formValidationError({
+          formErrors: ['registration.form.error'],
+        });
+      }
+    }),
   success: {
     title: 'registration.form.success.title',
     description: 'registration.form.success.description',
+  },
+  perRegistrantSuccess: {
+    title: 'registration.checkout.perRegistrant.success.title',
+    description: 'registration.checkout.perRegistrant.success.description',
   },
 });

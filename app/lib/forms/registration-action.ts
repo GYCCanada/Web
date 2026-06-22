@@ -5,7 +5,7 @@ import { Clock, Effect, Option, Result } from 'effect';
 import { Content } from '../content.server';
 import { Env } from '../env.server';
 import { formValidationError, redirect } from '../effect/errors';
-import { getLocale } from '../localization/localization';
+import { getLocale, type Locale } from '../localization/localization';
 import {
   type FormSuccess,
   routeFormAction,
@@ -79,7 +79,35 @@ export interface RegistrationActionConfig<E> {
     E,
     ReactRouterContext | Content.Service | Mailer.Service
   >;
+  /**
+   * The `perRegistrant` Checkout-link mail (round-2 --deep BLOCKER fix). Each
+   * minted `perRegistrant` Checkout Session belongs to a DIFFERENT registrant; a
+   * single browser can only begin one of N hosted checkouts, so the action does
+   * NOT redirect — it instead mails each registrant THEIR OWN hosted `url` here.
+   * Called once per minted session (after ALL sessions are persisted), over the
+   * persisted registrant `Submission` + its session `url`. It runs through the
+   * SAME `Mailer` boundary `notify` uses (no new email layer); the session/order
+   * is already durable + `pending` (persist-then-notify, :56), so a mail failure
+   * surfaces a form-level error WITHOUT losing the minted sessions — they
+   * reconcile on their own `checkout.session.completed` regardless.
+   */
+  readonly notifyPaymentLink: (input: {
+    readonly submission: Submission;
+    readonly url: string;
+    readonly locale: Locale;
+  }) => Effect.Effect<
+    void,
+    E,
+    ReactRouterContext | Content.Service | Mailer.Service
+  >;
   readonly success: SuccessToast;
+  /**
+   * The post-submit toast for the `perRegistrant` path — distinct from `success`
+   * (group's redirect): honest that nothing is paid yet, "we've emailed each
+   * person their payment link". Shown via `toast.redirect` to the form (no Stripe
+   * redirect for perRegistrant).
+   */
+  readonly perRegistrantSuccess: SuccessToast;
 }
 
 /**
@@ -177,15 +205,16 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
     //   - `perRegistrant` ⇒ N orders/sessions — one per registrant, each frozen on
     //                       that registrant's own price + email.
     //
-    // Checkout handoff (the `--deep` BLOCKER fix): each session is a HOSTED Stripe
-    // Checkout page where the card is actually collected + charged. The order stays
-    // `pending` and we REDIRECT the browser to the (first) session's hosted `url`
-    // (303) so the visitor really pays — the old bare-PaymentIntent path discarded
-    // the secret and "succeeded" with no money collected. The success notification
-    // moves to webhook reconciliation (`checkout.session.completed`, C8); on a
-    // checkout we do NOT notify here (nothing is settled yet). When NO chargeable
-    // session is minted (no party / unpriced / zero amount) the submission falls
-    // through to the legacy persist→notify→success-redirect below.
+    // Checkout handoff (the round-1 `--deep` BLOCKER fix + the round-2 perRegistrant
+    // correction): each session is a HOSTED Stripe Checkout page where the card is
+    // actually collected + charged. The order stays `pending`; the paid status +
+    // receipt move to webhook reconciliation (`checkout.session.completed`, C8), so
+    // we do NOT `notify` here (nothing is settled yet). The handoff is mode-branched
+    // below: `group` (one session) REDIRECTS the browser to its hosted `url` (303);
+    // `perRegistrant` (N sessions, one browser) CANNOT redirect, so it MAILS each
+    // registrant their own `url` and redirects to a "links sent" toast. When NO
+    // chargeable session is minted (no party / unpriced / zero amount) the
+    // submission falls through to the legacy persist→notify→success-redirect below.
     if (
       Option.isSome(env.stripe) &&
       'party' in shell &&
@@ -204,11 +233,19 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
       // (picked for THIS request's locale) is the closest human label the
       // definition carries.
       const productName = definition.title[getLocale(params)];
-      // The hosted session URLs minted this submission, in registrant order. We
-      // redirect to the FIRST so the visitor begins paying; each order is its own
-      // independently-reconciled `checkout.session.completed` (perRegistrant fans
-      // out to N receipt-routed payers — a single browser can only start one).
-      const sessionUrls: Array<string> = [];
+      // The locale for THIS request — drives the perRegistrant payment-link mail
+      // copy below (group routes its receipt through Stripe, not this mail).
+      const locale = getLocale(params);
+      // The ONE group session url minted this submission (group mints exactly one);
+      // we redirect the visitor to it so they begin paying. perRegistrant never
+      // sets this — it cannot redirect (N sessions, one browser), it mails instead.
+      let groupSessionUrl: string | undefined;
+      // The perRegistrant payment links minted this submission, one per registrant
+      // session. After the loop persists every session+order `pending`, each
+      // registrant is MAILED their own hosted `url` (round-2 --deep BLOCKER:
+      // redirecting to only the first stranded registrants 2..N forever). Each
+      // order reconciles independently off its own `checkout.session.completed`.
+      const paymentLinks: Array<{ submission: Submission; url: string }> = [];
       // ONE `now` for the whole submission (Decision 6) — every frozen amount in
       // this checkout reads the same instant, so a window boundary cannot split a
       // single submit across two prices.
@@ -241,7 +278,7 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
             metadata: { orderId: requestFingerprint, mode: 'group' },
             idempotencyKey,
           });
-          sessionUrls.push(session.url);
+          groupSessionUrl = session.url;
           // Freeze the order record (Decision 7 step 3) — ONE order keyed by the
           // fingerprint, `registrantIds` = the whole party, amount + receiptEmail
           // frozen, `sessionId` = the Checkout Session. The webhook (C8) reads it
@@ -296,7 +333,9 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
             metadata: { orderId, mode: 'perRegistrant' },
             idempotencyKey,
           });
-          sessionUrls.push(session.url);
+          // Pair THIS session's hosted url with the registrant it pays for, so the
+          // post-loop fan-out mails each registrant their own link (not a redirect).
+          paymentLinks.push({ submission: stored[index]!, url: session.url });
           const order: RegistrationOrder = {
             orderId,
             mode: 'perRegistrant',
@@ -325,13 +364,41 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
         }
       }
 
-      // At least one chargeable session was minted ⇒ hand the browser off to the
-      // hosted Stripe Checkout page (303 See Other — a POST action redirecting to a
-      // GET). The order(s) stay `pending`; the success notification + paid status
-      // are owned by the `checkout.session.completed` webhook (C8). No success toast
-      // here — nothing is settled until the visitor actually pays on Stripe.
-      if (sessionUrls.length > 0) {
-        return yield* redirect(sessionUrls[0]!, { status: 303 });
+      // The post-session handoff is mode-branched (round-2 --deep BLOCKER):
+      //
+      //   group  ⇒ exactly ONE session was minted; hand the browser off to its
+      //            hosted Stripe Checkout page (303 See Other — a POST action
+      //            redirecting to a GET) so the visitor actually pays. The order
+      //            stays `pending`; the paid status + receipt are owned by the
+      //            `checkout.session.completed` webhook (C8).
+      //
+      //   perRegistrant ⇒ N sessions were minted, one per registrant — a single
+      //            browser can only begin ONE, so redirecting to the first stranded
+      //            registrants 2..N `pending` forever (their links hidden). Instead
+      //            we MAIL each registrant their OWN hosted `url` (reusing the same
+      //            `Mailer` boundary `notify` uses) and redirect to an HONEST
+      //            "payment links sent — check your email" toast. Nothing is paid;
+      //            each order reconciles independently on its own webhook. The
+      //            sessions+orders are already durable + `pending`, so a mail
+      //            failure surfaces a form error WITHOUT losing them
+      //            (persist-then-notify, :56).
+      if (groupSessionUrl !== undefined) {
+        return yield* redirect(groupSessionUrl, { status: 303 });
+      }
+      if (paymentLinks.length > 0) {
+        for (const link of paymentLinks) {
+          yield* config.notifyPaymentLink({
+            submission: link.submission,
+            url: link.url,
+            locale,
+          });
+        }
+        return yield* toast.redirect(url.pathname, {
+          title: config.perRegistrantSuccess.title,
+          description: config.perRegistrantSuccess.description,
+          type: 'success',
+          form: 'registration',
+        });
       }
       // Otherwise (every amount was zero) fall through to the legacy
       // persist→notify→success-redirect path below.
