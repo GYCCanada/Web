@@ -131,6 +131,53 @@ describe('email', () => {
   });
 });
 
+// The registration email relaxation (registrar plan 2b.3 / C7a authoring half):
+// the registration `email` instance flips to `optional: true` (optional-at-key,
+// non-empty-WHEN-present). This is the decode-LEVEL contract C7a establishes —
+// an ABSENT key is valid, but a PRESENT blank still rejects. The shell
+// blank-drop that makes the real rendered `email: ''` payload pass in `group`
+// (and the per-registrant re-imposition for `perRegistrant`) live in C7/C7.5;
+// C7a alone makes *absent* valid, NOT *present-blank*.
+const optionalEmailDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'email',
+      name: 'email',
+      label: text('Email', 'Courriel'),
+      optional: true,
+      requiredMessage: 'contact.form.email.required',
+      invalidMessage: 'contact.form.email.error',
+    },
+  ],
+});
+
+describe('email (optional: true) — the C7a registrant relaxation', () => {
+  test('an ABSENT email decodes valid (optional-at-key)', () => {
+    expect(Result.isSuccess(decodeForm(optionalEmailDef, {}))).toBe(true);
+  });
+
+  test('a present blank STILL rejects with the required key (the shell drop is C7)', () => {
+    expect(
+      errorsFor(optionalEmailDef, { email: '' })?.fieldErrors['email'],
+    ).toEqual(['contact.form.email.required']);
+  });
+
+  test('a present malformed value rejects with the invalid key', () => {
+    expect(
+      errorsFor(optionalEmailDef, { email: 'not-an-email' })?.fieldErrors[
+        'email'
+      ],
+    ).toEqual(['contact.form.email.error']);
+  });
+
+  test('a present well-formed value decodes', () => {
+    expect(
+      Result.isSuccess(decodeForm(optionalEmailDef, { email: 'a@b.co' })),
+    ).toBe(true);
+  });
+});
+
 const urlDef = asDefinition({
   title: text('F', 'F'),
   fields: [

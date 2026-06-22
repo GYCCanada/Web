@@ -1018,10 +1018,11 @@ describe('pricing sibling on FormDefinition (Decision 1/3)', () => {
 });
 
 describe('party section on FormDefinition (Decision 2b)', () => {
-  // The new `registration.party.*` MessageKey tokens do not ship until C7a (a
-  // deploy — proven absent by the party-scope spike), so these fixtures reuse
-  // EXISTING valid TranslationKeys for the payer/selector message chrome. C6.5
-  // proves only the schema mechanics; the authored block lands in C7a.
+  // These fixtures reuse EXISTING valid TranslationKeys for the payer/selector
+  // message chrome — they exercise the schema MECHANICS, independent of which
+  // tokens the live registration form authors. (The dedicated
+  // `registration.party.*` tokens ship in C7a; SPIKE 2 below asserts they
+  // resolve, and `defaults.ts` authors the live block against them.)
   const groupOptions = {
     group: text('Pay for everyone', 'Payer pour tous'),
   };
@@ -1162,17 +1163,25 @@ describe('party section on FormDefinition (Decision 2b)', () => {
     expect('perRegistrant' in mergedGroupOnly).toBe(false);
   });
 
-  test('SPIKE 2 — a new registration.party.* token is REJECTED by the REAL MessageKey until it ships in translations.ts', () => {
-    // The C7a tokens are not yet registered, so the brand boundary must reject
-    // them: a CMS edit cannot introduce a new key, only localize a registered one.
-    const decoded = Schema.decodeUnknownResult(MessageKey)(
+  test('SPIKE 2 — the registration.party.* MessageKey tokens now RESOLVE (shipped in translations.ts in C7a)', () => {
+    // C7a ships the party-scope tokens in `translations.ts` (the one deploy), so
+    // the brand boundary now ACCEPTS them — thereafter their en/fr strings are
+    // CMS-editable. (Before C7a these were rejected; the spike proved the brand
+    // gate, this asserts the deploy landed.)
+    for (const token of [
       'registration.party.billingMode.required',
-    );
-    expect(Result.isFailure(decoded)).toBe(true);
-    // total boundary anchor — an already-registered token still decodes.
+      'registration.party.payer.name.required',
+      'registration.party.payer.email.required',
+      'registration.party.payer.email.error',
+    ]) {
+      expect(
+        Result.isSuccess(Schema.decodeUnknownResult(MessageKey)(token)),
+      ).toBe(true);
+    }
+    // an unregistered token is still rejected — the brand gate stays load-bearing.
     expect(
-      Result.isSuccess(
-        Schema.decodeUnknownResult(MessageKey)('registration.form.email.required'),
+      Result.isFailure(
+        Schema.decodeUnknownResult(MessageKey)('registration.party.not.a.token'),
       ),
     ).toBe(true);
   });

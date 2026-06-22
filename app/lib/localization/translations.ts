@@ -259,6 +259,18 @@ const en = {
   'registration.form.website.placeholder': 'Enter your website here',
   'registration.form.website.required': 'Please enter your website',
 
+  // Party-scope chrome (registrar plan Decision 2b / C7a). These MessageKey
+  // *tokens* ship here (a one-time deploy); their en/fr strings — and ALL the
+  // party `Text` labels authored in `forms/registration.json` — are thereafter
+  // CMS-editable with no deploy. Validated at the brand boundary by `MessageKey`.
+  'registration.party.billingMode.required': 'Please choose a payment option',
+  'registration.party.payer.name.required':
+    "Please enter the payer's name",
+  'registration.party.payer.email.required':
+    "Please enter the payer's email",
+  'registration.party.payer.email.error':
+    "Please enter a valid email for the payer",
+
   'registration.form.submit': 'Submit',
 } as const;
 
@@ -544,6 +556,14 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.website.label': 'Site Web',
   'registration.form.website.placeholder': 'Entrez votre site Web ici',
   'registration.form.website.required': 'Veuillez entrer votre site Web',
+  'registration.party.billingMode.required':
+    'Veuillez choisir une option de paiement',
+  'registration.party.payer.name.required':
+    'Veuillez entrer le nom du payeur',
+  'registration.party.payer.email.required':
+    'Veuillez entrer le courriel du payeur',
+  'registration.party.payer.email.error':
+    'Veuillez entrer un courriel valide pour le payeur',
   'registration.form.submit': 'Soumettre',
 };
 

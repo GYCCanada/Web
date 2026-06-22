@@ -795,6 +795,13 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
       name: 'email',
       label: { en: 'Email', fr: 'Courriel' },
       placeholder: { en: 'example@mail.com', fr: 'example@mail.com' },
+      // optional-at-key (registrar plan 2b.3): an ABSENT registrant email
+      // decodes valid; a PRESENT blank still rejects. In `group` the shell
+      // drops blank non-leader emails before the per-registrant codec (C7);
+      // in `perRegistrant` the shell re-imposes presence on every registrant
+      // (C7.5). The relaxation is dormant until the published
+      // `forms/registration.json` is re-authored.
+      optional: true,
       requiredMessage: 'registration.form.email.required',
       invalidMessage: 'registration.form.email.error',
     },
@@ -1054,5 +1061,40 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
         ],
       },
     ],
+  },
+  // The CMS-authored party scope (registrar plan Decision 2b / C7a). C7a authors
+  // GROUP-ONLY options — the `perRegistrant` option is added in C7.5, AFTER the
+  // server branch that fans out per-registrant intents exists (the C7-standalone
+  // hazard: offering a mode the server cannot yet handle). The biconditional on
+  // FormDefinition requires a `payer` block here because `group` ∈ options keys.
+  // Every label is CMS-editable `Text`; the message keys are the tokens that
+  // shipped in `translations.ts` in C7a.
+  party: {
+    intro: {
+      en: 'Tell us how your party is paying.',
+      fr: 'Dites-nous comment votre groupe paie.',
+    },
+    billingMode: {
+      label: { en: 'How are you paying?', fr: 'Comment payez-vous?' },
+      requiredMessage: 'registration.party.billingMode.required',
+      options: {
+        group: {
+          en: 'One person pays for everyone',
+          fr: 'Une personne paie pour tout le monde',
+        },
+      },
+    },
+    payer: {
+      label: { en: 'Who is paying?', fr: 'Qui paie?' },
+      nameField: {
+        label: { en: "Payer's name", fr: 'Nom du payeur' },
+        requiredMessage: 'registration.party.payer.name.required',
+      },
+      emailField: {
+        label: { en: "Payer's email", fr: 'Courriel du payeur' },
+        requiredMessage: 'registration.party.payer.email.required',
+        invalidMessage: 'registration.party.payer.email.error',
+      },
+    },
   },
 });
