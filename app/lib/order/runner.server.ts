@@ -1,6 +1,6 @@
 export * as Order from './runner.server';
 
-import { Layer } from 'effect';
+import { Effect, Layer, Option } from 'effect';
 import {
   MessageStorage,
   RunnerHealth,
@@ -15,9 +15,18 @@ import {
   Client,
 } from 'effect-encore';
 
-import { ShardingConfigLive } from './storage.server';
+import { Env } from '../env.server';
+import {
+  ShardingConfigLive,
+  MessageStorageLive,
+  layerTest,
+} from './storage.server';
+import { handlers as orderHandlers, Order as OrderActorEntity } from './order.actor';
 
 export { MessageStorageLive, ShardingConfigLive, layerTest } from './storage.server';
+
+/** Re-export the Order entity so senders (`runtime.ts`, the webhook) dispatch ops through one handle. */
+export const Entity = OrderActorEntity;
 
 /**
  * The single-process in-process Sharding **runner** — the consumer side of the
@@ -102,3 +111,67 @@ export const senderLayer = <R, E, RIn>(
     // first two come from here while the resolver wraps the shard config.
     Layer.provideMerge(Layer.mergeAll(messageStorage, ShardingConfigLive)),
   );
+
+/**
+ * G6 — the FULLY-WIRED Order runner: the `arm` + `settle` (+ `cancel`/`refund`/
+ * `expire`) handler layer (`order.actor.ts` `handlers`) registered onto the
+ * single-process Sharding runner over a given `MessageStorage`. This is the
+ * layer `server.ts` adds to the long-lived `ServerLive` graph (gated on
+ * `Env.database` Some) so the runner's mailbox-poll fiber runs the handlers and
+ * writes their durable replies — the consumer side of the two-runtime topology.
+ *
+ * The handlers require `Submissions.Service` (the bucket-authority writes); the
+ * runner discharges `Sharding | MessageStorage`. So this leaves
+ * `Submissions.Service` plus the storage's `RIn` (`Env.Service` in prod) open,
+ * provided by `server.ts`. Production wires `Order.MessageStorageLive` (the
+ * shared sqlite FILE); the lifecycle tests wire `Order.layerTest` (`:memory:`).
+ */
+export const fullRunnerLayer = <R, E, RIn>(
+  messageStorage: Layer.Layer<R | MessageStorage.MessageStorage, E, RIn>,
+) =>
+  // `provideMerge` (not `provide`): keep the runner's client/storage/registry
+  // services (`Client | MessageStorage | ActorClientService | ActorAddressResolver
+  // | ActorStateRegistry`, which the handlers' `toLayer` output also carries) in
+  // the result, so a same-graph driver (the G6 lifecycle test, which `send`s ops
+  // and reads `getState` against this one runner) can resolve them. In prod this
+  // layer is merged into `ServerLive` where those extra outputs are harmless.
+  orderHandlers.pipe(Layer.provideMerge(runnerLayer(messageStorage)));
+
+/** The services the request/webhook sender contributes to `AppRuntime`. */
+export type SenderServices =
+  | Client
+  | ActorAddressResolver
+  | MessageStorage.MessageStorage;
+
+/**
+ * G6 — the SENDER seam threaded into `makeAppLayer` (the `AppRuntime` request
+ * graph), gated on `Env.database` Some exactly as `Storage`/`Payment` are
+ * optional there. The senders that USE it (the registration action's `arm`
+ * send, G7; the webhook's `settle` resolve, G8) are themselves `Env.database`-
+ * gated, so the DB-less branch never dispatches — but the service TYPES must be
+ * present unconditionally for `AppServices` to be stable, so the None branch
+ * wires the sender over an inert in-memory `layerTest` storage (a "disabled"
+ * instance no DB-less caller reaches, mirroring how `Storage.layerOptional`
+ * always produces `Storage.Service`). The Some branch wires the real
+ * `MessageStorageLive` — the SAME shared sqlite FILE the `ServerLive` runner
+ * polls — and the SAME `ShardingConfigLive` (the cross-runtime shard-parity
+ * invariant: a divergent shard count would route a `send` to a shard the runner
+ * never polls).
+ */
+export const appSenderLayer: Layer.Layer<
+  SenderServices,
+  never,
+  Env.Service
+> = Layer.unwrap(
+  Effect.gen(function* () {
+    const env = yield* Env.Service;
+    return Option.isNone(env.database) ?
+        senderLayer(layerTest)
+        // In this branch `Env.database` IS Some, so `MessageStorageLive`'s
+        // `DatabaseUnconfigured` gate cannot fire — `orDie` reflects that
+        // impossibility (a build failure here would be a real defect) and keeps
+        // the sender's error channel `never`, so threading it into `makeAppLayer`
+        // does not widen `AppRuntime`'s `ConfigError`-only build-error channel.
+      : senderLayer(MessageStorageLive).pipe(Layer.orDie);
+  }),
+);

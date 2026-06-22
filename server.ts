@@ -1,5 +1,5 @@
 import { BunHttpServer, BunRuntime } from '@effect/platform-bun';
-import { Data, Effect, Layer } from 'effect';
+import { Data, Effect, Layer, Option } from 'effect';
 import {
   HttpRouter,
   HttpServerRequest,
@@ -15,6 +15,8 @@ import {
 } from './app/lib/effect/runtime.ts';
 import { imageKeyFromPath } from './app/lib/images.server.ts';
 import { Storage } from './app/lib/storage.server.ts';
+import { Submissions } from './app/lib/forms/submissions.server.ts';
+import { Order } from './app/lib/order/runner.server.ts';
 
 declare module 'react-router' {
   interface RouterContextProvider {
@@ -260,10 +262,46 @@ const StartupCheck = Layer.effectDiscard(Env.Service).pipe(
 // storage layer is self-contained.
 const StorageLive = Storage.defaultLayer;
 
+// The durable Order workflow's CONSUMER side: the in-process Sharding runner +
+// the `arm`/`settle`/… handlers, hosted in this long-lived `Layer.launch`-ed
+// `ServerLive` graph (G6, order-workflow-plan §1) — NOT the request-handler
+// `makeAppLayer` graph, which is consumed once into the `AppRuntime` singleton
+// and never `Layer.launch`-ed, so it has no process-lifetime supervisor for the
+// runner's mailbox-poll fiber. The runner consumes the SQL mailbox the
+// registration action + Stripe webhook (SENDERS in `AppRuntime`) write to; the
+// two graphs coordinate ONLY through the shared `DATABASE_URL` sqlite FILE.
+//
+// Gated on `Env.database` Some: a DB-less deploy composes `Layer.empty`, so the
+// bucket-only registration/webhook path is byte-identically unaffected and
+// `Layer.launch` still exits non-zero on a missing REQUIRED config (the
+// `StartupCheck` contract). The runner's bucket-authority writes come from
+// `Submissions.defaultLayer` (self-contained); `Env.layer` discharges the
+// `MessageStorageLive` SqlClient gate and the `Env`-read in the gate itself.
+const OrderRunnerLive = Layer.unwrap(
+  Effect.gen(function* () {
+    const env = yield* Env.Service;
+    if (Option.isNone(env.database)) return Layer.empty;
+    // In this branch `Env.database` IS Some, so `MessageStorageLive`'s
+    // `DatabaseUnconfigured` gate cannot fire; `orDie` reflects the
+    // impossibility (a build failure here is a real defect) and keeps the
+    // runner's build-error channel clean.
+    return Order.fullRunnerLayer(Order.MessageStorageLive).pipe(
+      Layer.provide(Submissions.defaultLayer),
+      Layer.orDie,
+    );
+  }),
+).pipe(Layer.provide(Env.layer));
+
 const ServerLive = HttpRouter.serve(RoutesLive).pipe(
   Layer.provide(StorageLive),
   Layer.provide(StartupCheck),
   Layer.provide(BunHttpServer.layer({ port: PORT })),
+  // `merge` (not `provide`): nothing in the HTTP graph CONSUMES the runner's
+  // output services, so `Layer.provide` would never build it (provide only
+  // builds a dependency something requires). Merging makes the runner part of
+  // `ServerLive`'s own composition, so `Layer.launch` builds it and supervises
+  // its mailbox-poll fiber for the process lifetime.
+  Layer.merge(OrderRunnerLive),
 );
 
 BunRuntime.runMain(Layer.launch(ServerLive));
