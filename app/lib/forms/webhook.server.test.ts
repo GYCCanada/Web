@@ -17,7 +17,7 @@ import { isSuccess } from 'effect-encore';
 
 import { Content } from '../content.server';
 import { Env } from '../env.server';
-import { type ListItemId, newListItemId } from '../content/schema';
+import { IsoDate, type ListItemId, newListItemId } from '../content/schema';
 import { defaultRegistrationForm } from '../content/pages/defaults';
 import { orderKey, submissionKey } from '../content/pages/registry';
 import {
@@ -556,6 +556,102 @@ describe('/api/stripe/webhook (C8 route)', () => {
     const response = await action(args);
     expect(response.status).toBe(200);
     expect(await readStatus(runtime, args, 'ord1')).toBe('pending');
+  });
+});
+
+// ── (2b) the webhook cannot RESURRECT a terminal order (F1 — transition guards) ─
+
+/**
+ * F1 (final --deep BLOCKERs) — the webhook's bucket flips MUST agree with the G4
+ * transition table (`order/transitions.ts`, the single source of truth). A late
+ * `checkout.session.completed` racing a terminal `expired`/`cancelled`/`refunded`/
+ * `failed` order must NOT resurrect it to `paid`, and a stray
+ * `checkout.session.async_payment_failed` racing one of those terminals must NOT
+ * overwrite it to `failed`. The guard runs at the BUCKET authority
+ * (`markOrderPaid` / `markOrderFailed`), so the order AND its named registrant
+ * submissions both stay frozen at the terminal state.
+ *
+ * A `paid` terminal carries the frozen `paidAt` (the bucket schema requires it on
+ * a paid order); the other terminals carry no `paidAt`. None of these is `pending`,
+ * so the late event's flip is illegal and a no-op.
+ */
+const terminalOrder = (
+  orderId: string,
+  amount: number,
+  status: 'expired' | 'cancelled' | 'refunded' | 'failed' | 'paid',
+): RegistrationOrder => ({
+  ...pendingOrder(orderId, amount),
+  status,
+  ...(status === 'paid' ? { paidAt: IsoDate.make('2026-06-01') } : {}),
+});
+
+describe('/api/stripe/webhook — terminal orders cannot be resurrected (F1)', () => {
+  const TERMINALS = ['expired', 'cancelled', 'refunded', 'failed'] as const;
+
+  for (const terminal of TERMINALS) {
+    it(`a completed (paid) event does NOT resurrect a ${terminal} order to paid, nor restamp registrants`, async () => {
+      const runtime = makeRequestRuntimeFromLayer(
+        stripeAppLayer(seed(terminalOrder('ord1', 15000, terminal))),
+      );
+      const body = eventBody('checkout.session.completed', 'ord1', 15000);
+      const signature = await signPayload(body, Math.floor(Date.now() / 1000));
+      const args = webhookArgs(runtime, body, signature);
+      const { action } = await import('../../routes/api.stripe-webhook');
+      const response = await action(args);
+      // The bucket flip is a guarded no-op (the order is already terminal), so the
+      // webhook still 200s — but the order STAYS at its terminal state, and the
+      // registrants are NOT restamped `paid`.
+      expect(response.status).toBe(200);
+      expect(await readStatus(runtime, args, 'ord1')).toBe(terminal);
+      expect(await readRegistrantTag(runtime, args, REGISTRANT_IDS[0]!)).toBe(
+        'none',
+      );
+      expect(await readRegistrantTag(runtime, args, REGISTRANT_IDS[1]!)).toBe(
+        'none',
+      );
+    });
+
+    it(`an async_payment_failed event leaves a ${terminal} order UNTOUCHED (no overwrite to failed)`, async () => {
+      const runtime = makeRequestRuntimeFromLayer(
+        stripeAppLayer(seed(terminalOrder('ord1', 15000, terminal))),
+      );
+      const body = eventBody(
+        'checkout.session.async_payment_failed',
+        'ord1',
+        15000,
+      );
+      const signature = await signPayload(body, Math.floor(Date.now() / 1000));
+      const args = webhookArgs(runtime, body, signature);
+      const { action } = await import('../../routes/api.stripe-webhook');
+      const response = await action(args);
+      // `markOrderFailed` is now pending-or-failed ONLY, so a stray failure event
+      // for a terminal order keeps the order at its terminal STATE — it is never
+      // overwritten to a DIFFERENT state. For `expired`/`cancelled`/`refunded` the
+      // guard rejects the flip outright (registrants untouched); for an already-
+      // `failed` order the flip is the legal IDENTITY case (`failed → failed`), a
+      // byte-identical idempotent re-stamp, NOT a resurrection or downgrade.
+      expect(response.status).toBe(200);
+      expect(await readStatus(runtime, args, 'ord1')).toBe(terminal);
+      expect(await readRegistrantTag(runtime, args, REGISTRANT_IDS[0]!)).toBe(
+        terminal === 'failed' ? 'failed' : 'none',
+      );
+    });
+  }
+
+  it('a completed (paid) event on a paid order is idempotent — no registrant restamp drift', async () => {
+    // `paid → paid` is the identity case (legal), so the flip converges to the
+    // SAME bytes (the frozen `paidAt`), not a resurrection: the registrant
+    // re-stamp is byte-identical (idempotent), never a downgrade or a re-clock.
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeAppLayer(seed(terminalOrder('ord1', 15000, 'paid'))),
+    );
+    const body = eventBody('checkout.session.completed', 'ord1', 15000);
+    const signature = await signPayload(body, Math.floor(Date.now() / 1000));
+    const args = webhookArgs(runtime, body, signature);
+    const { action } = await import('../../routes/api.stripe-webhook');
+    const response = await action(args);
+    expect(response.status).toBe(200);
+    expect(await readStatus(runtime, args, 'ord1')).toBe('paid');
   });
 });
 

@@ -17,6 +17,8 @@ import {
 } from '../content/schema';
 import { type NotFound, Storage, type StorageError } from '../storage.server';
 
+import { canTransition } from '../order/transitions';
+
 import type { DecodedForm } from './decode';
 import { RegistrationOrder } from './order';
 import {
@@ -480,18 +482,26 @@ export const layer = Layer.effect(
       form: FormId,
       orderId: string,
     ) {
-      // Any non-`paid` order (pending/failed/expired) may settle to `paid`: a
-      // confirmed charge is authoritative over an earlier non-terminal state. The
-      // settled-on calendar date (`paidAt`) is FROZEN onto the order the instant it
-      // transitions and never re-stamped, so a webhook replay on a LATER date
-      // re-reads it rather than the clock. Each registrant is stamped `paid` with
-      // the order's frozen mode/amount/currency plus that frozen `paidAt` —
+      // ONLY a `pending` order may settle to `paid` (the G4 transition table —
+      // `canTransition(current, 'paid')`, the SINGLE source of truth in
+      // `order/transitions.ts`; an already-`paid` order re-flips idempotently via
+      // the identity case). A late `checkout.session.completed` racing an
+      // `expired`/`cancelled`/`refunded`/`failed` terminal must NOT resurrect the
+      // order to `paid` (a money/support hazard) — the guard rejects it, leaving
+      // the terminal order AND its registrant stamps untouched. This guard runs at
+      // the BUCKET authority, so the webhook's direct `markOrderPaid` call honors
+      // the table BEFORE any bucket flip, even though the durable `settle` op also
+      // consults the same predicate (no second source of truth, no resurrection).
+      // The settled-on calendar date (`paidAt`) is FROZEN onto the order the
+      // instant it transitions and never re-stamped, so a webhook replay on a LATER
+      // date re-reads it rather than the clock. Each registrant is stamped `paid`
+      // with the order's frozen mode/amount/currency plus that frozen `paidAt` —
       // byte-identical on every replay (the idempotency invariant the webhook owes).
       return yield* flipStatus(
         form,
         orderId,
         'paid',
-        () => true,
+        (current) => canTransition(current, 'paid'),
         // Read the clock ONCE, here, on the real transition only — a replay
         // re-reads the already-`paid` order verbatim and never enters this branch,
         // so `paidAt` cannot drift across deliveries.
@@ -532,15 +542,21 @@ export const layer = Layer.effect(
       form: FormId,
       orderId: string,
     ) {
-      // Never downgrade a `paid` order: a completed session already reconciled it,
-      // so a stray later failure for the same session is ignored (the `guard`).
-      // Each registrant is stamped `failed`, carrying the order link + a short
-      // reason (no amount/paidAt — there is nothing settled).
+      // ONLY a `pending` order may flip to `failed` (the G4 transition table —
+      // `canTransition(current, 'failed')`, the SINGLE source of truth in
+      // `order/transitions.ts`; an already-`failed` order re-flips idempotently via
+      // the identity case). A stray `async_payment_failed` racing an
+      // `expired`/`cancelled`/`refunded`/`paid` terminal must NOT overwrite it —
+      // the guard rejects it, leaving the terminal order AND its registrant stamps
+      // untouched (the documented legal transitions are `pending → failed` plus
+      // identity ONLY; `paid` was always protected, and now every other terminal
+      // is too). Each registrant is stamped `failed`, carrying the order link + a
+      // short reason (no amount/paidAt — there is nothing settled).
       return yield* flipStatus(
         form,
         orderId,
         'failed',
-        (current) => current !== 'paid',
+        (current) => canTransition(current, 'failed'),
         // A failed transition freezes no timestamp — there is nothing settled.
         (order) => Effect.succeed({ ...order, status: 'failed' } satisfies RegistrationOrder),
         (order) =>

@@ -9,8 +9,19 @@ import { Submissions } from '../forms/submissions.server';
 import { RegistrationOrder } from '../forms/order';
 import { Payment } from '../payment.server';
 import { NotFound, StorageError } from '../storage.server';
+import {
+  type BucketStatus,
+  canTransition,
+  OrderStatus,
+} from './transitions';
 
 import { Actor } from 'effect-encore';
+
+// Re-export the pure transition surface from its dependency-free home
+// (`transitions.ts`) so existing `OrderActor.*` importers keep resolving these
+// off this module while `submissions.server.ts` imports the SAME predicate
+// directly — one source of truth, no circular import (Decision 5).
+export { type BucketStatus, canTransition, OrderStatus };
 
 /**
  * G4 — the durable **Order entity**: definition + state machine ONLY (no Stripe
@@ -121,15 +132,6 @@ export const OrderIdPayload = {
  * `paidAt` is set the instant `settle` first succeeds and never re-stamped
  * (the byte-identical idempotency contract, `order.ts:62-71`).
  */
-export const OrderStatus = Schema.Literals([
-  'pending',
-  'paid',
-  'cancelled',
-  'refunded',
-  'expired',
-]);
-export type OrderStatus = typeof OrderStatus.Type;
-
 export const OrderState = Schema.Struct({
   status: OrderStatus,
   sessionId: Schema.String,
@@ -218,50 +220,6 @@ export const Order = Actor.fromEntity(
   },
   { state: { schema: OrderState } },
 );
-
-/**
- * The full bucket-status set the transition table reconciles over. It is the
- * UNION of the actor's five visible states PLUS `failed` (bucket-only,
- * `async_payment_failed`) — because legality is a property of the bucket
- * `RegistrationOrder.status` lifecycle, not just the actor cache. Widened in G5
- * to this same closed set on the bucket schema (Decision 5).
- */
-export type BucketStatus =
-  | OrderStatus
-  | 'failed';
-
-/**
- * The pure transition predicate (Decision 5 / G4 scope): which `status → status`
- * flip is legal. The runtime handlers (G6/G7) consult this so an out-of-order or
- * replayed op is a typed no-op rather than a corrupt downgrade — the same
- * never-downgrade-a-terminal-state discipline `flipStatus` enforces at the
- * bucket boundary (`submissions.server.ts`).
- *
- * Legal:
- *   - `pending → { paid, cancelled, expired, failed }`
- *   - `paid    → refunded`
- *   - any `x → x` (idempotent re-flip to the same terminal is a no-op)
- * Everything else is illegal.
- *
- * Terminal states (`cancelled`, `refunded`, `expired`, `failed`) have no legal
- * onward transition except to themselves; `paid` may ONLY go to `refunded`.
- */
-const LEGAL_TRANSITIONS: Readonly<Record<BucketStatus, ReadonlySet<BucketStatus>>> = {
-  pending: new Set<BucketStatus>(['paid', 'cancelled', 'expired', 'failed']),
-  paid: new Set<BucketStatus>(['refunded']),
-  cancelled: new Set<BucketStatus>(),
-  refunded: new Set<BucketStatus>(),
-  expired: new Set<BucketStatus>(),
-  failed: new Set<BucketStatus>(),
-};
-
-/**
- * `true` iff `from → to` is a legal Order lifecycle transition. An identity flip
- * (`from === to`) is always legal (idempotent replay no-op); otherwise the
- * target must be in `from`'s legal target set.
- */
-export const canTransition = (from: BucketStatus, to: BucketStatus): boolean =>
-  from === to || LEGAL_TRANSITIONS[from].has(to);
 
 /**
  * The bucket form every Order entity reconciles. The Order lifecycle is the
