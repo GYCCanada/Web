@@ -49,6 +49,10 @@ export interface BucketConfig {
   readonly region: string;
 }
 
+export interface DatabaseConfig {
+  readonly url: Redacted.Redacted<string>;
+}
+
 const mailConfigRequired = Config.all({
   host: Config.string('MAIL_HOST'),
   port: Config.number('MAIL_PORT'),
@@ -174,6 +178,36 @@ const bucketConfig: Config.Config<Option.Option<BucketConfig>> = Config.all({
   ),
 );
 
+/**
+ * Durable Order workflow database (encore SQL MessageStorage). OPTIONAL
+ * everywhere — when `DATABASE_URL` is unset the durable Order entity is disabled
+ * and the app falls back to the existing bucket-only registration/webhook path.
+ *
+ * Same blank-collapse None-gate as the bucket/stripe/sendgrid configs: read with
+ * a `''` default, trimmed, collapsing to `Option.none()` unless non-blank. We do
+ * NOT use `Config.option` — a present-but-empty `DATABASE_URL=` (the value
+ * shipped in `.env.example`) is a *successful* empty parse, not missing data, so
+ * `Config.option` would wrongly resolve it to `Some(Redacted(''))` and treat the
+ * empty placeholder as a real DB.
+ *
+ * The connection string flows through `Config.redacted` so it is never
+ * accidentally logged (harmless for a sqlite file path; load-bearing for a
+ * future Postgres URL with embedded credentials). In production this MUST be a
+ * sqlite FILE path on a persistent volume, never `':memory:'` — the long-lived
+ * runner and the request/webhook senders are two separate layer graphs that
+ * coordinate ONLY through the shared sqlite file.
+ */
+const databaseConfig: Config.Config<Option.Option<DatabaseConfig>> = Config.redacted(
+  'DATABASE_URL',
+).pipe(
+  Config.withDefault(Redacted.make('')),
+  Config.map((url) =>
+    isBlankRedacted(url)
+      ? Option.none()
+      : Option.some<DatabaseConfig>({ url }),
+  ),
+);
+
 export class Service extends Context.Service<
   Service,
   {
@@ -182,6 +216,7 @@ export class Service extends Context.Service<
     readonly sendgrid: Option.Option<SendgridConfig>;
     readonly stripe: Option.Option<StripeConfig>;
     readonly bucket: Option.Option<BucketConfig>;
+    readonly database: Option.Option<DatabaseConfig>;
   }
 >()('gycc/lib/env.server/Service') {}
 
@@ -203,6 +238,7 @@ export const layer = Layer.effect(
     const bucket = yield* bucketConfig;
     const sendgrid = yield* sendgridConfig;
     const stripe = yield* stripeConfig;
+    const database = yield* databaseConfig;
 
     if (isProduction) {
       const mail = yield* mailConfigRequired;
@@ -212,11 +248,12 @@ export const layer = Layer.effect(
         sendgrid,
         stripe,
         bucket,
+        database,
       });
     }
 
     const mail = yield* Config.option(mailConfigRequired);
-    return Service.of({ isProduction, mail, sendgrid, stripe, bucket });
+    return Service.of({ isProduction, mail, sendgrid, stripe, bucket, database });
   }),
 );
 

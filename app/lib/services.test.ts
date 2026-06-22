@@ -246,6 +246,58 @@ describe('Env config', () => {
         BUCKET_REGION: 'us-east-1',
       }),
     ));
+
+  it.effect('leaves the database absent everywhere when DATABASE_URL is unset', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.database)).toBe(true);
+    }).pipe(provideEnv({ NODE_ENV: 'development' })));
+
+  it.effect('leaves the database absent in production when DATABASE_URL is unset', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(env.isProduction).toBe(true);
+      expect(Option.isNone(env.database)).toBe(true);
+    }).pipe(provideEnv(PROD_ENV)));
+
+  it.effect('resolves the database and redacts the connection URL', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isSome(env.database)).toBe(true);
+      if (Option.isSome(env.database)) {
+        expect(Redacted.value(env.database.value.url)).toBe('/data/order.db');
+      }
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        DATABASE_URL: '/data/order.db',
+      }),
+    ));
+
+  it.effect('treats a present-but-blank DATABASE_URL as absent (env.example placeholder)', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      // Mirrors a freshly-copied `.env.example`: DATABASE_URL is present but
+      // empty. It must collapse to `Option.none()` so the durable Order entity
+      // stays disabled, not a Some(...) of an empty string.
+      expect(Option.isNone(env.database)).toBe(true);
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        DATABASE_URL: '',
+      }),
+    ));
+
+  it.effect('treats a whitespace-only DATABASE_URL as absent', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.database)).toBe(true);
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        DATABASE_URL: '   \t',
+      }),
+    ));
 });
 
 describe('Mailer', () => {
