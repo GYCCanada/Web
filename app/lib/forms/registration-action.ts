@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import { Effect, Result, Schema } from 'effect';
+import { Clock, Effect, Option, Result } from 'effect';
 
 import { Content } from '../content.server';
+import { Env } from '../env.server';
 import { formValidationError } from '../effect/errors';
 import {
   type FormSuccess,
@@ -12,10 +13,13 @@ import {
 import { formatSchemaResult, parseSchema } from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
 import { Mailer } from '../mailer.server';
+import { Payment } from '../payment.server';
 import { Toast } from '../toast.server';
 
-import { definitionToSchema } from './decode';
 import type { SuccessToast } from './action';
+import type { RegistrationOrder } from './order';
+import { priceGroup } from './price';
+import { registrationShellSchema } from './registration-shell';
 import type { Submission } from './submission';
 import { Submissions } from './submissions.server';
 
@@ -92,21 +96,31 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
     const submissions = yield* Submissions.Service;
     const toast = yield* Toast;
 
+    const env = yield* Env.Service;
+    const payment = yield* Payment.Service;
+
     const definition = yield* content.getForm('registration');
 
     // The registrant-array shell is registration's own concern (registration-spec
     // §"Scope boundary"): the engine owns ONE registrant's graph, the route owns
-    // the `{ registrants: [...] }` envelope. Decoding the shell with the
-    // per-registrant codec keeps error paths at `registrants[n].<field>` — the
-    // conform field names the live form renders.
-    const registrantsSchema = Schema.Struct({
-      registrants: Schema.Array(definitionToSchema(definition)),
-    });
-
-    const decoded = parseSchema(registrantsSchema, submission.payload);
+    // the `{ registrants: [...] }` envelope — and, once a form authors a `party`
+    // section, the party block alongside it. `registrationShellSchema` (registrar
+    // plan Decision 2b.4 / Decision 7 step 0) decodes that envelope: it validates
+    // the chosen `party._tag` against the authored `billingMode.options`
+    // allow-list, decodes the `group`-arm nominated payer (name + required email),
+    // and drops blank non-leader registrant emails so an un-filled email decodes
+    // valid (2b.3). A definition with no `party` (legacy / contact / volunteer)
+    // decodes the today `{ registrants }` shell, group-implicit. Error paths stay
+    // at `registrants[n].<field>` / `party.payer.<field>` — the conform field
+    // names the live form renders.
+    const decoded = parseSchema(
+      registrationShellSchema(definition),
+      submission.payload,
+    );
     if (Result.isFailure(decoded)) {
       return yield* formValidationError(formatSchemaResult(decoded) ?? {});
     }
+    const shell = decoded.success;
 
     // Persist each registrant FIRST — one durable `submissions/registration/<id>.json`
     // object apiece, written + returned before any notification runs, so a `notify`
@@ -126,7 +140,7 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
       .update(JSON.stringify(submission.payload))
       .digest('hex');
     const stored: Array<Submission> = [];
-    for (const [index, registrant] of decoded.success.registrants.entries()) {
+    for (const [index, registrant] of shell.registrants.entries()) {
       stored.push(
         yield* submissions.persist(
           'registration',
@@ -134,6 +148,55 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
           `${requestFingerprint}:${index}`,
         ),
       );
+    }
+
+    // Group checkout (registrar plan Decision 2 / 2b / Decision 7), gated by the
+    // `Env.stripe` `None`-gate (Decision 8). When stripe is unconfigured the
+    // on-site payment path is INERT — registration persists + notifies + redirects
+    // exactly as the RegFox-era no-op did, so nothing changes until the gate flips.
+    // When configured AND the form authored a `party` section, the `group` arm
+    // freezes ONE order for the party sum and mints ONE PaymentIntent for it.
+    // (The `perRegistrant` cardinality is C7.5; this commit handles the `group`
+    // arm + the no-party legacy arm only.)
+    if (Option.isSome(env.stripe) && 'party' in shell) {
+      const party = shell.party;
+      if (party._tag === 'group') {
+        const now = yield* Clock.currentTimeMillis;
+        // The party sum, frozen under ONE `now` (Decision 6) — the amount the
+        // order records and the intent charges. `priceGroup` sums each
+        // registrant's price; an unpriced form sums to 0 (the gate is the only
+        // thing that makes the on-site path live, not pricing).
+        const amount = priceGroup(definition, shell.registrants, now);
+        const currency = env.stripe.value.currency;
+        // The receipt routes to the NOMINATED payer (possibly a non-attendee),
+        // frozen here so a later edit cannot retro-redirect the receipt (2b.6).
+        const receiptEmail = party.payer.email;
+        // One PaymentIntent per party, keyed off the request fingerprint + mode
+        // (Decision 2): a verbatim retry re-derives the same key ⇒ Stripe replays
+        // the first intent (no double-charge); a changed payload ⇒ a new checkout.
+        const idempotencyKey = `registration:checkout:${requestFingerprint}:group`;
+        const intent = yield* payment.createIntent(
+          amount,
+          currency,
+          receiptEmail,
+          { orderId: requestFingerprint, mode: 'group' },
+          idempotencyKey,
+        );
+        // Freeze the order record (Decision 7 step 3) — ONE order keyed by the
+        // fingerprint, `registrantIds` = the whole party, amount + receiptEmail
+        // frozen. The webhook (C8) reads it back to mark it `paid`.
+        const order: RegistrationOrder = {
+          orderId: requestFingerprint,
+          mode: 'group',
+          intentId: intent.intentId,
+          amount,
+          currency,
+          receiptEmail,
+          status: 'pending',
+          registrantIds: stored.map((registrant) => registrant.id),
+        };
+        yield* submissions.persistOrder('registration', order);
+      }
     }
 
     yield* config.notify(stored);

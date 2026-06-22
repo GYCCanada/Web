@@ -1,18 +1,21 @@
 import { describe, expect, it } from 'bun:test';
-import { DateTime, Effect, Layer, Option, Schema } from 'effect';
+import { ConfigProvider, DateTime, Effect, Layer, Option, Schema } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
 import { defaultRegistrationForm } from '../content/pages/defaults';
 import { formValidationError } from '../effect/errors';
 import {
+  type AppLayer,
   makeAppLayer,
   makeRequestRuntimeFromLayer,
   type RequestRuntime,
 } from '../effect/runtime';
 import type { RouteArgs } from '../effect/router-context';
+import { type CreateIntentCall, Payment } from '../payment.server';
 import { type ObjectHead, NotFound, Storage, StorageError } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
 
+import { RegistrationOrder } from './order';
 import { registrationAction } from './registration-action';
 import { submissionSchema } from './submission';
 import type { Submission } from './submission';
@@ -72,10 +75,28 @@ const exhibitorFields = (i: number): Record<string, string> => {
   );
 };
 
-/** A POST body carrying `count` valid exhibitor registrants. */
+/**
+ * The party payer fields the live form now POSTs (registrar plan C7 — the default
+ * `registration` form authors a GROUP-only `party` section, so the route-owned
+ * shell requires the nominated payer's name + email). The mode discriminant is
+ * left ABSENT so the shell's `withDecodingDefaultKey` fills the lone `group` mode.
+ */
+const partyPayerFields = {
+  'party.payer.name': 'Group Leader',
+  'party.payer.email': 'leader@example.com',
+} as const;
+
+/**
+ * A POST body carrying `count` valid exhibitor registrants plus the group party
+ * payer block (the shell decodes the party alongside the registrants).
+ */
 const registrantsBody = (count: number): URLSearchParams =>
   new URLSearchParams(
-    Object.assign({}, ...Array.from({ length: count }, (_, i) => exhibitorFields(i))),
+    Object.assign(
+      {},
+      ...Array.from({ length: count }, (_, i) => exhibitorFields(i)),
+      partyPayerFields,
+    ),
   );
 
 /**
@@ -340,5 +361,215 @@ describe('registrationAction', () => {
     const stored = await listRegistrations(runtime, args);
     expect(stored.length).toBe(2);
     expect(new Set(stored.map((entry) => entry.record.id)).size).toBe(2);
+  });
+});
+
+/**
+ * Registrar C7 — the GROUP checkout the action mints when the `Env.stripe` gate is
+ * `Some` and the form authored a `party` section. The default `registration` form
+ * authors a GROUP-only party (C7a), so a party submission decodes the group arm:
+ * the action freezes ONE order for the party sum and mints ONE PaymentIntent via
+ * `Payment` — proven end-to-end through `Payment.testLayer` (NO network). When the
+ * gate is `None` the on-site path is INERT (no intent, no order) — the RegFox-era
+ * no-op behaviour. Both halves are pinned here (the `--deep` blocker: the
+ * blank-non-leader-email drop is proven on the REAL rendered `email: ''` payload,
+ * not just the schema).
+ */
+const STRIPE_ENABLED_ENV: Record<string, string> = {
+  STRIPE_API_KEY: 'sk_test_123',
+  STRIPE_WEBHOOK_SECRET: 'whsec_456',
+  // STRIPE_CURRENCY unset ⇒ the `cad` default (the GYC settlement currency).
+};
+
+/**
+ * An app layer with the stripe gate forced `Some` (a ConfigProvider override, no
+ * process.env leak) and the supplied `Payment` layer — `Payment.testLayer` for a
+ * checkout assertion, or the real layer for the disabled case (gate `None`).
+ */
+const stripeEnabledLayer = (
+  storageLayer: Parameters<typeof makeAppLayer>[0],
+  paymentLayer: Layer.Layer<Payment.Service, never, never>,
+): AppLayer =>
+  makeAppLayer(storageLayer, paymentLayer).pipe(
+    Layer.provide(
+      ConfigProvider.layer(ConfigProvider.fromEnv({ env: STRIPE_ENABLED_ENV })),
+    ),
+  ) as AppLayer;
+
+/** Read every persisted order back through the shared runtime's bucket. */
+const listOrders = (runtime: RequestRuntime, args: RouteArgs) =>
+  runtime.run(
+    args,
+    Effect.gen(function* () {
+      const storage = yield* Storage.Service;
+      const listed = yield* storage.list('submissions/registration/orders/');
+      const decode = Schema.decodeUnknownEffect(
+        Schema.fromJsonString(RegistrationOrder),
+      );
+      return yield* Effect.forEach(listed, (entry) =>
+        Effect.gen(function* () {
+          const object = yield* storage.get(entry.key);
+          const text = yield* Effect.promise(() =>
+            new Response(object.stream).text(),
+          );
+          return { key: entry.key, order: yield* decode(text) };
+        }),
+      );
+    }),
+  );
+
+/** A group party POST body: `count` exhibitors (with per-registrant overrides) + the payer. */
+const groupBody = (
+  count: number,
+  registrantOver: (i: number) => Record<string, string> = () => ({}),
+): URLSearchParams =>
+  new URLSearchParams(
+    Object.assign(
+      {},
+      ...Array.from({ length: count }, (_, i) => {
+        const fields = exhibitorFields(i);
+        return Object.fromEntries(
+          Object.entries({ ...stripRegistrantPrefix(fields, i), ...registrantOver(i) }).map(
+            ([key, value]) => [`registrants[${i}].${key}`, value],
+          ),
+        );
+      }),
+      partyPayerFields,
+    ),
+  );
+
+/** Strip the `registrants[i].` prefix from a built field map (so overrides merge cleanly). */
+const stripRegistrantPrefix = (
+  fields: Record<string, string>,
+  i: number,
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(fields).map(([key, value]) => [
+      key.replace(`registrants[${i}].`, ''),
+      value,
+    ]),
+  );
+
+describe('registrationAction — group checkout (registrar C7)', () => {
+  it('mints ONE PaymentIntent + ONE frozen order for the party (stripe enabled)', async () => {
+    const calls: Array<CreateIntentCall> = [];
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({ notify: () => Effect.void, success });
+    const args = makeRegistrationArgs(runtime, groupBody(2));
+
+    await action(args).catch(() => {});
+
+    // (a) Exactly ONE create-intent call (the group: one intent for the party).
+    expect(calls.length).toBe(1);
+    const call = calls[0]!;
+    // The receipt routes to the NOMINATED payer (frozen), not a registrant.
+    expect(call.receiptEmail).toBe('leader@example.com');
+    expect(String(call.currency)).toBe('cad');
+    // The idempotency key is the request-fingerprint + mode (Decision 2) — a
+    // verbatim retry re-derives it ⇒ Stripe replays the first intent.
+    expect(call.idempotencyKey).toMatch(/^registration:checkout:[a-f0-9]+:group$/);
+    expect(call.metadata).toEqual(
+      expect.objectContaining({ mode: 'group' }),
+    );
+
+    // (b) Exactly ONE frozen order landed, keyed by the fingerprint, holding the
+    // whole party + the frozen amount/receipt.
+    const orders = await listOrders(runtime, args);
+    expect(orders.length).toBe(1);
+    const order = orders[0]!.order;
+    expect(order.mode).toBe('group');
+    expect(order.status).toBe('pending');
+    expect(order.receiptEmail).toBe('leader@example.com');
+    expect(order.registrantIds.length).toBe(2);
+    expect(order.intentId).toBe(`pi_test_${call.idempotencyKey}`);
+    // The order amount is the frozen Cents the intent charged.
+    expect(order.amount).toBe(call.amount);
+  });
+
+  it('a group submission with a blank non-leader registrant email SUCCEEDS end-to-end (2b.3)', async () => {
+    // The REAL rendered payload: registrant #1 POSTs `email: ''`. The shell drops
+    // it to absent so the optional-at-key email decodes valid — proven through the
+    // full action + parseSubmission path, not just the schema (the --deep blocker).
+    const calls: Array<CreateIntentCall> = [];
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({ notify: () => Effect.void, success });
+    const body = groupBody(2, (i): Record<string, string> =>
+      i === 1 ? { email: '' } : {},
+    );
+
+    let thrown: unknown;
+    try {
+      await action(makeRegistrationArgs(runtime, body));
+    } catch (error) {
+      thrown = error;
+    }
+    // It SUCCEEDED → the terminal redirect (a present-blank that still rejected
+    // would surface as a form error, no redirect).
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(302);
+    // And it still minted the group intent + order.
+    expect(calls.length).toBe(1);
+    const orders = await listOrders(runtime, makeRegistrationArgs(runtime, body));
+    expect(orders.length).toBe(1);
+  });
+
+  it('a group submission with a blank PAYER email FAILS (payer email required)', async () => {
+    const calls: Array<CreateIntentCall> = [];
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({ notify: () => Effect.void, success });
+    const body = new URLSearchParams(
+      Object.assign({}, exhibitorFields(0), {
+        'party.payer.name': 'Group Leader',
+        'party.payer.email': '',
+      }),
+    );
+    const result = await action(makeRegistrationArgs(runtime, body));
+
+    // A decode failure reports a form error — no redirect, no intent, no order.
+    expect(result.status).toBe('error');
+    expect(calls.length).toBe(0);
+  });
+
+  it('an empty party (zero registrants) FAILS before any checkout', async () => {
+    const calls: Array<CreateIntentCall> = [];
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({ notify: () => Effect.void, success });
+    const body = new URLSearchParams({ ...partyPayerFields });
+    const result = await action(makeRegistrationArgs(runtime, body));
+
+    expect(result.status).toBe('error');
+    expect(calls.length).toBe(0);
+  });
+
+  it('stripe DISABLED skips checkout — registration persists + redirects, no order', async () => {
+    // The gate is `None` (no STRIPE env in the default test process), so the real
+    // `Payment.layer` is wired but the action never calls it — the inert RegFox-era
+    // path: persist + notify + redirect, with NO order written.
+    const runtime = makeRequestRuntimeFromLayer(makeAppLayer(layerTest({})));
+    const action = registrationAction({ notify: () => Effect.void, success });
+    const args = makeRegistrationArgs(runtime, registrantsBody(2));
+
+    let thrown: unknown;
+    try {
+      await action(args);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(302);
+
+    // Registrants persisted, but NO order (the checkout path was skipped).
+    const stored = await listRegistrations(runtime, args);
+    expect(stored.length).toBe(2);
+    const orders = await listOrders(runtime, args);
+    expect(orders.length).toBe(0);
   });
 });

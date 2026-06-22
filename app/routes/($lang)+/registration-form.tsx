@@ -5,9 +5,9 @@ import { Form } from 'react-router';
 import dayjs from 'dayjs';
 
 import { FormProvider, useForm, useFormData } from '~/lib/conform';
-import { definitionToSchema } from '~/lib/forms/decode';
 import { FormDefinition } from '~/lib/forms/definition';
-import { useTranslate } from '~/lib/localization/context';
+import { registrationShellSchema } from '~/lib/forms/registration-shell';
+import { useLocale, useTranslate } from '~/lib/localization/context';
 import { Button } from '~/ui/button';
 import { Checkbox, Checkboxes, CheckboxGroup } from '~/ui/checkbox';
 import { FieldErrors } from '~/ui/field-error';
@@ -109,17 +109,40 @@ const RegistrantInput = Schema.Struct({
  * idiom this codebase already uses), NOT a re-declaration of the validation: every
  * issue the form shows is computed by the engine codec.
  */
+/**
+ * The party block's FORM-INPUT (encoded) field-name contract (registrar plan C7).
+ * The route-owned shell decodes `party.{_tag, payer.{name, email}}` alongside the
+ * registrants; the form renders the nominated-payer inputs (and, once ≥2 modes are
+ * authored in C7.5, the mode selector) keyed off these accessors. Like
+ * {@link RegistrantInput}, every leaf is the raw submitted string — the validation
+ * is the shell codec's, not this shape's. MANDATORY lockstep with the runtime
+ * shell (`defaultValue` below): a `party` in the runtime shell that is absent here
+ * would let the `as unknown as` cast silently hide the divergence.
+ */
+const PartyInput = Schema.Struct({
+  _tag: Schema.optional(Schema.Literals(['group', 'perRegistrant'])),
+  payer: Schema.optional(
+    Schema.Struct({
+      name: Schema.optional(Schema.String),
+      email: Schema.optional(Schema.String),
+    }),
+  ),
+});
+
 const RegistrationFormShape = Schema.Struct({
+  party: Schema.optional(PartyInput),
   registrants: Schema.mutable(Schema.Array(RegistrantInput)),
 });
 
 const makeRegistrationStandardSchema = (definition: FormDefinition) => {
-  const registrationSchema = Schema.Struct({
-    registrants: Schema.mutable(
-      Schema.Array(definitionToSchema(definition)),
-    ).annotateKey({ messageMissingKey: 'registration.form.type.required' }),
-  });
-  return Schema.toStandardSchemaV1(registrationSchema) as unknown as ReturnType<
+  // The client validates against the SAME route-owned party-aware shell the server
+  // decodes (registrar plan C7) — the party block + the registrant array in one
+  // codec — so a client-side validation matches the server's exactly (one shell,
+  // `derive-dont-sync`). A definition with no `party` decodes the legacy
+  // `{ registrants }` shell, group-implicit (contact/volunteer never reach here).
+  return Schema.toStandardSchemaV1(
+    registrationShellSchema(definition),
+  ) as unknown as ReturnType<
     typeof Schema.toStandardSchemaV1<typeof RegistrationFormShape>
   >;
 };
@@ -171,6 +194,19 @@ export const makeDefaultRegistrant = () => ({
 });
 
 /**
+ * The party block's initial form-input value (registrar plan C7) — the raw
+ * string/absent values conform's `defaultValue` consumes. The mode `_tag` is left
+ * absent (the shell's `withDecodingDefaultKey` fills the lone/first authored mode),
+ * and the nominated payer's name/email seed blank. MANDATORY lockstep with
+ * {@link PartyInput} + the render below: the render-parity test checks that every
+ * rendered party `name=` has a seed key here, exactly as it does for a registrant.
+ */
+export const makeDefaultParty = () => ({
+  _tag: undefined as string | undefined,
+  payer: { name: '', email: '' },
+});
+
+/**
  * Shared registration form, parameterized by conference `year`. The three
  * `{2024,2025,2026}/form` route modules render `<RegistrationForm year={…} />`;
  * previously they were byte-identical 688-line files differing only by the
@@ -205,6 +241,7 @@ export function RegistrationForm({
   actionData?: SubmissionResult<string[]> | null;
 }) {
   const translate = useTranslate();
+  const locale = useLocale();
 
   // The loader JSON crossed a boundary; re-decode it through `FormDefinition` so
   // the client codec is built from a branded definition (`boundary-discipline`),
@@ -226,12 +263,22 @@ export function RegistrationForm({
     shouldValidate: 'onSubmit',
     shouldRevalidate: 'onInput',
     defaultValue: {
+      // Seed the party block only for a party-offering form (registration); a
+      // no-`party` definition (legacy / contact / volunteer) seeds none, matching
+      // the legacy `{ registrants }` shell the client codec then validates against.
+      ...(definition.party ? { party: makeDefaultParty() } : {}),
       registrants: [...seedRegistrants],
     },
     lastResult: actionData,
   });
 
   const registrants = fields.registrants.getFieldList();
+  // The party block's accessors (registrar plan C7): the nominated-payer name +
+  // email inputs render from the CMS-authored `definition.party.*` Text, never
+  // route-static keys (Constraint 4). The mode SELECTOR is C7.5 (shown only when
+  // ≥2 modes are authored); C7 authors group-only, so only the payer block draws.
+  const party = definition.party;
+  const payerFieldset = fields.party.getFieldset().payer.getFieldset();
 
   // `/future` field metadata exposes no live `.value`; read the current `type`
   // and `dateOfBirth` for each registrant from the live form data instead. The
@@ -262,6 +309,25 @@ export function RegistrationForm({
     { fallback },
   );
 
+  // The "I'm paying" affordance (registrar plan C7, OQ3) reads each registrant's
+  // live name + email so the group payer block can copy a chosen registrant's
+  // contact into `party.payer` — a client-side convenience; the server still
+  // decodes + freezes `party.payer.{name,email}` from the payer inputs, no schema
+  // change. C7 copies the FIRST registrant.
+  const payerSourceNames = registrants.map((registrant) => {
+    const set = registrant.getFieldset();
+    return { name: set.name.name, email: set.email.name };
+  });
+  const payerSource = useFormData(
+    form.id,
+    (formData) =>
+      payerSourceNames.map((n) => ({
+        name: String(formData.get(n.name) ?? ''),
+        email: String(formData.get(n.email) ?? ''),
+      })),
+    { fallback: seedRegistrants.map(() => ({ name: '', email: '' })) },
+  );
+
   return (
     <Main className="gap-10 px-3 py-12 text-2xl md:px-16">
       <h1>{translate('registration.form.title', { year })}</h1>
@@ -271,6 +337,50 @@ export function RegistrationForm({
           className="flex flex-col gap-4"
           {...form.props}
         >
+          {/*
+            The CMS-authored party block (registrar plan C7). Rendered only for a
+            party-offering form (registration); the labels are the authored
+            `definition.party.*` Text projected to the active locale (NOT
+            route-static keys, Constraint 4). C7 authors GROUP-only, so the mode
+            selector is not shown (C7.5 shows it when ≥2 modes are authored); the
+            nominated-payer name + email always render for a group-offering form.
+            The "I'm paying" affordance copies the first registrant's name + email
+            into the payer inputs — a client-side convenience; the server still
+            decodes + freezes `party.payer.{name,email}` from these inputs.
+          */}
+          {party && party.payer ? (
+            <fieldset className="flex flex-col gap-4">
+              {party.intro ? <p>{party.intro[locale]}</p> : null}
+              <h2>{party.payer.label[locale]}</h2>
+              <TextField name={payerFieldset.name.name}>
+                <Label>{party.payer.nameField.label[locale]}</Label>
+                <TextField.Input type="text" />
+                <FieldErrors />
+              </TextField>
+              <TextField name={payerFieldset.email.name}>
+                <Label>{party.payer.emailField.label[locale]}</Label>
+                <TextField.Input type="text" />
+                <FieldErrors />
+              </TextField>
+              <div>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    intent.update({
+                      name: payerFieldset.name.name,
+                      value: payerSource[0]?.name ?? '',
+                    });
+                    intent.update({
+                      name: payerFieldset.email.name,
+                      value: payerSource[0]?.email ?? '',
+                    });
+                  }}
+                >
+                  {locale === 'fr' ? "C'est moi qui paie" : "I'm paying"}
+                </Button>
+              </div>
+            </fieldset>
+          ) : null}
           {registrants.map((registrant, index) => {
             const type = liveValues[index]?.type as 'attendee' | 'exhibitor';
 

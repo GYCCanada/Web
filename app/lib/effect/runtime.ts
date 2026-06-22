@@ -6,6 +6,12 @@ import { Content } from '~/lib/content.server';
 import { DraftEditor } from '~/lib/content/draft-editor.server';
 import { Submissions } from '~/lib/forms/submissions.server';
 import { Env } from '~/lib/env.server';
+import {
+  Payment,
+  PaymentDisabled,
+  PaymentError,
+  PaymentWebhookError,
+} from '~/lib/payment.server';
 import { Sendgrid, SendgridDisabled, SendgridError } from '~/lib/sendgrid.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
 import { NotFound, Storage, StorageError } from '~/lib/storage.server';
@@ -27,6 +33,7 @@ export type AppServices =
   | Content.Service
   | DraftEditor.Service
   | Submissions.Service
+  | Payment.Service
   | Auth.Service
   | Storage.Service
   | Toast;
@@ -36,6 +43,9 @@ export type AppError =
   | MailError
   | SendgridError
   | SendgridDisabled
+  | PaymentError
+  | PaymentWebhookError
+  | PaymentDisabled
   | AdminDisabled
   | Unauthorized
   | BadPassword
@@ -83,6 +93,12 @@ export type AppError =
  */
 export const makeAppLayer = (
   storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
+  // The `Payment` layer to wire (registrar plan C7). Production uses the real
+  // `Payment.layer` (gated by `Env.stripe`); a checkout test passes
+  // `Payment.testLayer({ calls })` so the group-checkout create-intent wiring is
+  // exercised end-to-end with NO network. Defaulted so every existing caller is
+  // unchanged.
+  paymentLayer: Layer.Layer<Payment.Service, never, Env.Service> = Payment.layer,
 ) => {
   const baseLayer = Layer.mergeAll(
     Mailer.layer,
@@ -91,10 +107,11 @@ export const makeAppLayer = (
     Content.layer,
     Auth.layer,
   ).pipe(Layer.provideMerge(storageLayer));
-  return Layer.mergeAll(DraftEditor.layer, Submissions.layer).pipe(
-    Layer.provideMerge(baseLayer),
-    Layer.provideMerge(Env.layer),
-  );
+  return Layer.mergeAll(
+    DraftEditor.layer,
+    Submissions.layer,
+    paymentLayer,
+  ).pipe(Layer.provideMerge(baseLayer), Layer.provideMerge(Env.layer));
 };
 
 /** The fully-composed app layer (its error channel is `Env.layer`'s `ConfigError`). */

@@ -8,6 +8,7 @@ import { FormDefinition } from '~/lib/forms/definition';
 import { LocalizationProvider } from '~/lib/localization/provider';
 import { root } from '~/lib/localization/translations';
 import {
+  makeDefaultParty,
   makeDefaultRegistrant,
   RegistrationForm,
 } from '~/routes/($lang)+/registration-form';
@@ -126,6 +127,15 @@ const renderedNames = (
   );
 };
 
+/**
+ * The party block's submit-`name`s the live form renders (registrar plan C7). The
+ * default `registration` form authors a GROUP-only `party` with a nominated payer,
+ * so the payer name + email inputs always render OUTSIDE the `registrants[n].`
+ * namespace; the mode selector is NOT rendered (group-only — C7.5 renders it when
+ * ≥2 modes are authored). These names extend the strict render-parity sets below.
+ */
+const partyNames = ['party.payer.name', 'party.payer.email'];
+
 describe('registration render-level field-name + default-value parity', () => {
   // RENDER parity: the LIVE form is rendered and its emitted submit-names are
   // asserted against the definition's graph — not an inlined hand-copied object.
@@ -143,6 +153,7 @@ describe('registration render-level field-name + default-value parity', () => {
     // discriminator, the common fields, and the exhibitor branch fields — each
     // prefixed `registrants[0].` by conform.
     const expected = new Set([
+      ...partyNames,
       'registrants[0]',
       `registrants[0].${defaultRegistrationForm.variant?.discriminator}`,
       ...collectNames(defaultRegistrationForm.fields, false).map(
@@ -197,6 +208,7 @@ describe('registration render-level field-name + default-value parity', () => {
       true,
     ).filter((name) => !name.startsWith('parent.'));
     const expected = new Set([
+      ...partyNames,
       'registrants[0]',
       `registrants[0].${defaultRegistrationForm.variant?.discriminator}`,
       ...collectNames(defaultRegistrationForm.fields, false).map(
@@ -329,6 +341,31 @@ describe('registration render-level field-name + default-value parity', () => {
       [...graphNames].some((name) => name.startsWith(`${leaf}.`));
     for (const leaf of collectDefaultLeaves(defaultRegistrant)) {
       expect({ leaf, known: isKnown(leaf) }).toEqual({ leaf, known: true });
+    }
+  });
+
+  // PARTY-SEED parity (registrar plan C7, `derive-dont-sync`): the form's REAL
+  // `makeDefaultParty` must seed a key for every party submit-`name` the form
+  // renders, exactly as `makeDefaultRegistrant` does for a registrant. The form
+  // keys its `name={payerFieldset.name.name}` / `name={payerFieldset.email.name}`
+  // accessors off this default, so a missing key is a missing/orphaned rendered
+  // party name (the same class of bug the registrant default guards).
+  test('every rendered party name resolves to a default-party key', () => {
+    const defaultParty = makeDefaultParty() as Record<string, unknown>;
+    for (const name of partyNames) {
+      // Drop the leading `party.` (the seed object IS the party value).
+      const segments = name.replace(/^party\./, '').split('.');
+      let cursor: unknown = defaultParty;
+      for (const segment of segments) {
+        expect({
+          name,
+          present:
+            cursor !== null &&
+            typeof cursor === 'object' &&
+            segment in (cursor as Record<string, unknown>),
+        }).toEqual({ name, present: true });
+        cursor = (cursor as Record<string, unknown>)[segment];
+      }
     }
   });
 

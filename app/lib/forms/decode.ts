@@ -69,8 +69,16 @@ type Encoded = Record<string, unknown>;
 // Leaf codecs — one per FieldKind, mirroring the hand-tuned annotation idiom
 // ---------------------------------------------------------------------------
 
-/** Required free-text: empty, absent, and non-string all emit `message`. */
-const requiredString = (message: MessageKey) =>
+/**
+ * Required free-text: empty, absent, and non-string all emit `message`.
+ *
+ * EXPORTED (registrar plan C7): the route-owned party shell
+ * (`registration-shell.ts`) is a new caller — it builds the `group`-arm payer's
+ * `name` codec from the authored `requiredMessage` with the same idiom the engine
+ * uses for a `requiredText` leaf, rather than re-declaring a parallel non-empty
+ * string codec (`derive-dont-sync`).
+ */
+export const requiredString = (message: MessageKey) =>
   Schema.String.annotate({ message })
     .check(Schema.isMinLength(1, { message }))
     .annotateKey({ messageMissingKey: message });
@@ -111,8 +119,15 @@ const optionalText = (message: MessageKey) =>
 const presentEmptyAllowedText = (message: MessageKey) =>
   Schema.String.annotate({ message }).annotateKey({ messageMissingKey: message });
 
-/** Required email: empty/absent emit `requiredMessage`, malformed emits `invalidMessage`. */
-const email = (requiredMessage: MessageKey, invalidMessage: MessageKey) =>
+/**
+ * Required email: empty/absent emit `requiredMessage`, malformed emits `invalidMessage`.
+ *
+ * EXPORTED (registrar plan C7): the route-owned party shell
+ * (`registration-shell.ts`) decodes the `group`-arm payer's required `email`
+ * through this very codec, so the nominated payer's address is validated by the
+ * SAME permissive-email shape every form `email` field uses (`derive-dont-sync`).
+ */
+export const email = (requiredMessage: MessageKey, invalidMessage: MessageKey) =>
   Schema.String.annotate({ message: invalidMessage })
     .check(
       Schema.isMinLength(1, { message: requiredMessage }),

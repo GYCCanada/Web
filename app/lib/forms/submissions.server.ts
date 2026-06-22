@@ -3,7 +3,7 @@ export * as Submissions from './submissions.server';
 import { Clock, Context, DateTime, Effect, Layer, Schema } from 'effect';
 
 import { Content } from '../content.server';
-import { type FormId, submissionKey } from '../content/pages/registry';
+import { type FormId, orderKey, submissionKey } from '../content/pages/registry';
 import {
   deterministicListItemId,
   IsoDate,
@@ -12,6 +12,7 @@ import {
 import { Storage, type StorageError } from '../storage.server';
 
 import type { DecodedForm } from './decode';
+import { RegistrationOrder } from './order';
 import { submissionSchema, type Submission } from './submission';
 
 /**
@@ -90,6 +91,21 @@ export class Service extends Context.Service<
       decoded: DecodedForm,
       idempotencyKey?: string,
     ) => Effect.Effect<Submission, StorageError>;
+    /**
+     * Persist one frozen `RegistrationOrder` as a durable bucket object at
+     * `submissions/<form>/orders/<orderId>.json` (`orderKey`) and return it
+     * (registrar plan Decision 2 / Decision 7 step 3). The order's `amount` +
+     * `receiptEmail` are already frozen by the caller at create-intent time; this
+     * is persistence ONLY. The write is content-addressed by the order's own
+     * `orderId` (the request fingerprint in `group`), so a verbatim checkout retry
+     * OVERWRITES the same object in place rather than minting a duplicate — the
+     * same idempotency discipline `persist` gives a registrant record. The webhook
+     * (C8) reads this record back to mark it `paid`.
+     */
+    readonly persistOrder: (
+      form: FormId,
+      order: RegistrationOrder,
+    ) => Effect.Effect<RegistrationOrder, StorageError>;
   }
 >()('gycc/lib/forms/submissions.server/Service') {}
 
@@ -148,7 +164,28 @@ export const layer = Layer.effect(
       return submission;
     });
 
-    return Service.of({ persist });
+    const persistOrder = Effect.fn('Submissions.persistOrder')(function* (
+      form: FormId,
+      order: RegistrationOrder,
+    ) {
+      // A frozen order ALWAYS re-encodes through its own (form-independent) codec;
+      // a failure here is an upstream bug (a hand-built order that never satisfied
+      // `RegistrationOrder`), so it dies rather than masquerading as a
+      // `StorageError`. The encode is the validation, exactly as `persist`'s is.
+      const json = yield* Schema.encodeUnknownEffect(
+        Schema.fromJsonString(RegistrationOrder),
+      )(order).pipe(Effect.orDie);
+
+      yield* storage.put(
+        orderKey(form, order.orderId),
+        json,
+        'application/json',
+      );
+
+      return order;
+    });
+
+    return Service.of({ persist, persistOrder });
   }),
 );
 
