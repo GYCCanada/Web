@@ -180,6 +180,47 @@ export class Service extends Context.Service<
       form: FormId,
       orderId: string,
     ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
+    /**
+     * Flip the order to `cancelled` AND stamp each registrant it names
+     * `cancelled` in lock-step, returning the order (the durable Order actor's
+     * operator/abandon `cancel` op, G5/G7). ONLY a `pending` order transitions —
+     * the same never-downgrade-a-terminal guard as {@link markOrderFailed}: a
+     * `paid`/`failed`/`expired`/`refunded` order is left untouched (and its
+     * registrants with it). `cancelled` is DISTINCT from `failed` (operator
+     * abandon vs Stripe `async_payment_failed`). Idempotent in the same shape: a
+     * re-flip of an already-`cancelled` order returns it unchanged and re-stamps
+     * each registrant byte-identically. Same failure channel.
+     */
+    readonly markOrderCancelled: (
+      form: FormId,
+      orderId: string,
+    ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
+    /**
+     * Flip the order to `expired` AND stamp each registrant it names `expired` in
+     * lock-step, returning the order (the deadline-sweep `expire` op, G7). ONLY a
+     * `pending` order transitions — a settled (`paid`) or otherwise-terminal
+     * order is never swept. Idempotent like {@link markOrderCancelled}.
+     */
+    readonly markOrderExpired: (
+      form: FormId,
+      orderId: string,
+    ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
+    /**
+     * Flip the order to `refunded` AND stamp each registrant it names `refunded`
+     * in lock-step, returning the order (the `refund` op, G7 — the only
+     * transition reachable FROM `paid`). ONLY a `paid` order transitions; a
+     * `pending`/`failed`/`expired`/`cancelled` order is left untouched (refunding
+     * an unsettled order is meaningless). The refund's calendar date
+     * (`refundedAt`) is FROZEN onto the order the instant it transitions and
+     * never re-stamped — so a re-flip on a LATER date re-reads it rather than the
+     * clock, and each registrant's `refundedAt` derives FROM the order's frozen
+     * stamp (`derive-dont-sync`), byte-identical on every replay. Same failure
+     * channel.
+     */
+    readonly markOrderRefunded: (
+      form: FormId,
+      orderId: string,
+    ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
   }
 >()('gycc/lib/forms/submissions.server/Service') {}
 
@@ -456,6 +497,118 @@ export const layer = Layer.effect(
       );
     });
 
+    const markOrderCancelled = Effect.fn('Submissions.markOrderCancelled')(
+      function* (form: FormId, orderId: string) {
+        // Only a `pending` order may be cancelled — a settled (`paid`) or
+        // otherwise-terminal order is never downgraded (the same guard shape as
+        // `markOrderFailed`). Each registrant is stamped `cancelled`, carrying the
+        // order link + its frozen amount/currency (nothing was collected, so no
+        // `paidAt`).
+        return yield* flipStatus(
+          form,
+          orderId,
+          'cancelled',
+          (current) => current === 'pending',
+          // A cancellation freezes no timestamp — there is nothing settled.
+          (order) =>
+            Effect.succeed({
+              ...order,
+              status: 'cancelled',
+            } satisfies RegistrationOrder),
+          (order) =>
+            Effect.succeed({
+              _tag: 'cancelled',
+              orderId: order.orderId,
+              mode: order.mode,
+              amount: order.amount,
+              currency: order.currency,
+            } satisfies PaymentState),
+        );
+      },
+    );
+
+    const markOrderExpired = Effect.fn('Submissions.markOrderExpired')(
+      function* (form: FormId, orderId: string) {
+        // Only a `pending` order may be swept to `expired` — a settled or
+        // otherwise-terminal order is never swept.
+        return yield* flipStatus(
+          form,
+          orderId,
+          'expired',
+          (current) => current === 'pending',
+          // Expiry freezes no timestamp.
+          (order) =>
+            Effect.succeed({
+              ...order,
+              status: 'expired',
+            } satisfies RegistrationOrder),
+          (order) =>
+            Effect.succeed({
+              _tag: 'expired',
+              orderId: order.orderId,
+              mode: order.mode,
+              amount: order.amount,
+              currency: order.currency,
+            } satisfies PaymentState),
+        );
+      },
+    );
+
+    const markOrderRefunded = Effect.fn('Submissions.markOrderRefunded')(
+      function* (form: FormId, orderId: string) {
+        // ONLY a `paid` order may be refunded — the single transition reachable
+        // FROM `paid`. A `pending`/`failed`/`expired`/`cancelled` order is left
+        // untouched (refunding an unsettled order is meaningless). The refund's
+        // calendar date is FROZEN onto the order the instant it transitions and
+        // never re-stamped; each registrant's `refundedAt` derives FROM it, so a
+        // re-flip on a LATER date rewrites byte-identical records.
+        return yield* flipStatus(
+          form,
+          orderId,
+          'refunded',
+          (current) => current === 'paid',
+          // Read the clock ONCE, on the real transition only — a re-flip re-reads
+          // the already-`refunded` order verbatim and never enters this branch,
+          // so `refundedAt` cannot drift across deliveries.
+          (order) =>
+            Effect.gen(function* () {
+              const now = yield* Clock.currentTimeMillis;
+              const refundedAt = yield* decodeIsoDate(isoDateString(now)).pipe(
+                Effect.orDie,
+              );
+              return {
+                ...order,
+                status: 'refunded',
+                refundedAt,
+              } satisfies RegistrationOrder;
+            }),
+          // Derive the registrant `refundedAt` FROM the order's frozen stamp
+          // (`derive-dont-sync`), never from the clock. The settled order always
+          // carries `refundedAt` (the transition froze it, and an already-
+          // `refunded` order was written with it), so a missing value is bucket
+          // corruption and dies rather than masquerading as an undated refund.
+          (order) =>
+            Effect.gen(function* () {
+              if (order.refundedAt === undefined) {
+                return yield* Effect.die(
+                  new Error(
+                    `refunded order ${order.orderId} has no frozen refundedAt`,
+                  ),
+                );
+              }
+              return {
+                _tag: 'refunded',
+                orderId: order.orderId,
+                mode: order.mode,
+                amount: order.amount,
+                currency: order.currency,
+                refundedAt: order.refundedAt,
+              } satisfies PaymentState;
+            }),
+        );
+      },
+    );
+
     return Service.of({
       persist,
       persistOrder,
@@ -463,6 +616,9 @@ export const layer = Layer.effect(
       getOrder: readOrder,
       markOrderPaid,
       markOrderFailed,
+      markOrderCancelled,
+      markOrderExpired,
+      markOrderRefunded,
     });
   }),
 );
