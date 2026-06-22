@@ -45,6 +45,11 @@ export default [
   // `/admin` index nests under the guard.
   route('admin/login', 'routes/admin/login.tsx'),
   route('admin/logout', 'routes/admin/logout.tsx'),
+  // The Stripe webhook (registrar plan C8) is a top-level, non-localized POST
+  // route OUTSIDE both the `:lang?` tree and the `/admin` guard layout: no
+  // middleware/loader runs ahead of it, so `request.text()` reads the RAW bytes
+  // Stripe signed (HMAC verification fails on any reserialized body).
+  route('api/stripe/webhook', 'routes/api.stripe-webhook.ts'),
   layout('routes/admin/_layout.tsx', [
     route('admin', 'routes/admin/_index.tsx'),
     route('admin/content', 'routes/admin/content.tsx'),
