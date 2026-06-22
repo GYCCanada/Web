@@ -243,6 +243,33 @@ describe('registrationShellSchema — perRegistrant arm + allow-list (C7.5)', ()
     });
     expect(Result.isFailure(result)).toBe(true);
   });
+
+  test('a SMUGGLED payer under perRegistrant FAILS decode (payer-absent is unrepresentable, plan :134)', () => {
+    // `Schema.Struct` would silently STRIP an unknown `payer` key, decoding the
+    // submission and dropping the payer — re-opening the impossible state. The
+    // `payer: optionalKey(Never)` guard hard-fails the instant a `payer` is
+    // PRESENT, so the boundary is enforced, not laundered.
+    const result = decode(defaultRegistrationForm, {
+      party: { _tag: 'perRegistrant', payer: payer() },
+      registrants: [exhibitor()],
+    });
+    expect(Result.isFailure(result)).toBe(true);
+  });
+
+  test('the normal NO-payer perRegistrant still decodes (absent payer stays valid)', () => {
+    const result = decode(defaultRegistrationForm, {
+      party: { _tag: 'perRegistrant' },
+      registrants: [exhibitor()],
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      const shell = result.success as Extract<
+        RegistrationShellDecoded,
+        { party: { _tag: 'perRegistrant' } }
+      >;
+      expect('payer' in shell.party).toBe(false);
+    }
+  });
 });
 
 describe('registrationShellSchema — no-party legacy arm', () => {

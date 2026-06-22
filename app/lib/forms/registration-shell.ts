@@ -322,8 +322,18 @@ export const registrationShellSchema = (
   // self-pays), and EVERY registrant email re-imposed (2b row (i)) — the blank
   // emails are NOT dropped here, the engine codec runs verbatim and the shell
   // filter requires presence on top.
+  //
+  // `payer: optionalKey(Never)` makes "payer absent in perRegistrant" the ONLY
+  // representable shape (plan Decision 2b.2(b), :134). Without the explicit
+  // `Never` key, `Schema.Struct` silently STRIPS an unknown `payer` — a smuggled
+  // `{ _tag: 'perRegistrant', payer: {…} }` would decode and drop the payer,
+  // re-opening the impossible state the tagged union exists to foreclose. `Never`
+  // hard-fails decode the instant a `payer` key is PRESENT; absence stays valid.
   const perRegistrantShell = Schema.Struct({
-    party: Schema.Struct({ _tag: Schema.tag('perRegistrant') }),
+    party: Schema.Struct({
+      _tag: Schema.tag('perRegistrant'),
+      payer: Schema.optionalKey(Schema.Never),
+    }),
     registrants: Schema.mutable(Schema.Array(registrant)),
   })
     .check(nonEmptyParty as never)
