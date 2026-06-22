@@ -98,11 +98,24 @@ export const SqlClientLive: Layer.Layer<
  * does NOT re-export `ShardingConfig` (so the runner storage uses the defaults),
  * but the SENDER side cannot borrow the storage's config — it must be provided
  * this layer independently (G6). Exporting the one definition here is what keeps
- * both sides in lockstep. Defaults today (no overrides) — the seam exists so a
- * future non-default shard count stays single-sourced.
+ * both sides in lockstep.
+ *
+ * ## Poll-interval tuning (Risk 3)
+ *
+ * The runner consumes the SQL mailbox by POLLING (`entityMessagePollInterval`),
+ * and encore's default is **10 seconds** — far too slow for the durable Order
+ * settlement, which is driven cross-runtime: the Stripe webhook (`AppRuntime`
+ * sender) `send`s `settle` and the long-lived runner (`ServerLive`) must consume
+ * it and write the `pending → paid` reply promptly (the webhook waits for the
+ * terminal reply within the request). A 10s mailbox poll would make every
+ * settlement lag up to ten seconds. We tighten `entityMessagePollInterval` to
+ * 250ms so the runner picks up a `send` within a couple hundred ms — the
+ * coordination is still durable (the SQL rows are the seam), just polled snappily.
+ * Single-sourced here so BOTH the runner and the sender share the identical
+ * config (the shard-parity invariant is unaffected — only the poll cadence moves).
  */
 export const ShardingConfigLive: Layer.Layer<ShardingConfig.ShardingConfig> =
-  ShardingConfig.layer();
+  ShardingConfig.layer({ entityMessagePollInterval: '250 millis' });
 
 /**
  * encore's SQL `MessageStorage` (`fromSqlClient` — provides BOTH the upstream
