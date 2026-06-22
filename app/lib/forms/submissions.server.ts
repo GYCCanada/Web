@@ -21,6 +21,7 @@ import { canTransition } from '../order/transitions';
 
 import type { DecodedForm } from './decode';
 import { RegistrationOrder } from './order';
+import { OrderConflict } from './order-conflict';
 import {
   type PaymentState,
   submissionSchema,
@@ -71,6 +72,20 @@ import {
  * a submission must never look like success.
  */
 
+/**
+ * The outcome of committing a registration resubmit through
+ * `createOrReuseOrder` (order-workflow round-2 --deep H1). A closed union so the
+ * action branches exhaustively: a `created` order is the only one the action
+ * stamps registrants `pending` + `arm`s; `reused` reuses the live pending order's
+ * replayed session WITHOUT restamping; `alreadyPaid` returns the existing
+ * success/receipt WITHOUT minting a session or restamping. `OrderConflict` (case
+ * d) is a failure, not an outcome.
+ */
+export type OrderCreateOutcome =
+  | { readonly _tag: 'created'; readonly order: RegistrationOrder }
+  | { readonly _tag: 'reused'; readonly order: RegistrationOrder }
+  | { readonly _tag: 'alreadyPaid'; readonly order: RegistrationOrder };
+
 /** Format a UTC millisecond instant as a `YYYY-MM-DD` calendar-date string. */
 const isoDateString = (millis: number): string =>
   DateTime.formatIso(DateTime.makeUnsafe(millis)).slice(0, 10);
@@ -118,6 +133,79 @@ export class Service extends Context.Service<
       form: FormId,
       order: RegistrationOrder,
     ) => Effect.Effect<RegistrationOrder, StorageError>;
+    /**
+     * Resolve the order SLOT a same-payload registration resubmit must land on
+     * (order-workflow round-2 --deep H1). The deterministic `baseOrderId` (the
+     * request fingerprint, possibly `:index`) is stable across a verbatim
+     * resubmit, so a naive `persistOrder` at that key would silently OVERWRITE
+     * whatever order already lives there — including an already-PAID order
+     * (restamping its registrants `pending`, the F1 resurrection class through
+     * the CREATE path) or a non-paid TERMINAL (cancelled/expired/refunded/failed)
+     * the user is legitimately re-registering after.
+     *
+     * This reads the order(s) at `baseOrderId` FIRST and returns the slot the
+     * resubmit should use, WITHOUT writing anything:
+     *
+     *   - the LIVE order at `baseOrderId` is `pending` or `paid` ⇒ that
+     *     generation is still the active one; the caller reuses it (case (b)
+     *     pending reuse / case (a) already-paid). `existing` is `Some(order)`,
+     *     `orderId` is `baseOrderId`.
+     *   - the order at `baseOrderId` is a non-paid TERMINAL (case (c)) ⇒ it is a
+     *     DEAD order the user is re-registering past. A new pending must NOT
+     *     overwrite it, and it cannot reuse the same key, so this walks to the
+     *     NEXT free generation (`baseOrderId#g1`, `#g2`, …) — the lowest
+     *     generation whose slot is absent OR live — and returns THAT as the fresh
+     *     `orderId` (`existing` `None`). Deterministic: a verbatim resubmit
+     *     re-walks the same dead terminals to the same generation, so it
+     *     idempotently lands on the same fresh slot (no runaway generations).
+     *   - no order at `baseOrderId` at all ⇒ a first submission; `orderId` is
+     *     `baseOrderId`, `existing` `None`.
+     *
+     * The caller mints its Checkout session keyed off the RETURNED `orderId` (so
+     * a fresh generation gets a fresh session, and a reuse replays the same one)
+     * and then commits through {@link createOrReuseOrder}.
+     */
+    readonly resolveOrderSlot: (
+      form: FormId,
+      baseOrderId: string,
+    ) => Effect.Effect<
+      { readonly orderId: string; readonly existing: Option.Option<RegistrationOrder> },
+      StorageError
+    >;
+    /**
+     * Commit a registration resubmit against the slot {@link resolveOrderSlot}
+     * resolved, implementing the CONFIRMED resubmit UX (order-workflow round-2
+     * --deep H1). The caller passes the freshly-built `proposed` order (carrying
+     * the resolved `orderId` + the just-minted `sessionId`); this re-reads the
+     * order at `proposed.orderId` to decide:
+     *
+     *   - absent ⇒ write `proposed` as a fresh `pending` order; outcome
+     *     `{ _tag: 'created' }`. The caller stamps registrants `pending` + arms.
+     *   - existing `paid` ⇒ do NOT overwrite, do NOT restamp; outcome
+     *     `{ _tag: 'alreadyPaid', order }` carrying the EXISTING paid order. The
+     *     caller returns the existing success/receipt (case (a)).
+     *   - existing `pending` whose frozen fields MATCH `proposed`
+     *     (amount/currency/receiptEmail/mode/registrantIds) ⇒ idempotent retry;
+     *     do NOT overwrite, do NOT restamp; outcome `{ _tag: 'reused', order }`
+     *     carrying the EXISTING order (case (b)). The caller reuses the replayed
+     *     session.
+     *   - existing `pending` whose frozen fields CONFLICT ⇒ fail with
+     *     {@link OrderConflict} (case (d)).
+     *   - existing non-paid TERMINAL ⇒ this is unreachable on the happy path
+     *     ({@link resolveOrderSlot} already walked past a dead terminal to a fresh
+     *     generation), but if a terminal somehow lands here it is treated as a
+     *     hard guard violation and FAILS `OrderConflict` rather than overwriting —
+     *     NEVER restamp a terminal order back to `pending`.
+     *
+     * The write is a single `persistOrder`; a `paid`/`reused` outcome performs NO
+     * write at all (byte-identical idempotent resubmit). This is the CREATE-path
+     * analog of the `markOrder*` `canTransition` guards (F1) — the resubmit can
+     * never resurrect a terminal nor restamp a settled order.
+     */
+    readonly createOrReuseOrder: (
+      form: FormId,
+      proposed: RegistrationOrder,
+    ) => Effect.Effect<OrderCreateOutcome, StorageError | OrderConflict>;
     /**
      * Stamp a `PaymentState` onto an already-persisted registrant `Submission`
      * (`submissions/<form>/<id>.json`) and return the updated record. Re-reads the
@@ -287,7 +375,28 @@ export const layer = Layer.effect(
         Effect.orDie,
       );
 
-      const submission: Submission = { id, form, submittedAt, payload: decoded };
+      // PRESERVE an already-stamped payment lifecycle on an idempotent overwrite
+      // (order-workflow round-2 --deep H1). With an `idempotencyKey` a verbatim
+      // resubmit re-derives the SAME id and OVERWRITES the existing record — but
+      // the order/webhook flow may have already stamped that registrant
+      // `pending`/`paid`/… (`setRegistrantPayment`). A naive overwrite would write
+      // a fresh record with NO `payment`, silently WIPING the paid stamp (the
+      // restamp hazard H1 closes on the order side, mirrored here on the registrant
+      // side). So a keyed persist carries the existing record's `payment` forward;
+      // a keyless persist (single-record forms) has no prior record to preserve.
+      const existingPayment: PaymentState | undefined =
+        idempotencyKey === undefined
+          ? undefined
+          : yield* readSubmissionOption(form, id).pipe(
+              Effect.map((record) =>
+                Option.isSome(record) ? record.value.payment : undefined,
+              ),
+            );
+
+      const submission: Submission =
+        existingPayment === undefined
+          ? { id, form, submittedAt, payload: decoded }
+          : { id, form, submittedAt, payload: decoded, payment: existingPayment };
 
       // A decoded `Submission` ALWAYS re-encodes through its derived codec; a
       // failure here is an upstream bug (a `decoded` that never came from
@@ -324,6 +433,19 @@ export const layer = Layer.effect(
         text,
       ).pipe(Effect.orDie);
     });
+
+    // `readSubmission`'s Option flavour: a missing record is a benign absence
+    // (`None`), not a `NotFound` — `persist` uses it to discover whether an
+    // idempotent overwrite has a prior record whose `payment` lifecycle must be
+    // carried forward (H1). A real `StorageError` still propagates.
+    const readSubmissionOption = Effect.fn('Submissions.readSubmissionOption')(
+      function* (form: FormId, id: ListItemId) {
+        return yield* readSubmission(form, id).pipe(
+          Effect.map(Option.some<Submission>),
+          Effect.catchTag('Storage.NotFound', () => Effect.succeedNone),
+        );
+      },
+    );
 
     const setRegistrantPayment = Effect.fn('Submissions.setRegistrantPayment')(
       function* (form: FormId, id: ListItemId, payment: PaymentState) {
@@ -384,6 +506,127 @@ export const layer = Layer.effect(
         Schema.fromJsonString(RegistrationOrder),
       )(text).pipe(Effect.orDie);
     });
+
+    // `readOrder`'s Option flavour for the resubmit guard: a missing order is a
+    // benign absence (`None`), not a user-facing `NotFound` — `resolveOrderSlot`
+    // probes generations expecting most to be absent. A real `StorageError` (a
+    // bucket fault) still propagates; only the `NotFound` is folded to `None`.
+    const readOrderOption = Effect.fn('Submissions.readOrderOption')(function* (
+      form: FormId,
+      orderId: string,
+    ) {
+      return yield* readOrder(form, orderId).pipe(
+        Effect.map(Option.some<RegistrationOrder>),
+        Effect.catchTag('Storage.NotFound', () => Effect.succeedNone),
+      );
+    });
+
+    // A non-paid TERMINAL order is a DEAD slot the resubmit must walk past
+    // (cancelled/expired/refunded/failed). `pending` is live (reuse), `paid` is
+    // live-and-settled (return the receipt) — neither is "dead". The transition
+    // table is the source of truth for terminality, but the resubmit's branch is
+    // status-shaped (live-pending / live-paid / dead-terminal), so it reads the
+    // status directly here rather than `canTransition` (which answers a different
+    // question — "may from→to flip").
+    const isDeadTerminal = (status: RegistrationOrder['status']): boolean =>
+      status === 'cancelled' ||
+      status === 'expired' ||
+      status === 'refunded' ||
+      status === 'failed';
+
+    // Resolve the generation a resubmit lands on (H1 case (c)). Walk
+    // `baseOrderId`, `baseOrderId#g1`, `#g2`, … until the slot is absent OR live
+    // (pending/paid): a dead terminal at a generation means the user re-registered
+    // past it, so the next generation is the fresh slot. Deterministic — a
+    // verbatim resubmit re-walks the same dead terminals to the same generation,
+    // so it never runs away minting new generations. The cap is a safety bound
+    // (a real submission re-registering hundreds of times is pathological); it
+    // dies loudly rather than looping unbounded.
+    const generationOrderId = (baseOrderId: string, generation: number): string =>
+      generation === 0 ? baseOrderId : `${baseOrderId}#g${generation}`;
+    const MAX_GENERATIONS = 1000;
+    const resolveOrderSlot = Effect.fn('Submissions.resolveOrderSlot')(
+      function* (form: FormId, baseOrderId: string) {
+        for (let generation = 0; generation < MAX_GENERATIONS; generation += 1) {
+          const orderId = generationOrderId(baseOrderId, generation);
+          const existing = yield* readOrderOption(form, orderId);
+          // Absent ⇒ a fresh slot at this generation.
+          if (Option.isNone(existing)) {
+            return { orderId, existing: Option.none<RegistrationOrder>() };
+          }
+          // Live (pending/paid) ⇒ this generation is the active one; reuse it.
+          if (!isDeadTerminal(existing.value.status)) {
+            return { orderId, existing };
+          }
+          // Dead terminal ⇒ walk to the next generation.
+        }
+        return yield* Effect.die(
+          new Error(
+            `resolveOrderSlot exhausted ${MAX_GENERATIONS} generations for ${baseOrderId}`,
+          ),
+        );
+      },
+    );
+
+    // Compare the frozen fields a resubmit must agree on with a live `pending`
+    // order to be an idempotent retry (H1 case (b) vs (d)). The session id is
+    // DELIBERATELY excluded: a verbatim resubmit replays the SAME Stripe session
+    // (idempotency key), so a matching resubmit re-mints the same `sessionId`, but
+    // the equality that decides reuse-vs-conflict is the MONEY + receipt routing
+    // (amount/currency/receiptEmail/mode) and which registrants the order pays for
+    // — those are what must never be silently overwritten. Returns the first
+    // disagreeing field name, or `undefined` when every frozen field matches.
+    const conflictReason = (
+      existing: RegistrationOrder,
+      proposed: RegistrationOrder,
+    ): string | undefined => {
+      if (existing.mode !== proposed.mode) return 'mode';
+      if (existing.amount !== proposed.amount) return 'amount';
+      if (existing.currency !== proposed.currency) return 'currency';
+      if (existing.receiptEmail !== proposed.receiptEmail) return 'receiptEmail';
+      if (
+        existing.registrantIds.length !== proposed.registrantIds.length ||
+        existing.registrantIds.some((id, i) => id !== proposed.registrantIds[i])
+      ) {
+        return 'registrantIds';
+      }
+      return undefined;
+    };
+
+    const createOrReuseOrder = Effect.fn('Submissions.createOrReuseOrder')(
+      function* (form: FormId, proposed: RegistrationOrder) {
+        const existing = yield* readOrderOption(form, proposed.orderId);
+        // No order at this slot ⇒ write the fresh `pending` order.
+        if (Option.isNone(existing)) {
+          const order = yield* persistOrder(form, proposed);
+          return { _tag: 'created', order } satisfies OrderCreateOutcome;
+        }
+        const current = existing.value;
+        // Already PAID (case a) ⇒ return the existing receipt; NEVER overwrite or
+        // restamp. The action skips the session + the registrant restamp.
+        if (current.status === 'paid') {
+          return { _tag: 'alreadyPaid', order: current } satisfies OrderCreateOutcome;
+        }
+        // A non-paid TERMINAL must never reach here — `resolveOrderSlot` already
+        // walked past it to a fresh generation. If one does (a caller that bypassed
+        // the slot resolver), fail rather than overwrite it back to `pending`.
+        if (isDeadTerminal(current.status)) {
+          return yield* new OrderConflict({
+            orderId: proposed.orderId,
+            reason: `terminal order (${current.status}) cannot be reused`,
+          });
+        }
+        // Live `pending`: idempotent retry iff the frozen fields match (case b);
+        // a fingerprint collision with disagreeing fields fails explicitly (case
+        // d). Either way the existing order is NOT overwritten and its registrants
+        // are NOT restamped.
+        const reason = conflictReason(current, proposed);
+        if (reason !== undefined) {
+          return yield* new OrderConflict({ orderId: proposed.orderId, reason });
+        }
+        return { _tag: 'reused', order: current } satisfies OrderCreateOutcome;
+      },
+    );
 
     // List every frozen order under `ordersPrefix(form)` and decode each. The
     // sweep (G9) reads this to find pending orders past their deadline. A stored
@@ -684,6 +927,8 @@ export const layer = Layer.effect(
     return Service.of({
       persist,
       persistOrder,
+      resolveOrderSlot,
+      createOrReuseOrder,
       setRegistrantPayment,
       getOrder: readOrder,
       listOrders,

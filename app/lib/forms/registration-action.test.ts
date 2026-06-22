@@ -167,7 +167,14 @@ const listRegistrations = (runtime: RequestRuntime, args: RouteArgs) =>
     args,
     Effect.gen(function* () {
       const storage = yield* Storage.Service;
-      const listed = yield* storage.list('submissions/registration/');
+      // Registrant submissions sit at `submissions/registration/<id>.json`; the
+      // frozen ORDERS nest one level UNDER at `submissions/registration/orders/`.
+      // The shared `list` prefix returns BOTH, so the order keys are filtered out
+      // here (they decode as orders, not submissions — the real registrar reads
+      // them through `listOrders`).
+      const listed = (
+        yield* storage.list('submissions/registration/')
+      ).filter((entry) => !entry.key.startsWith('submissions/registration/orders/'));
       const decode = Schema.decodeUnknownEffect(
         Schema.fromJsonString(submissionSchema(defaultRegistrationForm)),
       );
@@ -837,8 +844,12 @@ describe('registrationAction — perRegistrant checkout (registrar C7.5)', () =>
       a.idempotencyKey.localeCompare(b.idempotencyKey),
     );
     byKey.forEach((call, index) => {
+      // The idempotency key is derived from the RESOLVED orderId
+      // (`<fingerprint>:<index>`) + mode (order-workflow round-2 --deep H1), so a
+      // fresh generation after a dead terminal would key a new session; a verbatim
+      // resubmit replays the same per-registrant session.
       expect(call.idempotencyKey).toMatch(
-        new RegExp(`^registration:checkout:[a-f0-9]+:perRegistrant:${index}$`),
+        new RegExp(`^registration:checkout:[a-f0-9]+:${index}:perRegistrant$`),
       );
       expect(call.receiptEmail).toBe(`booth${index}@example.com`);
       expect(call.metadata).toEqual(
@@ -1115,5 +1126,238 @@ describe('registrationAction — durable Order arm send (order-workflow G7.1)', 
     const { orders, armTags } = await runActionAndAwaitArms(groupBody(2), {});
     expect(orders.length).toBe(0);
     expect(armTags).toEqual([]);
+  });
+});
+
+/**
+ * order-workflow round-2 --deep H1 — the GUARDED order create/reuse on a
+ * same-payload registration resubmit. A verbatim resubmit derives the SAME
+ * deterministic `orderId` (the request fingerprint), so a naive
+ * `persistOrder` would silently OVERWRITE whatever order already lives there —
+ * restamping an already-PAID order's registrants back to `pending` (the F1
+ * resurrection class through the CREATE path), or resurrecting a non-paid
+ * TERMINAL order. These pin the CONFIRMED resubmit UX end-to-end through the real
+ * action over a PERSISTENT shared bucket (so the second submit reads what the
+ * first wrote):
+ *   (a) resubmit after PAID  ⇒ existing receipt, NO new session, order stays
+ *       paid, registrants NOT restamped;
+ *   (b) resubmit while PENDING ⇒ replays the same session, NO restamp;
+ *   (c) resubmit after a non-paid TERMINAL ⇒ a FRESH pending order (new
+ *       generation) is allowed — the user legitimately re-registers;
+ *   (d) a live PENDING whose frozen fields CONFLICT ⇒ explicit failure.
+ */
+
+/** A single-registrant priced GROUP body (the simplest order to drive). */
+const oneRegistrantGroupBody = (): URLSearchParams => groupBody(1);
+
+/**
+ * Drive a registration action over the SAME runtime/bucket the test holds, and
+ * return the thrown `Response` (the redirect) or the `FormResult` (an error
+ * report). The action's terminal `toast.redirect`/Stripe `redirect` throws a
+ * mapped `Response`; a validation failure resolves to a `FormResult`.
+ */
+const driveAction = async (
+  runtime: RequestRuntime,
+  action: ReturnType<typeof registrationAction>,
+  body: URLSearchParams,
+): Promise<Response | Awaited<ReturnType<ReturnType<typeof registrationAction>>>> => {
+  try {
+    return await action(makeRegistrationArgs(runtime, body));
+  } catch (error) {
+    if (error instanceof Response) return error;
+    throw error;
+  }
+};
+
+describe('registrationAction — guarded order create/reuse on resubmit (H1)', () => {
+  it('(a) resubmit after PAID returns the existing receipt — no new session, order stays paid, registrants NOT restamped', async () => {
+    const calls: Array<CreateCheckoutSessionCall> = [];
+    // ONE shared bucket across both submits + the status mutation.
+    const storage = sharedStorageLayer(pricedRegistrationObject());
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(storage, Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
+    const body = oneRegistrantGroupBody();
+
+    // First submit: one pending order + one session.
+    const first = await driveAction(runtime, action, body);
+    expect(first).toBeInstanceOf(Response);
+    expect((first as Response).status).toBe(303);
+    expect(calls.length).toBe(1);
+    const args = makeRegistrationArgs(runtime, body);
+    const order = (await listOrders(runtime, args))[0]!.order;
+
+    // Mark it PAID through the bucket authority (the webhook's reconcile).
+    await runtime.run(
+      args,
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        yield* submissions.markOrderPaid('registration', order.orderId);
+      }),
+    );
+    const paidRegistrants = await listRegistrations(runtime, args);
+    expect(paidRegistrants[0]?.record.payment?._tag).toBe('paid');
+
+    // Resubmit the SAME payload: the order is paid, so the action returns the
+    // existing success/receipt — NO new Stripe session, the order stays paid,
+    // and the registrant is NOT restamped back to pending.
+    const second = await driveAction(runtime, action, body);
+    expect(second).toBeInstanceOf(Response);
+    // Lands on the success TOAST (302 to the form), not a Stripe checkout (303).
+    expect((second as Response).status).toBe(302);
+    expect((second as Response).headers.get('location')).toBe('/2026/form');
+    expect((second as Response).headers.get('location')).not.toContain(
+      'checkout.stripe.test',
+    );
+    // No SECOND create-session call (no re-charge).
+    expect(calls.length).toBe(1);
+    // Still exactly ONE order, still `paid` (never overwritten to pending).
+    const ordersAfter = await listOrders(runtime, args);
+    expect(ordersAfter.length).toBe(1);
+    expect(ordersAfter[0]!.order.status).toBe('paid');
+    // The registrant kept its `paid` stamp — NOT restamped to pending.
+    const registrantsAfter = await listRegistrations(runtime, args);
+    expect(registrantsAfter[0]?.record.payment?._tag).toBe('paid');
+  });
+
+  it('(b) resubmit while PENDING reuses the same checkout — order not overwritten, registrants not restamped', async () => {
+    const calls: Array<CreateCheckoutSessionCall> = [];
+    const storage = sharedStorageLayer(pricedRegistrationObject());
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(storage, Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
+    const body = oneRegistrantGroupBody();
+    const args = makeRegistrationArgs(runtime, body);
+
+    // First submit: pending order + session.
+    const first = await driveAction(runtime, action, body);
+    expect((first as Response).status).toBe(303);
+    expect(calls.length).toBe(1);
+    const firstOrder = (await listOrders(runtime, args))[0]!.order;
+    const firstUrl = (first as Response).headers.get('location');
+
+    // Resubmit the SAME payload while still pending: Stripe replays the SAME
+    // session (idempotency key), so the visitor is redirected to the same hosted
+    // url; the order is NOT overwritten (same orderId, same sessionId), and there
+    // is still exactly ONE order.
+    const second = await driveAction(runtime, action, body);
+    expect((second as Response).status).toBe(303);
+    expect((second as Response).headers.get('location')).toBe(firstUrl);
+    // The Payment testLayer is idempotency-keyed, so a verbatim resubmit does NOT
+    // double the create-session calls beyond the replayed one.
+    const ordersAfter = await listOrders(runtime, args);
+    expect(ordersAfter.length).toBe(1);
+    expect(ordersAfter[0]!.order.orderId).toBe(firstOrder.orderId);
+    expect(ordersAfter[0]!.order.sessionId).toBe(firstOrder.sessionId);
+    expect(ordersAfter[0]!.order.status).toBe('pending');
+  });
+
+  it('(c) resubmit after a non-paid TERMINAL (expired) mints a FRESH pending order at a new generation — the dead order is left untouched', async () => {
+    const calls: Array<CreateCheckoutSessionCall> = [];
+    const storage = sharedStorageLayer(pricedRegistrationObject());
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(storage, Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
+    const body = oneRegistrantGroupBody();
+    const args = makeRegistrationArgs(runtime, body);
+
+    // First submit → pending order. Expire it (the deadline sweep / abandon).
+    await driveAction(runtime, action, body);
+    const deadOrder = (await listOrders(runtime, args))[0]!.order;
+    await runtime.run(
+      args,
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        yield* submissions.markOrderExpired('registration', deadOrder.orderId);
+      }),
+    );
+    const afterExpire = await listOrders(runtime, args);
+    expect(afterExpire.length).toBe(1);
+    expect(afterExpire[0]!.order.status).toBe('expired');
+
+    // Resubmit the SAME payload: the user is legitimately re-registering past a
+    // dead order, so a FRESH pending order is minted at a NEW generation — the
+    // expired order is NEVER overwritten back to pending.
+    const second = await driveAction(runtime, action, body);
+    expect((second as Response).status).toBe(303);
+    const ordersAfter = await listOrders(runtime, args);
+    // TWO orders now: the dead expired one (untouched) + a fresh pending one.
+    expect(ordersAfter.length).toBe(2);
+    const byStatus = Object.fromEntries(
+      ordersAfter.map((entry) => [entry.order.status, entry.order]),
+    );
+    expect(byStatus['expired']?.orderId).toBe(deadOrder.orderId);
+    expect(byStatus['pending']).toBeDefined();
+    // The fresh order is a DISTINCT generation key, not the dead one.
+    expect(byStatus['pending']?.orderId).not.toBe(deadOrder.orderId);
+    expect(byStatus['pending']?.orderId.startsWith(deadOrder.orderId)).toBe(true);
+  });
+
+  it('(d) a live PENDING order whose frozen fields CONFLICT fails explicitly — the in-flight order is NOT overwritten', async () => {
+    const calls: Array<CreateCheckoutSessionCall> = [];
+    const storage = sharedStorageLayer(pricedRegistrationObject());
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(storage, Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
+    const body = oneRegistrantGroupBody();
+    const args = makeRegistrationArgs(runtime, body);
+
+    // First submit → a live pending order. Mutate its frozen `amount` on the
+    // bucket to simulate a fingerprint COLLISION: a different order's frozen
+    // fields now live at the orderId the resubmit derives.
+    await driveAction(runtime, action, body);
+    const order = (await listOrders(runtime, args))[0]!.order;
+    const tamperedReceipt = 'collision@example.com';
+    await runtime.run(
+      args,
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        yield* submissions.persistOrder('registration', {
+          ...order,
+          receiptEmail: tamperedReceipt,
+        });
+      }),
+    );
+
+    // Resubmit the SAME payload: the live pending order's frozen receiptEmail now
+    // disagrees with the proposed order, so the guard FAILS explicitly rather
+    // than overwriting the in-flight order's receipt routing.
+    const result = await driveAction(runtime, action, body);
+    // A form-level validation error report (not a redirect Response).
+    expect(result).not.toBeInstanceOf(Response);
+    const formResult = result as Exclude<typeof result, Response>;
+    expect(formResult.status).toBe('error');
+    expect(formResult.result.error?.formErrors?.[0]).toContain(
+      'registration.checkout.conflict:receiptEmail',
+    );
+    // The tampered order was NOT overwritten back to the proposed receipt.
+    const ordersAfter = await listOrders(runtime, args);
+    expect(ordersAfter.length).toBe(1);
+    expect(ordersAfter[0]!.order.receiptEmail).toBe(tamperedReceipt);
+    expect(ordersAfter[0]!.order.status).toBe('pending');
   });
 });

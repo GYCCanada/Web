@@ -20,6 +20,7 @@ import { Toast } from '../toast.server';
 
 import type { SuccessToast } from './action';
 import type { RegistrationOrder } from './order';
+import { OrderConflict } from './order-conflict';
 import { priceGroup, priceRegistrant } from './price';
 import { registrationShellSchema } from './registration-shell';
 import type { Submission } from './submission';
@@ -281,6 +282,12 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
       // we redirect the visitor to it so they begin paying. perRegistrant never
       // sets this — it cannot redirect (N sessions, one browser), it mails instead.
       let groupSessionUrl: string | undefined;
+      // A same-payload group resubmit whose order is ALREADY paid (H1 case a) —
+      // no new session is minted, the registrants are NOT restamped, and the
+      // visitor lands on the existing success/receipt toast (NOT a Stripe url, the
+      // order is settled). Distinct from `groupSessionUrl` (a live pending session
+      // to pay) so the handoff below can tell "go pay" from "already paid".
+      let groupAlreadyPaid = false;
       // The perRegistrant payment links minted this submission, one per registrant
       // session. After the loop persists every session+order `pending`, each
       // registrant is MAILED their own hosted `url` (round-2 --deep BLOCKER:
@@ -305,52 +312,98 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
           // The receipt routes to the NOMINATED payer (possibly a non-attendee),
           // frozen here so a later edit cannot retro-redirect the receipt (2b.6).
           const receiptEmail = party.payer.email;
-          // One Checkout Session per party, keyed off the request fingerprint + mode
-          // (Decision 2): a verbatim retry re-derives the same key ⇒ Stripe replays
-          // the first session (no second checkout); a changed payload ⇒ a new one.
-          const idempotencyKey = `registration:checkout:${requestFingerprint}:group`;
-          const session = yield* payment.createCheckoutSession({
-            amount,
-            currency,
-            receiptEmail,
-            productName,
-            successUrl,
-            cancelUrl,
-            metadata: { orderId: requestFingerprint, mode: 'group' },
-            idempotencyKey,
-          });
-          groupSessionUrl = session.url;
-          // Freeze the order record (Decision 7 step 3) — ONE order keyed by the
-          // fingerprint, `registrantIds` = the whole party, amount + receiptEmail
-          // frozen, `sessionId` = the Checkout Session. The webhook (C8) reads it
-          // back to mark it `paid`.
-          const order: RegistrationOrder = {
-            orderId: requestFingerprint,
-            mode: 'group',
-            sessionId: session.sessionId,
-            amount,
-            currency,
-            receiptEmail,
-            status: 'pending',
-            registrantIds: stored.map((registrant) => registrant.id),
-          };
-          yield* submissions.persistOrder('registration', order);
-          // Anchor the durable Order entity at `pending` (G7.1) — fire-and-forget
-          // after the freeze, gated on `Env.database` Some, never blocking the
-          // redirect.
-          yield* armOrder(order);
-          // Stamp each party registrant `pending` on its OWN submission envelope
-          // (plan :695) so a registrant record carries its payment lifecycle, not
-          // just the order. The webhook (C8) flips these to `paid`/`failed` in
-          // lock-step. Frozen mode/amount/currency mirror the order.
-          for (const id of order.registrantIds) {
-            yield* submissions.setRegistrantPayment('registration', id, {
-              _tag: 'pending',
-              orderId: order.orderId,
-              mode: order.mode,
-              amount: order.amount,
-              currency: order.currency,
+          // Resolve the order SLOT this resubmit lands on BEFORE minting a session
+          // (order-workflow round-2 --deep H1). The deterministic `orderId` is the
+          // request fingerprint, stable across a verbatim resubmit, so blindly
+          // re-minting + persisting would overwrite whatever order already lives
+          // there. `resolveOrderSlot` reads it first: an ALREADY-paid order short-
+          // circuits with NO new session (case a); a non-paid TERMINAL (the user
+          // re-registering past a dead order) walks to a fresh generation (case c);
+          // a live `pending` reuses the same slot (case b).
+          const slot = yield* submissions.resolveOrderSlot(
+            'registration',
+            requestFingerprint,
+          );
+          if (
+            Option.isSome(slot.existing) &&
+            slot.existing.value.status === 'paid'
+          ) {
+            // Case (a): the order is already paid — return the existing receipt,
+            // do NOT mint a new session, do NOT restamp registrants.
+            groupAlreadyPaid = true;
+          } else {
+            // One Checkout Session per party, keyed off the RESOLVED orderId + mode
+            // (Decision 2 + H1 case c): a verbatim retry re-derives the same slot ⇒
+            // Stripe replays the first session (no second checkout); a fresh
+            // generation after a dead terminal derives a NEW key ⇒ a new session.
+            const idempotencyKey = `registration:checkout:${slot.orderId}:group`;
+            const session = yield* payment.createCheckoutSession({
+              amount,
+              currency,
+              receiptEmail,
+              productName,
+              successUrl,
+              cancelUrl,
+              metadata: { orderId: slot.orderId, mode: 'group' },
+              idempotencyKey,
             });
+            groupSessionUrl = session.url;
+            // Freeze the order record (Decision 7 step 3) — ONE order keyed by the
+            // resolved orderId, `registrantIds` = the whole party, amount +
+            // receiptEmail frozen, `sessionId` = the Checkout Session. The webhook
+            // (C8) reads it back to mark it `paid`.
+            const proposed: RegistrationOrder = {
+              orderId: slot.orderId,
+              mode: 'group',
+              sessionId: session.sessionId,
+              amount,
+              currency,
+              receiptEmail,
+              status: 'pending',
+              registrantIds: stored.map((registrant) => registrant.id),
+            };
+            // Commit through the guarded create/reuse path (H1): a fresh slot
+            // WRITES the pending order; a live pending with matching frozen fields
+            // REUSES it (no overwrite, no restamp); a conflicting pending FAILS
+            // explicitly. An `OrderConflict` (case d) is surfaced as a form-level
+            // validation error — the same channel a decode failure uses — so the
+            // visitor sees an explicit conflict message rather than a silent
+            // overwrite of the in-flight order's frozen amount/receipt.
+            const outcome = yield* submissions
+              .createOrReuseOrder('registration', proposed)
+              .pipe(
+                Effect.catchTag('Order.Conflict', (conflict: OrderConflict) =>
+                  formValidationError({
+                    formErrors: [
+                      `registration.checkout.conflict:${conflict.reason}`,
+                    ],
+                  }),
+                ),
+              );
+            // Only a freshly-CREATED order is anchored + restamped; a `reused`
+            // pending was already armed + stamped on its first submit (byte-
+            // identical replay — re-doing it is harmless but unnecessary).
+            if (outcome._tag === 'created') {
+              const order = outcome.order;
+              // Anchor the durable Order entity at `pending` (G7.1) — fire-and-
+              // forget after the freeze, gated on `Env.database` Some, never
+              // blocking the redirect.
+              yield* armOrder(order);
+              // Stamp each party registrant `pending` on its OWN submission
+              // envelope (plan :695) so a registrant record carries its payment
+              // lifecycle, not just the order. The webhook (C8) flips these to
+              // `paid`/`failed` in lock-step. Frozen mode/amount/currency mirror
+              // the order.
+              for (const id of order.registrantIds) {
+                yield* submissions.setRegistrantPayment('registration', id, {
+                  _tag: 'pending',
+                  orderId: order.orderId,
+                  mode: order.mode,
+                  amount: order.amount,
+                  currency: order.currency,
+                });
+              }
+            }
           }
         }
       } else {
@@ -366,8 +419,27 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
           // line items and there is nothing to collect.
           if (amount <= 0) continue;
           const receiptEmail = registrant['email'] as string;
-          const orderId = `${requestFingerprint}:${index}`;
-          const idempotencyKey = `registration:checkout:${requestFingerprint}:perRegistrant:${index}`;
+          const baseOrderId = `${requestFingerprint}:${index}`;
+          // Resolve THIS registrant's order slot BEFORE minting a session (H1).
+          // The deterministic `<fingerprint>:<index>` orderId is stable across a
+          // verbatim resubmit; `resolveOrderSlot` reads it first so an already-paid
+          // registrant order is not re-charged (case a — skip the session + mail),
+          // a dead-terminal one walks to a fresh generation (case c), and a live
+          // pending reuses its replayed session (case b).
+          const slot = yield* submissions.resolveOrderSlot(
+            'registration',
+            baseOrderId,
+          );
+          // Case (a): this registrant's order is already paid — do NOT mint a new
+          // session, do NOT mail a payment link, do NOT restamp. The other
+          // registrants in the party still process their own slots.
+          if (
+            Option.isSome(slot.existing) &&
+            slot.existing.value.status === 'paid'
+          ) {
+            continue;
+          }
+          const idempotencyKey = `registration:checkout:${slot.orderId}:perRegistrant`;
           const session = yield* payment.createCheckoutSession({
             amount,
             currency,
@@ -375,14 +447,11 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
             productName,
             successUrl,
             cancelUrl,
-            metadata: { orderId, mode: 'perRegistrant' },
+            metadata: { orderId: slot.orderId, mode: 'perRegistrant' },
             idempotencyKey,
           });
-          // Pair THIS session's hosted url with the registrant it pays for, so the
-          // post-loop fan-out mails each registrant their own link (not a redirect).
-          paymentLinks.push({ submission: stored[index]!, url: session.url });
-          const order: RegistrationOrder = {
-            orderId,
+          const proposed: RegistrationOrder = {
+            orderId: slot.orderId,
             mode: 'perRegistrant',
             sessionId: session.sessionId,
             amount,
@@ -391,25 +460,50 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
             status: 'pending',
             registrantIds: [stored[index]!.id],
           };
-          yield* submissions.persistOrder('registration', order);
-          // Anchor the durable Order entity for THIS perRegistrant order (G7.1) —
-          // one `arm` send per minted order (N per request), each keyed by its
-          // own `<fingerprint>:<index>` orderId.
-          yield* armOrder(order);
-          // Stamp THIS registrant `pending` on its own submission envelope (plan
-          // :695) — one registrant per perRegistrant order. The webhook flips it
-          // `paid`/`failed` in lock-step.
-          yield* submissions.setRegistrantPayment(
-            'registration',
-            stored[index]!.id,
-            {
-              _tag: 'pending',
-              orderId: order.orderId,
-              mode: order.mode,
-              amount: order.amount,
-              currency: order.currency,
-            },
-          );
+          // Commit through the guarded create/reuse path (H1): a fresh slot WRITES
+          // the pending order; a live pending with matching frozen fields REUSES it
+          // (no overwrite, no restamp); a conflicting pending FAILS explicitly,
+          // surfaced as a form-level validation error (same channel as a decode
+          // failure).
+          const outcome = yield* submissions
+            .createOrReuseOrder('registration', proposed)
+            .pipe(
+              Effect.catchTag('Order.Conflict', (conflict: OrderConflict) =>
+                formValidationError({
+                  formErrors: [
+                    `registration.checkout.conflict:${conflict.reason}`,
+                  ],
+                }),
+              ),
+            );
+          // Pair the session's hosted url with the registrant it pays for, so the
+          // post-loop fan-out mails each registrant their own link. Both a fresh
+          // `created` order and a `reused` live pending get the (replayed) link —
+          // the user still needs to pay an un-settled order.
+          paymentLinks.push({ submission: stored[index]!, url: session.url });
+          // Only a freshly-CREATED order is anchored + restamped; a `reused`
+          // pending was already armed + stamped on its first submit.
+          if (outcome._tag === 'created') {
+            const order = outcome.order;
+            // Anchor the durable Order entity for THIS perRegistrant order (G7.1) —
+            // one `arm` send per minted order (N per request), each keyed by its
+            // own resolved orderId.
+            yield* armOrder(order);
+            // Stamp THIS registrant `pending` on its own submission envelope (plan
+            // :695) — one registrant per perRegistrant order. The webhook flips it
+            // `paid`/`failed` in lock-step.
+            yield* submissions.setRegistrantPayment(
+              'registration',
+              stored[index]!.id,
+              {
+                _tag: 'pending',
+                orderId: order.orderId,
+                mode: order.mode,
+                amount: order.amount,
+                currency: order.currency,
+              },
+            );
+          }
         }
       }
 
@@ -431,6 +525,20 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
       //            sessions+orders are already durable + `pending`, so a mail
       //            failure surfaces a form error WITHOUT losing them
       //            (persist-then-notify, :56).
+      // H1 case (a) for group: the order was already paid on a prior submit — no
+      // new session was minted, so there is nothing to pay. Return the existing
+      // success/receipt (the same success toast a first-time settled redirect
+      // shows), NOT a Stripe url. The webhook already delivered the receipt; this
+      // is the idempotent "you already paid" landing for a same-payload resubmit.
+      if (groupAlreadyPaid) {
+        yield* config.notify(stored);
+        return yield* toast.redirect(url.pathname, {
+          title: config.success.title,
+          description: config.success.description,
+          type: 'success',
+          form: 'registration',
+        });
+      }
       if (groupSessionUrl !== undefined) {
         return yield* redirect(groupSessionUrl, { status: 303 });
       }
