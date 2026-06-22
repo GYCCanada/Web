@@ -16,7 +16,8 @@ import { isSuccess } from 'effect-encore';
 
 import { defaultRegistrationForm } from '../content/pages/defaults';
 import { Content } from '../content.server';
-import { formObjectKey } from '../content/pages/registry';
+import { formObjectKey, orderKey } from '../content/pages/registry';
+import { IsoDate } from '../content/schema';
 import { formValidationError } from '../effect/errors';
 import {
   type AppLayer,
@@ -30,6 +31,7 @@ import { type CreateCheckoutSessionCall, Payment } from '../payment.server';
 import { type ObjectHead, NotFound, Storage, StorageError } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
 
+import { Cents } from './pricing';
 import { FormDefinition } from './definition';
 import { RegistrationOrder } from './order';
 import { registrationAction } from './registration-action';
@@ -991,6 +993,69 @@ const sharedStorageLayer = (
   );
 };
 
+/**
+ * A Map-backed `Storage` over an EXTERNALLY-owned `entries` map (so a test can
+ * seed it, read it, mutate it mid-action, and share one instance across submits).
+ * Distinct from `sharedStorageLayer` (which owns its map internally): the H1
+ * round-3 adversarial tests need to (i) flip an order to paid mid-action via a
+ * Payment-hook side effect and (ii) inject a targeted `put` failure on the
+ * registrant-stamp write — both require holding the map AND a `failPut` predicate.
+ */
+const mapBackedStorage = (
+  entries: Map<string, { body: string; contentType: string }>,
+  failPut: (key: string) => boolean = () => false,
+): Layer.Layer<Storage.Service> =>
+  Layer.sync(Storage.Service, () =>
+    Storage.Service.of({
+      get: Effect.fn('Storage.get')(function* (key: string) {
+        const object = entries.get(key);
+        if (object === undefined) return yield* new NotFound({ key });
+        return {
+          stream:
+            new Response(object.body).body ?? new ReadableStream<Uint8Array>(),
+          contentType: object.contentType,
+          size: new TextEncoder().encode(object.body).byteLength,
+        };
+      }),
+      put: Effect.fn('Storage.put')(function* (
+        key: string,
+        body: string | Uint8Array,
+        contentType: string,
+      ) {
+        if (failPut(key)) return yield* new StorageError({ key, op: 'put' });
+        entries.set(key, { body: String(body), contentType });
+      }),
+      head: Effect.fn('Storage.head')((key: string) =>
+        Effect.sync(() =>
+          entries.has(key)
+            ? Option.some<ObjectHead>({
+                size: 0,
+                contentType: 'application/json',
+                lastModified: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+                etag: `"${key}"`,
+              })
+            : Option.none<ObjectHead>(),
+        ),
+      ),
+      list: Effect.fn('Storage.list')((prefix?: string) =>
+        Effect.sync(() =>
+          [...entries.keys()]
+            .filter((key) => prefix === undefined || key.startsWith(prefix))
+            .map((key) => ({
+              key,
+              size: 0,
+              lastModified: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+            })),
+        ),
+      ),
+      delete: Effect.fn('Storage.delete')((key: string) =>
+        Effect.sync(() => {
+          entries.delete(key);
+        }),
+      ),
+    }),
+  );
+
 const tmpDbFile = (suffix: string): string =>
   `${tmpdir()}/gyc-order-action-${process.pid}-${Date.now()}-${suffix}.sqlite`;
 
@@ -1169,16 +1234,35 @@ const driveAction = async (
   }
 };
 
+/** Sync `RegistrationOrder` JSON codecs — the race-injection hook (i) rewrites a
+ * stored order to `paid` through the SAME schema the action reads, no raw JSON. */
+const decodeOrderSync = Schema.decodeUnknownSync(
+  Schema.fromJsonString(RegistrationOrder),
+);
+const encodeOrderSync = Schema.encodeSync(
+  Schema.fromJsonString(RegistrationOrder),
+);
+/** Decode a `YYYY-MM-DD` string to the branded, real-calendar `IsoDate`. */
+const isoDateSync = Schema.decodeUnknownSync(IsoDate);
+
 describe('registrationAction — guarded order create/reuse on resubmit (H1)', () => {
-  it('(a) resubmit after PAID returns the existing receipt — no new session, order stays paid, registrants NOT restamped', async () => {
+  it('(a) resubmit after PAID returns the existing ?checkout=success receipt — no new session, order stays paid, registrants NOT restamped, NO duplicate admin notify', async () => {
     const calls: Array<CreateCheckoutSessionCall> = [];
     // ONE shared bucket across both submits + the status mutation.
     const storage = sharedStorageLayer(pricedRegistrationObject());
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(storage, Payment.testLayer({ calls })),
     );
+    // Spy `notify`: the CONFIRMED paid-resubmit UX redirects to the existing
+    // `?checkout=success` receipt state WITHOUT calling `config.notify` (a second
+    // notify would re-send the admin `[!] Registration…` mail — round-3 --deep
+    // MAJOR 1). The count must stay 0 across the paid resubmit.
+    let notifyCount = 0;
     const action = registrationAction({
-      notify: () => Effect.void,
+      notify: () =>
+        Effect.sync(() => {
+          notifyCount += 1;
+        }),
       notifyPaymentLink: noopPaymentLink,
       success,
       perRegistrantSuccess,
@@ -1209,12 +1293,19 @@ describe('registrationAction — guarded order create/reuse on resubmit (H1)', (
     // and the registrant is NOT restamped back to pending.
     const second = await driveAction(runtime, action, body);
     expect(second).toBeInstanceOf(Response);
-    // Lands on the success TOAST (302 to the form), not a Stripe checkout (303).
-    expect((second as Response).status).toBe(302);
-    expect((second as Response).headers.get('location')).toBe('/2026/form');
+    // Lands on the EXISTING `?checkout=success` receipt state (303 to the same url
+    // Stripe returns to on a first completion), NOT a Stripe checkout url and NOT
+    // the legacy success toast (the CONFIRMED resubmit UX — round-3 --deep).
+    expect((second as Response).status).toBe(303);
+    expect((second as Response).headers.get('location')).toBe(
+      'http://localhost/2026/form?checkout=success',
+    );
     expect((second as Response).headers.get('location')).not.toContain(
       'checkout.stripe.test',
     );
+    // The admin `notify` was NEVER called on the paid resubmit (no duplicate
+    // notification — round-3 --deep MAJOR 1).
+    expect(notifyCount).toBe(0);
     // No SECOND create-session call (no re-charge).
     expect(calls.length).toBe(1);
     // Still exactly ONE order, still `paid` (never overwritten to pending).
@@ -1309,6 +1400,370 @@ describe('registrationAction — guarded order create/reuse on resubmit (H1)', (
     // The fresh order is a DISTINCT generation key, not the dead one.
     expect(byStatus['pending']?.orderId).not.toBe(deadOrder.orderId);
     expect(byStatus['pending']?.orderId.startsWith(deadOrder.orderId)).toBe(true);
+  });
+
+  it('(i) PAID between resolve and commit (the race) lands on ?checkout=success — no Stripe redirect, no restamp, no duplicate notify', async () => {
+    // The adversarial race the round-3 --deep BLOCKER 1 names: `resolveOrderSlot`
+    // reads the order live-PENDING, then the order flips to PAID in the window
+    // BEFORE the guarded `createOrReuseOrder` re-read at commit. The pre-mint
+    // paid fast-path cannot catch this (it already saw pending); only the commit
+    // branch on the FULL outcome union can. We inject the flip INSIDE
+    // `createCheckoutSession` (which the action calls AFTER resolve, BEFORE the
+    // commit re-read): the double rewrites the live order on the shared bucket to
+    // `paid` as a side effect, so `createOrReuseOrder` re-reads `alreadyPaid`.
+    const entries = new Map<string, { body: string; contentType: string }>();
+    for (const [key, object] of Object.entries(pricedRegistrationObject())) {
+      entries.set(key, { body: object.body, contentType: 'application/json' });
+    }
+    const mapStorage = mapBackedStorage(entries);
+    // The Payment double: on every call, flip whatever pending registration order
+    // already lives on the bucket to `paid` (the race), then return the session.
+    let flipNext = false;
+    const calls: Array<CreateCheckoutSessionCall> = [];
+    const racingPayment = Layer.succeed(
+      Payment.Service,
+      Payment.Service.of({
+        createCheckoutSession: (params) =>
+          Effect.sync(() => {
+            calls.push({
+              amount: params.amount,
+              currency: params.currency,
+              receiptEmail: params.receiptEmail,
+              productName: params.productName,
+              successUrl: params.successUrl,
+              cancelUrl: params.cancelUrl,
+              metadata: params.metadata,
+              idempotencyKey: params.idempotencyKey,
+            });
+            if (flipNext) {
+              // Rewrite the order at the resolved orderId to `paid` — the exact
+              // shape `markOrderPaid` would write (status + a frozen paidAt) —
+              // through the `RegistrationOrder` codec (no raw JSON), so the
+              // re-read sees a fully-valid paid order.
+              const key = orderKey('registration', params.metadata['orderId']!);
+              const current = entries.get(key);
+              if (current !== undefined) {
+                const order = decodeOrderSync(current.body);
+                const paid = encodeOrderSync({
+                  ...order,
+                  status: 'paid',
+                  paidAt: isoDateSync('2026-01-01'),
+                });
+                entries.set(key, {
+                  body: paid,
+                  contentType: 'application/json',
+                });
+              }
+            }
+            return {
+              sessionId: `cs_test_${params.idempotencyKey}`,
+              url: `https://checkout.stripe.test/${params.idempotencyKey}`,
+            };
+          }),
+        createRefund: () => Effect.die(new Error('unused')),
+        constructEvent: () => Effect.succeed({}),
+      }),
+    );
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(mapStorage, racingPayment),
+    );
+    let notifyCount = 0;
+    const action = registrationAction({
+      notify: () =>
+        Effect.sync(() => {
+          notifyCount += 1;
+        }),
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
+    const body = oneRegistrantGroupBody();
+    const args = makeRegistrationArgs(runtime, body);
+
+    // First submit: a normal pending order (no flip yet).
+    const first = await driveAction(runtime, action, body);
+    expect((first as Response).status).toBe(303);
+    expect(calls.length).toBe(1);
+
+    // Capture the registrant's stamp BEFORE the racing resubmit (it is `pending`
+    // from the first submit; the webhook that would flip it `paid` alongside the
+    // order has not run in this race scenario). The racing resubmit must NOT write
+    // it at all — so the stamp must be byte-identical after.
+    const stampBefore = (await listRegistrations(runtime, args))[0]?.record
+      .payment;
+    expect(stampBefore?._tag).toBe('pending');
+
+    // Second submit WITH the race armed: resolve sees pending → session mints (and
+    // flips the order to paid) → the commit re-read sees `alreadyPaid`.
+    flipNext = true;
+    const second = await driveAction(runtime, action, body);
+    expect(second).toBeInstanceOf(Response);
+    // Lands on the existing `?checkout=success` receipt (303), NOT a Stripe url.
+    expect((second as Response).status).toBe(303);
+    expect((second as Response).headers.get('location')).toBe(
+      'http://localhost/2026/form?checkout=success',
+    );
+    expect((second as Response).headers.get('location')).not.toContain(
+      'checkout.stripe.test',
+    );
+    // No admin notify on the paid-race landing (no duplicate notification).
+    expect(notifyCount).toBe(0);
+    // Still exactly ONE order, still `paid` (the race flip stuck; the commit did
+    // NOT overwrite it back to pending).
+    const ordersAfter = await listOrders(runtime, args);
+    expect(ordersAfter.length).toBe(1);
+    expect(ordersAfter[0]!.order.status).toBe('paid');
+    // The registrant stamp is UNTOUCHED by the racing resubmit — byte-identical to
+    // the pre-resubmit value (the `alreadyPaid` branch skips the stamp loop
+    // entirely, so nothing re-wrote the registrant record).
+    const registrantsAfter = await listRegistrations(runtime, args);
+    expect(registrantsAfter[0]?.record.payment).toEqual(stampBefore);
+  });
+
+  it('(ii) perRegistrant resubmit after EVERY registrant PAID lands on ?checkout=success — no link mail, no duplicate notify', async () => {
+    const calls: Array<CreateCheckoutSessionCall> = [];
+    const storage = sharedStorageLayer(pricedRegistrationObject());
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(storage, Payment.testLayer({ calls })),
+    );
+    let notifyCount = 0;
+    let mailCount = 0;
+    const action = registrationAction({
+      notify: () =>
+        Effect.sync(() => {
+          notifyCount += 1;
+        }),
+      notifyPaymentLink: () =>
+        Effect.sync(() => {
+          mailCount += 1;
+        }),
+      success,
+      perRegistrantSuccess,
+    });
+    const body = perRegistrantBody(2);
+    const args = makeRegistrationArgs(runtime, body);
+
+    // First submit: 2 pending per-registrant orders + 2 link mails.
+    const first = await driveAction(runtime, action, body);
+    expect((first as Response).status).toBe(302);
+    expect(calls.length).toBe(2);
+    expect(mailCount).toBe(2);
+
+    // Mark BOTH per-registrant orders paid (the webhook reconciles each).
+    const orders = await listOrders(runtime, args);
+    expect(orders.length).toBe(2);
+    await runtime.run(
+      args,
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        for (const { order } of orders) {
+          yield* submissions.markOrderPaid('registration', order.orderId);
+        }
+      }),
+    );
+    mailCount = 0;
+
+    // Resubmit the SAME payload: every chargeable registrant is already paid, so
+    // there is nothing to mail — land on the existing `?checkout=success` receipt,
+    // NOT the legacy notify/toast and NOT a fresh link mail.
+    const second = await driveAction(runtime, action, body);
+    expect(second).toBeInstanceOf(Response);
+    expect((second as Response).status).toBe(303);
+    expect((second as Response).headers.get('location')).toBe(
+      'http://localhost/2026/form?checkout=success',
+    );
+    // No new sessions, no link mails, no admin notify.
+    expect(calls.length).toBe(2);
+    expect(mailCount).toBe(0);
+    expect(notifyCount).toBe(0);
+    // Both orders stayed `paid`, registrants kept their `paid` stamp.
+    const ordersAfter = await listOrders(runtime, args);
+    expect(ordersAfter.every((e) => e.order.status === 'paid')).toBe(true);
+    const registrantsAfter = await listRegistrations(runtime, args);
+    expect(registrantsAfter.every((e) => e.record.payment?._tag === 'paid')).toBe(
+      true,
+    );
+  });
+
+  it('(iii) a setRegistrantPayment failure AFTER the order write self-heals on retry — the registrant ends stamped, never permanently skipped', async () => {
+    // The round-3 --deep BLOCKER 2: the first submit writes the pending order, then
+    // `setRegistrantPayment` FAILS — leaving the order pending but the registrant
+    // un-stamped. A retry sees the order `reused`; the OLD code skipped stamping on
+    // `reused`, stranding the registrant un-stamped FOREVER. The fix re-stamps on
+    // `reused`, so the retry self-heals.
+    const entries = new Map<string, { body: string; contentType: string }>();
+    for (const [key, object] of Object.entries(pricedRegistrationObject())) {
+      entries.set(key, { body: object.body, contentType: 'application/json' });
+    }
+    // Fail the registrant-record put that happens AFTER the order already landed —
+    // i.e. the `setRegistrantPayment` write (persist's first write happens BEFORE
+    // any order exists). `failStampWrites` arms exactly that window.
+    let failStampWrites = false;
+    const failingStorage = mapBackedStorage(entries, (key) => {
+      if (!failStampWrites) return false;
+      const isOrder = key.startsWith('submissions/registration/orders/');
+      const orderExists = [...entries.keys()].some((k) =>
+        k.startsWith('submissions/registration/orders/'),
+      );
+      // A registrant-record write (not the order) while an order already exists =
+      // the post-order `setRegistrantPayment` stamp.
+      return !isOrder && orderExists;
+    });
+    const calls: Array<CreateCheckoutSessionCall> = [];
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(failingStorage, Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
+    const body = oneRegistrantGroupBody();
+    const args = makeRegistrationArgs(runtime, body);
+
+    // Attempt 1: the order writes, then the registrant stamp put FAILS → 500.
+    failStampWrites = true;
+    const firstThrown = await driveAction(runtime, action, body);
+    expect(firstThrown).toBeInstanceOf(Response);
+    expect((firstThrown as Response).status).toBe(500);
+    // The order landed (pending), but the registrant is NOT yet stamped (the put
+    // that would have stamped it failed).
+    const ordersMid = await listOrders(runtime, args);
+    expect(ordersMid.length).toBe(1);
+    expect(ordersMid[0]!.order.status).toBe('pending');
+    const registrantsMid = await listRegistrations(runtime, args);
+    expect(registrantsMid[0]?.record.payment).toBeUndefined();
+
+    // Attempt 2 (retry), storage healthy: the order is seen `reused`, and the fix
+    // RE-stamps the registrant — so it self-heals instead of being skipped forever.
+    failStampWrites = false;
+    const second = await driveAction(runtime, action, body);
+    expect((second as Response).status).toBe(303);
+    // Still exactly ONE order (reused, not duplicated), still pending.
+    const ordersAfter = await listOrders(runtime, args);
+    expect(ordersAfter.length).toBe(1);
+    expect(ordersAfter[0]!.order.status).toBe('pending');
+    // The registrant is NOW stamped `pending` (the reuse self-healed the stamp).
+    const registrantsAfter = await listRegistrations(runtime, args);
+    const healed = registrantsAfter[0]?.record.payment;
+    expect(healed?._tag).toBe('pending');
+    // The healed stamp links the SAME (reused) order.
+    if (healed?._tag === 'pending') {
+      expect(healed.orderId).toBe(ordersAfter[0]!.order.orderId);
+    }
+  });
+
+  it('(iv) case (c) resubmitted a THIRD time re-walks to the SAME generation — no runaway #gN', async () => {
+    const calls: Array<CreateCheckoutSessionCall> = [];
+    const storage = sharedStorageLayer(pricedRegistrationObject());
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(storage, Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
+    const body = oneRegistrantGroupBody();
+    const args = makeRegistrationArgs(runtime, body);
+
+    // Submit 1 → pending order at the base generation. Expire it.
+    await driveAction(runtime, action, body);
+    const base = (await listOrders(runtime, args))[0]!.order;
+    await runtime.run(
+      args,
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        yield* submissions.markOrderExpired('registration', base.orderId);
+      }),
+    );
+
+    // Submit 2 → a fresh pending order at generation #g1 (walks past the expired
+    // base). The base stays expired.
+    const second = await driveAction(runtime, action, body);
+    expect((second as Response).status).toBe(303);
+    const afterSecond = await listOrders(runtime, args);
+    expect(afterSecond.length).toBe(2);
+    const g1 = afterSecond.find((e) => e.order.status === 'pending')!.order;
+    expect(g1.orderId).toBe(`${base.orderId}#g1`);
+
+    // Submit 3 (the THIRD time): the #g1 order is still live-pending, so the
+    // resubmit REUSES it — it does NOT walk to #g2. No runaway generations.
+    const third = await driveAction(runtime, action, body);
+    expect((third as Response).status).toBe(303);
+    const afterThird = await listOrders(runtime, args);
+    // STILL exactly two orders (expired base + the one reused #g1) — no #g2 minted.
+    expect(afterThird.length).toBe(2);
+    const pendings = afterThird.filter((e) => e.order.status === 'pending');
+    expect(pendings.length).toBe(1);
+    expect(pendings[0]!.order.orderId).toBe(`${base.orderId}#g1`);
+    // No order key carries a #g2 (or higher) suffix.
+    expect(
+      afterThird.some((e) => /#g[2-9]/.test(e.order.orderId)),
+    ).toBe(false);
+  });
+
+  it('(d2) a real Stripe idempotency-parameter MISMATCH on a live pending order fails OrderConflict — not just a mutated stored receipt', async () => {
+    // Case (d) modeled at the REAL idempotency boundary (round-3 --deep MAJOR 2):
+    // two genuinely-DIFFERENT submissions whose request fingerprints COLLIDE onto
+    // the same deterministic orderId would mint orders with disagreeing frozen
+    // money/receipt. We drive a first real submit to a live pending order, then a
+    // second submit whose registrant set differs (a different party size) but is
+    // forced onto the SAME orderId — the guard must reject the mismatch rather
+    // than silently overwrite the in-flight order's frozen registrantIds.
+    const calls: Array<CreateCheckoutSessionCall> = [];
+    const storage = sharedStorageLayer(pricedRegistrationObject());
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(storage, Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({
+      notify: () => Effect.void,
+      notifyPaymentLink: noopPaymentLink,
+      success,
+      perRegistrantSuccess,
+    });
+    const body = oneRegistrantGroupBody();
+    const args = makeRegistrationArgs(runtime, body);
+
+    // First submit → a live pending order with its real frozen amount (1 registrant).
+    await driveAction(runtime, action, body);
+    const order = (await listOrders(runtime, args))[0]!.order;
+
+    // Simulate a colliding DIFFERENT submission landing on the SAME orderId by
+    // rewriting the live order's frozen `amount` (the idempotency-parameter the
+    // session was keyed on) to a different value — exactly what a second distinct
+    // checkout would carry. The guard compares the proposed amount (the real
+    // priced amount) against this tampered stored amount.
+    await runtime.run(
+      args,
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        const tamperedAmount = yield* Schema.decodeUnknownEffect(Cents)(
+          order.amount + 1,
+        );
+        yield* submissions.persistOrder('registration', {
+          ...order,
+          amount: tamperedAmount,
+        });
+      }),
+    );
+
+    // Resubmit: the live pending order's frozen `amount` now disagrees with the
+    // proposed (real) amount — an idempotency-parameter mismatch — so the guard
+    // fails OrderConflict on `amount` rather than overwriting it.
+    const result = await driveAction(runtime, action, body);
+    expect(result).not.toBeInstanceOf(Response);
+    const formResult = result as Exclude<typeof result, Response>;
+    expect(formResult.status).toBe('error');
+    expect(formResult.result.error?.formErrors?.[0]).toContain(
+      'registration.checkout.conflict:amount',
+    );
+    // The tampered order was NOT overwritten back to the proposed amount.
+    const ordersAfter = await listOrders(runtime, args);
+    expect(ordersAfter.length).toBe(1);
+    expect(Number(ordersAfter[0]!.order.amount)).toBe(Number(order.amount) + 1);
   });
 
   it('(d) a live PENDING order whose frozen fields CONFLICT fails explicitly — the in-flight order is NOT overwritten', async () => {
