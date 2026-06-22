@@ -298,6 +298,77 @@ describe('Env config', () => {
         DATABASE_URL: '   \t',
       }),
     ));
+
+  it.effect("accepts DATABASE_URL=':memory:' in development (single-graph G3 path)", () =>
+    Effect.gen(function* () {
+      // The G3 `layerTest` / cross-runtime single-graph tests rely on the
+      // in-memory sqlite DB. The production guard must NOT regress that: dev/test
+      // keep `':memory:'` as a valid, resolvable connection string.
+      const env = yield* Env.Service;
+      expect(Option.isSome(env.database)).toBe(true);
+      if (Option.isSome(env.database)) {
+        expect(Redacted.value(env.database.value.url)).toBe(':memory:');
+      }
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        DATABASE_URL: ':memory:',
+      }),
+    ));
+
+  it.effect("rejects DATABASE_URL=':memory:' in production (two-runtime coordination guard)", () =>
+    Effect.gen(function* () {
+      // The runner (`ServerLive`) and senders (`AppRuntime`) are separate layer
+      // graphs that coordinate ONLY through the shared sqlite FILE; `':memory:'`
+      // gives each its OWN private DB, silently breaking the route → runner →
+      // webhook loop (docs/order-workflow-plan.md:327). It must fail the env
+      // layer at boot with a typed `ConfigError` (NOT a thrown defect).
+      const exit = yield* Env.Service.pipe(
+        provideEnv({
+          ...PROD_ENV,
+          DATABASE_URL: ':memory:',
+        }),
+        Effect.exit,
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        const typedRejection = exit.cause.reasons.some(
+          (reason) =>
+            reason._tag === 'Fail' &&
+            typeof reason.error === 'object' &&
+            reason.error !== null &&
+            '_tag' in reason.error &&
+            reason.error._tag === 'ConfigError',
+        );
+        expect(typedRejection).toBe(true);
+      }
+    }));
+
+  it.effect("rejects a whitespace/case variant of ':memory:' in production", () =>
+    Effect.gen(function* () {
+      const exit = yield* Env.Service.pipe(
+        provideEnv({
+          ...PROD_ENV,
+          DATABASE_URL: '  :MEMORY:  ',
+        }),
+        Effect.exit,
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+    }));
+
+  it.effect('accepts a sqlite FILE path in production', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isSome(env.database)).toBe(true);
+      if (Option.isSome(env.database)) {
+        expect(Redacted.value(env.database.value.url)).toBe('/data/order.db');
+      }
+    }).pipe(
+      provideEnv({
+        ...PROD_ENV,
+        DATABASE_URL: '/data/order.db',
+      }),
+    ));
 });
 
 describe('Mailer', () => {
