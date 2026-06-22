@@ -248,7 +248,7 @@ const RoutesLive = isDev ? DevRoutes : ProdRoutes;
 // (ADR 0004:38-40). Providing `Env.layer` discharges the requirement, so a
 // missing secret fails `Layer.launch` and `BunRuntime.runMain` exits non-zero.
 // In dev / test the env vars are optional, so this is a cheap no-op.
-const StartupCheck = Layer.effectDiscard(Env.Service.asEffect()).pipe(
+const StartupCheck = Layer.effectDiscard(Env.Service).pipe(
   Layer.provide(Env.layer),
 );
 

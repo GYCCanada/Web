@@ -71,7 +71,7 @@ describe('Env config', () => {
 
   it.effect('fails fast in production when a required mail var is missing', () =>
     Effect.gen(function* () {
-      const exit = yield* Env.Service.asEffect().pipe(
+      const exit = yield* Env.Service.pipe(
         provideEnv({ NODE_ENV: 'production', MAIL_HOST: 'only-host' }),
         Effect.exit,
       );
@@ -129,7 +129,7 @@ describe('Env config', () => {
 
   it.effect('fails fast when a configured stripe carries an unsupported currency', () =>
     Effect.gen(function* () {
-      const exit = yield* Env.Service.asEffect().pipe(
+      const exit = yield* Env.Service.pipe(
         provideEnv({
           NODE_ENV: 'development',
           STRIPE_API_KEY: 'sk_test_123',

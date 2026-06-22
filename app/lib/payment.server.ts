@@ -174,7 +174,7 @@ const credentialsLayer = Layer.effect(
   Credentials,
   // The `Credentials` service value IS an `Effect<Config>`, so map the `Env`
   // effect to that inner effect (the layer value is the inner `Effect<Config>`).
-  Effect.map(Env.Service.asEffect(), (env) =>
+  Effect.map(Env.Service, (env) =>
     Effect.succeed({
       apiKey: Option.isSome(env.stripe)
         ? env.stripe.value.apiKey

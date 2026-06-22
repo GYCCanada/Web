@@ -6,7 +6,7 @@ import type { AppError, AppServices } from './runtime';
 type RouteServices = AppServices | ReactRouterContext;
 
 export const routeHandler =
-  <Eff extends Effect.Yieldable<any, any, any, RouteServices>, AEff>(
+  <Eff extends Effect.Effect<any, any, RouteServices>, AEff>(
     body: () => Generator<Eff, AEff, never>,
   ) =>
   (args: RouteArgs): Promise<AEff> =>
@@ -16,7 +16,7 @@ export const routeHandler =
     );
 
 export const routeAction =
-  <Eff extends Effect.Yieldable<any, any, any, RouteServices>, AEff>(
+  <Eff extends Effect.Effect<any, any, RouteServices>, AEff>(
     body: () => Generator<Eff, AEff, never>,
   ) =>
   (args: RouteArgs): Promise<AEff> =>
