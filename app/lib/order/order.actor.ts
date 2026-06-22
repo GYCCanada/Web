@@ -343,14 +343,15 @@ export const handlers = Actor.toLayer(
       // ## Late-payment-on-expired (G9, Open Question 4 — reject-and-log default)
       //
       // A `checkout.session.completed` can race a deadline `expire`: the sweep
-      // flips the order `expired` and THEN a late paid event arrives. The bucket
-      // `markOrderPaid` guard is permissive (any non-`paid` → `paid`), so calling
-      // it unconditionally would silently RESURRECT an `expired`/`cancelled`/
-      // `refunded`/`failed` order to `paid` — a money/support hazard. The G4
-      // transition table (`canTransition`) is the authority: `paid` is reachable
-      // ONLY from `pending` (or idempotently from `paid`). So the paid arm reads
-      // the bucket status FIRST and, when the transition is ILLEGAL (a late settle
-      // on a terminal order), LOGS and leaves the order untouched (the plan
+      // flips the order `expired` and THEN a late paid event arrives. Resurrecting
+      // an `expired`/`cancelled`/`refunded`/`failed` order to `paid` would be a
+      // money/support hazard. The G4 transition table (`canTransition`) is the
+      // authority: `paid` is reachable ONLY from `pending` (or idempotently from
+      // `paid`). `Submissions.markOrderPaid` already enforces this same predicate at
+      // the bucket boundary (F1), so this arm consults the SAME table — no second
+      // source of truth — and reads the bucket status FIRST: when the transition is
+      // ILLEGAL (a late settle on a terminal order), it LOGS and leaves the order
+      // untouched (the plan
       // default — honor-vs-auto-refund is a product decision surfaced for the
       // operator, see flags). The op still resolves Success (a no-op), so the
       // webhook's `waitFor` terminates without a spurious failure — the bucket

@@ -56,10 +56,13 @@ import { Cents } from '~/lib/forms/pricing';
  *      reconstructing the full payload — `send` then `waitFor({ orderId })`. This
  *      is GATED on `Env.database` Some: a DB-less deploy has no runner and
  *      degrades to the bucket-only flip (backward compatible). The settle-drive is
- *      COMPLEMENTARY to the bucket authority, never a gate on it — a settle infra
- *      fault is logged + swallowed (the bucket order is already durably paid/failed
- *      and the runner reconciles the durable lifecycle off the persisted `send`),
- *      so it never changes the 200/400/503 the bucket flip earned (Decision 1/7).
+ *      COMPLEMENTARY to the bucket authority, never a gate on it. Failure handling
+ *      is split (F3): a `settle.send`/persistence fault PROPAGATES — the durable row
+ *      never landed, so the route returns 502 for Stripe to retry. Only the
+ *      POST-send `waitFor` observation (the durable row already persisted; the
+ *      runner/sweep reconciles the lifecycle) is logged + swallowed, since the
+ *      bucket order is already durably paid/failed — so that swallowed wait never
+ *      changes the 200/400/503 the bucket flip earned (Decision 1/7).
  *      Idempotent: a replayed event re-resolves an already-terminal ExecId to a
  *      no-op (encore dedup), `paidAt` byte-identical.
  *

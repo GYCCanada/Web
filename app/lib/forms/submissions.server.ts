@@ -664,8 +664,11 @@ export const layer = Layer.effect(
 
     // Read-flip-persist over BOTH the order AND the registrant submissions it names
     // (`registrantIds`), idempotent end-to-end. `guard` decides which current order
-    // statuses may transition: `markOrderPaid` flips from any non-`paid` state;
-    // `markOrderFailed` refuses to downgrade an already-`paid` order. When the guard
+    // statuses may transition: `markOrderPaid` settles ONLY a `pending` order to
+    // `paid` (the G4 `canTransition` table — a late completion on an
+    // `expired`/`cancelled`/`refunded`/`failed` terminal is rejected, never
+    // resurrected); `markOrderFailed` likewise gates on `canTransition` and refuses
+    // to downgrade an already-`paid` order. When the guard
     // forbids the transition AND the order is not already at `target`, NOTHING is
     // touched (a paid order's registrants are never downgraded by a stray failure).
     //
