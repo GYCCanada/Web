@@ -225,6 +225,19 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
             registrantIds: stored.map((registrant) => registrant.id),
           };
           yield* submissions.persistOrder('registration', order);
+          // Stamp each party registrant `pending` on its OWN submission envelope
+          // (plan :695) so a registrant record carries its payment lifecycle, not
+          // just the order. The webhook (C8) flips these to `paid`/`failed` in
+          // lock-step. Frozen mode/amount/currency mirror the order.
+          for (const id of order.registrantIds) {
+            yield* submissions.setRegistrantPayment('registration', id, {
+              _tag: 'pending',
+              orderId: order.orderId,
+              mode: order.mode,
+              amount: order.amount,
+              currency: order.currency,
+            });
+          }
         }
       } else {
         // `perRegistrant`: one order + one intent PER registrant (Decision 2b.6).
@@ -259,6 +272,20 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
             registrantIds: [stored[index]!.id],
           };
           yield* submissions.persistOrder('registration', order);
+          // Stamp THIS registrant `pending` on its own submission envelope (plan
+          // :695) — one registrant per perRegistrant order. The webhook flips it
+          // `paid`/`failed` in lock-step.
+          yield* submissions.setRegistrantPayment(
+            'registration',
+            stored[index]!.id,
+            {
+              _tag: 'pending',
+              orderId: order.orderId,
+              mode: order.mode,
+              amount: order.amount,
+              currency: order.currency,
+            },
+          );
         }
       }
     }

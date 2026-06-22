@@ -10,8 +10,9 @@ import { RouterContextProvider } from 'react-router';
 
 import { Content } from '../content.server';
 import { Env } from '../env.server';
-import { newListItemId } from '../content/schema';
-import { orderKey } from '../content/pages/registry';
+import { type ListItemId, newListItemId } from '../content/schema';
+import { defaultRegistrationForm } from '../content/pages/defaults';
+import { orderKey, submissionKey } from '../content/pages/registry';
 import {
   type AppLayer,
   makeAppLayer,
@@ -24,6 +25,7 @@ import { layerTest } from '../storage.test-helper';
 
 import { RegistrationOrder } from './order';
 import { Cents, CurrencyCode } from './pricing';
+import { submissionSchema } from './submission';
 import { Submissions } from './submissions.server';
 
 /**
@@ -59,7 +61,10 @@ const STRIPE_ENV: Record<string, string> = {
 /** Encode a `RegistrationOrder` to the JSON shape stored on the bucket. */
 const encodeOrder = Schema.encodeSync(Schema.fromJsonString(RegistrationOrder));
 
-/** A pending group order frozen at `amount`, seeded onto the bucket. */
+/** The two registrant ids every seeded order names — seeded as real submissions. */
+const REGISTRANT_IDS: readonly ListItemId[] = [newListItemId(), newListItemId()];
+
+/** A pending group order frozen at `amount`, naming {@link REGISTRANT_IDS}. */
 const pendingOrder = (orderId: string, amount: number): RegistrationOrder => ({
   orderId,
   mode: 'group',
@@ -68,8 +73,32 @@ const pendingOrder = (orderId: string, amount: number): RegistrationOrder => ({
   currency: CurrencyCode.make('cad'),
   receiptEmail: 'leader@example.com',
   status: 'pending',
-  registrantIds: [newListItemId(), newListItemId()],
+  registrantIds: [...REGISTRANT_IDS],
 });
+
+/**
+ * Encode one registrant `Submission` (a minimal valid exhibitor payload) to the
+ * JSON shape `submissions/registration/<id>.json` holds — WITHOUT a `payment`
+ * field, so the seed mirrors a record persisted before any order stamp (the
+ * webhook flip is what stamps it). The webhook's registrant flip re-reads this
+ * exact object, so it must decode against the live registration definition.
+ */
+const registrantSubmissionJson = (id: ListItemId): string =>
+  Schema.encodeSync(Schema.fromJsonString(submissionSchema(defaultRegistrationForm)))(
+    Schema.decodeUnknownSync(submissionSchema(defaultRegistrationForm))({
+      id,
+      form: 'registration',
+      submittedAt: '2026-06-17',
+      payload: {
+        name: 'Ada Co',
+        phone: '123-456-7890',
+        type: 'exhibitor',
+        synopsis: 'We sell books',
+        website: 'https://example.com',
+        company: 'Ada Books',
+      },
+    }),
+  );
 
 // ── (1) service-level order-state flips ───────────────────────────────────────
 
@@ -96,13 +125,42 @@ const runSubmissions = <A, E>(
   );
 };
 
-/** Seed one order onto a bucket under its real `orderKey`. */
+/**
+ * Seed one order onto a bucket under its real `orderKey`, ALONGSIDE the registrant
+ * submissions it names (each a `payment`-less exhibitor record under its
+ * `submissionKey`). The webhook's two-sided flip needs both present: the order to
+ * amount-check + flip, and the registrant records to stamp `paid`/`failed`.
+ */
 const seed = (order: RegistrationOrder): Parameters<typeof layerTest>[0] => ({
   [orderKey('registration', order.orderId)]: {
     body: encodeOrder(order),
     contentType: 'application/json',
   },
+  ...Object.fromEntries(
+    order.registrantIds.map((id) => [
+      submissionKey('registration', id),
+      { body: registrantSubmissionJson(id), contentType: 'application/json' },
+    ]),
+  ),
 });
+
+/**
+ * Read one stored registrant submission off the SHARED bucket (the same Storage
+ * the service flips through) and return its `payment` tag (or `'none'`). Used
+ * INSIDE a `runSubmissions` / runtime effect so it observes the post-flip state.
+ */
+const readRegistrantPaymentTag = (id: ListItemId) =>
+  Effect.gen(function* () {
+    const storage = yield* Storage.Service;
+    const object = yield* storage.get(submissionKey('registration', id));
+    const text = yield* Effect.promise(() =>
+      new Response(object.stream).text(),
+    );
+    const decoded = yield* Schema.decodeUnknownEffect(
+      Schema.fromJsonString(submissionSchema(defaultRegistrationForm)),
+    )(text);
+    return decoded.payment?._tag ?? 'none';
+  });
 
 describe('Submissions order-state flips (C8 reconcile primitives)', () => {
   it('markOrderPaid flips a pending order to paid', async () => {
@@ -118,6 +176,37 @@ describe('Submissions order-state flips (C8 reconcile primitives)', () => {
       }),
     );
     expect(status).toBe('paid');
+  });
+
+  it('markOrderPaid stamps EVERY named registrant submission paid (B2)', async () => {
+    const tags = await runSubmissions(
+      seed(pendingOrder('ord1', 15000)),
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        yield* submissions.markOrderPaid('registration', 'ord1');
+        // The flip is two-sided: each registrant the order names carries `paid` on
+        // its OWN submission envelope, not just the order (plan :695 / C8 :904).
+        const a = yield* readRegistrantPaymentTag(REGISTRANT_IDS[0]!);
+        const b = yield* readRegistrantPaymentTag(REGISTRANT_IDS[1]!);
+        return [a, b];
+      }),
+    );
+    expect(tags).toEqual(['paid', 'paid']);
+  });
+
+  it('markOrderPaid registrant flip is idempotent on replay (B2)', async () => {
+    const tag = await runSubmissions(
+      seed(pendingOrder('ord1', 15000)),
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        yield* submissions.markOrderPaid('registration', 'ord1');
+        // Replaying the same event re-reads an already-paid order and re-stamps the
+        // registrant byte-identically — still `paid`, no churn.
+        yield* submissions.markOrderPaid('registration', 'ord1');
+        return yield* readRegistrantPaymentTag(REGISTRANT_IDS[0]!);
+      }),
+    );
+    expect(tag).toBe('paid');
   });
 
   it('markOrderPaid is idempotent — replaying leaves it paid', async () => {
@@ -145,6 +234,20 @@ describe('Submissions order-state flips (C8 reconcile primitives)', () => {
     expect(status).toBe('failed');
   });
 
+  it('markOrderFailed stamps EVERY named registrant submission failed (B2)', async () => {
+    const tags = await runSubmissions(
+      seed(pendingOrder('ord1', 15000)),
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        yield* submissions.markOrderFailed('registration', 'ord1');
+        const a = yield* readRegistrantPaymentTag(REGISTRANT_IDS[0]!);
+        const b = yield* readRegistrantPaymentTag(REGISTRANT_IDS[1]!);
+        return [a, b];
+      }),
+    );
+    expect(tags).toEqual(['failed', 'failed']);
+  });
+
   it('markOrderFailed NEVER downgrades an already-paid order', async () => {
     const status = await runSubmissions(
       seed(pendingOrder('ord1', 15000)),
@@ -156,6 +259,21 @@ describe('Submissions order-state flips (C8 reconcile primitives)', () => {
       }),
     );
     expect(status).toBe('paid');
+  });
+
+  it('markOrderFailed never downgrades an already-PAID registrant (B2)', async () => {
+    const tag = await runSubmissions(
+      seed(pendingOrder('ord1', 15000)),
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        yield* submissions.markOrderPaid('registration', 'ord1');
+        // A stray later failure for a settled order leaves the order AND its
+        // registrants `paid` — the guard short-circuits before any registrant write.
+        yield* submissions.markOrderFailed('registration', 'ord1');
+        return yield* readRegistrantPaymentTag(REGISTRANT_IDS[0]!);
+      }),
+    );
+    expect(tag).toBe('paid');
   });
 
   it('getOrder fails NotFound for an unknown order', async () => {
@@ -247,6 +365,13 @@ const readStatus = (runtime: RequestRuntime, args: RouteArgs, orderId: string) =
     }),
   );
 
+/** Read a registrant submission's `payment` tag through the runtime's bucket. */
+const readRegistrantTag = (
+  runtime: RequestRuntime,
+  args: RouteArgs,
+  id: ListItemId,
+) => runtime.run(args, readRegistrantPaymentTag(id));
+
 describe('/api/stripe/webhook (C8 route)', () => {
   it('rejects a forged signature with 400', async () => {
     const runtime = makeRequestRuntimeFromLayer(
@@ -272,6 +397,10 @@ describe('/api/stripe/webhook (C8 route)', () => {
     const response = await action(args);
     expect(response.status).toBe(200);
     expect(await readStatus(runtime, args, 'ord1')).toBe('paid');
+    // B2: the route's flip is two-sided — the REGISTRANT submission carries `paid`
+    // on its own envelope, not just the order.
+    expect(await readRegistrantTag(runtime, args, REGISTRANT_IDS[0]!)).toBe('paid');
+    expect(await readRegistrantTag(runtime, args, REGISTRANT_IDS[1]!)).toBe('paid');
   });
 
   it('rejects an amount MISMATCH with 400 and leaves the order pending', async () => {
@@ -286,6 +415,8 @@ describe('/api/stripe/webhook (C8 route)', () => {
     const response = await action(args);
     expect(response.status).toBe(400);
     expect(await readStatus(runtime, args, 'ord1')).toBe('pending');
+    // The mismatch never reconciled — the registrant carries NO payment stamp.
+    expect(await readRegistrantTag(runtime, args, REGISTRANT_IDS[0]!)).toBe('none');
   });
 
   it('is idempotent — replaying the same succeeded event keeps it paid', async () => {

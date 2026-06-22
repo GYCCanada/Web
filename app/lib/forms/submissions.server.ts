@@ -7,13 +7,18 @@ import { type FormId, orderKey, submissionKey } from '../content/pages/registry'
 import {
   deterministicListItemId,
   IsoDate,
+  type ListItemId,
   newListItemId,
 } from '../content/schema';
 import { type NotFound, Storage, type StorageError } from '../storage.server';
 
 import type { DecodedForm } from './decode';
 import { RegistrationOrder } from './order';
-import { submissionSchema, type Submission } from './submission';
+import {
+  type PaymentState,
+  submissionSchema,
+  type Submission,
+} from './submission';
 
 /**
  * The persisted-`Submission` write service (CONTEXT §Submission, settled #8;
@@ -107,6 +112,25 @@ export class Service extends Context.Service<
       order: RegistrationOrder,
     ) => Effect.Effect<RegistrationOrder, StorageError>;
     /**
+     * Stamp a `PaymentState` onto an already-persisted registrant `Submission`
+     * (`submissions/<form>/<id>.json`) and return the updated record. Re-reads the
+     * stored record, replaces its `payment` envelope field, and re-writes it — so
+     * order-creation can mark each affected registrant `pending`, and the webhook
+     * (C8) can flip them `paid`/`failed` alongside the order (registrar plan :695
+     * "PaymentState on the submission envelope"; C8 :904 "mark order + registrants
+     * paid"). **Idempotent**: writing the SAME `payment` an already-stamped record
+     * carries re-writes byte-identical content (no status churn), mirroring the
+     * order flip. A stored registrant ALWAYS decodes (it was written by `persist`
+     * from the same definition-derived codec), so a decode failure is bucket
+     * corruption and dies; `NotFound` is real and user-facing (a webhook event that
+     * names a registrant whose record has not landed).
+     */
+    readonly setRegistrantPayment: (
+      form: FormId,
+      id: ListItemId,
+      payment: PaymentState,
+    ) => Effect.Effect<Submission, StorageError | NotFound>;
+    /**
      * Read one frozen order back off the bucket and decode it
      * (`submissions/<form>/orders/<orderId>.json`). The webhook (C8) re-reads the
      * order to verify the charged amount against the order's FROZEN `amount`
@@ -121,31 +145,36 @@ export class Service extends Context.Service<
       orderId: string,
     ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
     /**
-     * Flip the order at `submissions/<form>/orders/<orderId>.json` to `paid` and
-     * return the resulting record (registrar plan C8 — the webhook's terminal
-     * reconcile step, after the route has verified the charged amount matches the
-     * order's frozen `amount`). **Idempotent**: replaying the same
-     * `payment_intent.succeeded` event (Stripe retries until 200, and the
-     * `c8c4abd` idempotency fix proves a verbatim retry must not double-apply)
-     * re-reads an already-`paid` order and returns it UNCHANGED — no second write,
-     * no status churn. The order record is the live payment-status surface (the
-     * submission-`payment` backfill is latent — see plan Risks), so this flips the
-     * ORDER; the registrant submissions it names (`registrantIds`) are paid by
-     * virtue of their order being paid. Fails `NotFound` when no such order
-     * exists (an event for an unknown order — the route maps it to a 400 so Stripe
-     * retries until the order has landed), `StorageError` on a bucket fault.
+     * Flip the order at `submissions/<form>/orders/<orderId>.json` to `paid` AND
+     * stamp each registrant submission it names (`registrantIds`) `paid` in
+     * lock-step, returning the resulting order (registrar plan C8 :904 — "mark
+     * order + registrants paid", the webhook's terminal reconcile step, after the
+     * route has verified the charged amount matches the order's frozen `amount`).
+     * **Idempotent**: replaying the same `payment_intent.succeeded` event (Stripe
+     * retries until 200, and the `c8c4abd` idempotency fix proves a verbatim retry
+     * must not double-apply) re-reads an already-`paid` order, returns it UNCHANGED
+     * — no second write — and re-stamps each registrant with a byte-identical
+     * `paid` state (no status churn). The registrant flip mirrors the order's
+     * frozen `mode`/`amount`/`currency` plus a `paidAt` calendar date, so the
+     * registrant record carries its own paid status (plan :695) — order and
+     * registrant can never disagree. Fails `NotFound` when no such order exists (an
+     * event for an unknown order — the route maps it to a 400 so Stripe retries
+     * until the order has landed), `StorageError` on a bucket fault.
      */
     readonly markOrderPaid: (
       form: FormId,
       orderId: string,
     ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
     /**
-     * Flip the order to `failed` and return it (a `payment_intent.payment_failed`
-     * event). Idempotent in the same shape as {@link markOrderPaid}: a re-read of
-     * an already-`failed` order returns it unchanged. A `paid` order is NEVER
-     * downgraded to `failed` (a succeeded event already reconciled it; a stray
-     * later failure event for the same intent is ignored) — only a non-terminal
-     * (`pending`/`expired`) order transitions. Same failure channel.
+     * Flip the order to `failed` AND stamp each registrant it names `failed` in
+     * lock-step, returning the order (a `payment_intent.payment_failed` event).
+     * Idempotent in the same shape as {@link markOrderPaid}: a re-read of an
+     * already-`failed` order returns it unchanged and re-stamps each registrant
+     * byte-identically. A `paid` order is NEVER downgraded to `failed` (a succeeded
+     * event already reconciled it; a stray later failure event for the same intent
+     * is ignored) — only a non-terminal (`pending`/`expired`) order transitions,
+     * and when it does NOT transition the registrants are left untouched (a paid
+     * registrant is never downgraded either). Same failure channel.
      */
     readonly markOrderFailed: (
       form: FormId,
@@ -209,6 +238,48 @@ export const layer = Layer.effect(
       return submission;
     });
 
+    // Read one persisted registrant `Submission` back off the bucket and decode it
+    // through its definition-derived codec. A stored registrant ALWAYS decodes (it
+    // was written by `persist` from this same codec), so a decode failure is bucket
+    // corruption — it dies rather than masquerading as a `NotFound`/`StorageError`.
+    // The `NotFound` is real: a webhook event naming a registrant whose record has
+    // not landed (the route 400s so Stripe retries). The form definition is read
+    // through `Content` so the payload codec is derived, never re-declared.
+    const readSubmission = Effect.fn('Submissions.readSubmission')(function* (
+      form: FormId,
+      id: ListItemId,
+    ) {
+      const definition = yield* content.getForm(form);
+      const schema = submissionSchema(definition);
+      const object = yield* storage.get(submissionKey(form, id));
+      const text = yield* Effect.promise(() =>
+        new Response(object.stream).text(),
+      );
+      return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(
+        text,
+      ).pipe(Effect.orDie);
+    });
+
+    const setRegistrantPayment = Effect.fn('Submissions.setRegistrantPayment')(
+      function* (form: FormId, id: ListItemId, payment: PaymentState) {
+        const definition = yield* content.getForm(form);
+        const schema = submissionSchema(definition);
+        const current = yield* readSubmission(form, id);
+        const next: Submission = { ...current, payment };
+        // Re-encodes through the same derived codec the read used; a failure is an
+        // upstream bug (a `payment` that never satisfied `PaymentState`), so it dies
+        // rather than masquerading as a `StorageError` — the encode is the
+        // validation, exactly as `persist`'s is. Re-writing the SAME `payment` an
+        // already-stamped record carries produces byte-identical content (the
+        // idempotent replay path).
+        const json = yield* Schema.encodeUnknownEffect(
+          Schema.fromJsonString(schema),
+        )(next).pipe(Effect.orDie);
+        yield* storage.put(submissionKey(form, id), json, 'application/json');
+        return next;
+      },
+    );
+
     const persistOrder = Effect.fn('Submissions.persistOrder')(function* (
       form: FormId,
       order: RegistrationOrder,
@@ -249,23 +320,51 @@ export const layer = Layer.effect(
       )(text).pipe(Effect.orDie);
     });
 
-    // Read-flip-persist with an idempotent terminal-state short-circuit. Replaying
-    // the same webhook event (Stripe retries until 200) re-reads an order already
-    // in `target` and returns it WITHOUT a second write, so the flip is a no-op on
-    // replay (mirrors the `c8c4abd` idempotency discipline). `guard` decides which
-    // current statuses may transition: `markOrderPaid` flips from any non-`paid`
-    // state; `markOrderFailed` refuses to downgrade an already-`paid` order.
+    // Read-flip-persist over BOTH the order AND the registrant submissions it names
+    // (`registrantIds`), idempotent end-to-end. `guard` decides which current order
+    // statuses may transition: `markOrderPaid` flips from any non-`paid` state;
+    // `markOrderFailed` refuses to downgrade an already-`paid` order. When the guard
+    // forbids the transition AND the order is not already at `target`, NOTHING is
+    // touched (a paid order's registrants are never downgraded by a stray failure).
+    //
+    // Otherwise — the order is at `target`, or may transition to it — the order is
+    // written (only when it actually changes, so a replay is a no-op write on the
+    // order) and EVERY registrant is re-stamped with `registrantPayment(order)`.
+    // Re-stamping on the already-`target` path is deliberate: it converges a flip
+    // that on a first delivery wrote the order but failed mid-registrant-loop, and
+    // it is byte-identical on a clean replay (no churn) — mirroring the `c8c4abd`
+    // idempotency discipline across the two-sided write. `registrantPayment` reads
+    // the order's FROZEN `mode`/`amount`/`currency` (+ a `paidAt` for the paid arm),
+    // so order and registrant carry the same lifecycle by construction.
     const flipStatus = (
       form: FormId,
       orderId: string,
       target: RegistrationOrder['status'],
       guard: (current: RegistrationOrder['status']) => boolean,
+      registrantPayment: (
+        order: RegistrationOrder,
+      ) => Effect.Effect<PaymentState>,
     ) =>
       Effect.gen(function* () {
         const order = yield* readOrder(form, orderId);
-        if (order.status === target || !guard(order.status)) return order;
-        const next: RegistrationOrder = { ...order, status: target };
-        return yield* persistOrder(form, next);
+        // Guard forbids the transition and we are not already there ⇒ leave the
+        // order AND its registrants untouched.
+        if (order.status !== target && !guard(order.status)) return order;
+        // Write the order only when it actually changes (a replay re-reads it
+        // already at `target` and skips the write); the returned/settled order is
+        // the source the registrant stamp reads its frozen amounts from.
+        const settled: RegistrationOrder =
+          order.status === target
+            ? order
+            : yield* persistOrder(form, { ...order, status: target });
+        const payment = yield* registrantPayment(settled);
+        // Stamp every named registrant in lock-step (idempotent — byte-identical on
+        // replay). A `NotFound`/`StorageError` here propagates so Stripe retries and
+        // a later delivery converges the records that did not land.
+        for (const id of settled.registrantIds) {
+          yield* setRegistrantPayment(form, id, payment);
+        }
+        return settled;
       });
 
     const markOrderPaid = Effect.fn('Submissions.markOrderPaid')(function* (
@@ -273,8 +372,30 @@ export const layer = Layer.effect(
       orderId: string,
     ) {
       // Any non-`paid` order (pending/failed/expired) may settle to `paid`: a
-      // confirmed charge is authoritative over an earlier non-terminal state.
-      return yield* flipStatus(form, orderId, 'paid', () => true);
+      // confirmed charge is authoritative over an earlier non-terminal state. Each
+      // registrant is stamped `paid` with the order's frozen mode/amount/currency
+      // plus the calendar date it settled (`paidAt`).
+      return yield* flipStatus(
+        form,
+        orderId,
+        'paid',
+        () => true,
+        (order) =>
+          Effect.gen(function* () {
+            const now = yield* Clock.currentTimeMillis;
+            const paidAt = yield* decodeIsoDate(isoDateString(now)).pipe(
+              Effect.orDie,
+            );
+            return {
+              _tag: 'paid',
+              orderId: order.orderId,
+              mode: order.mode,
+              amount: order.amount,
+              currency: order.currency,
+              paidAt,
+            } satisfies PaymentState;
+          }),
+      );
     });
 
     const markOrderFailed = Effect.fn('Submissions.markOrderFailed')(function* (
@@ -283,17 +404,27 @@ export const layer = Layer.effect(
     ) {
       // Never downgrade a `paid` order: a succeeded event already reconciled it,
       // so a stray later failure for the same intent is ignored (the `guard`).
+      // Each registrant is stamped `failed`, carrying the order link + a short
+      // reason (no amount/paidAt — there is nothing settled).
       return yield* flipStatus(
         form,
         orderId,
         'failed',
         (current) => current !== 'paid',
+        (order) =>
+          Effect.succeed({
+            _tag: 'failed',
+            orderId: order.orderId,
+            mode: order.mode,
+            reason: 'payment_intent.payment_failed',
+          } satisfies PaymentState),
       );
     });
 
     return Service.of({
       persist,
       persistOrder,
+      setRegistrantPayment,
       getOrder: readOrder,
       markOrderPaid,
       markOrderFailed,
