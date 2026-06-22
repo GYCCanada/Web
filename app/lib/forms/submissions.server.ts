@@ -336,11 +336,21 @@ export const layer = Layer.effect(
     // idempotency discipline across the two-sided write. `registrantPayment` reads
     // the order's FROZEN `mode`/`amount`/`currency` (+ a `paidAt` for the paid arm),
     // so order and registrant carry the same lifecycle by construction.
+    //
+    // `transition` builds the order to WRITE when it actually changes — it runs ONCE,
+    // only on the real transition (never on a replay that re-reads an order already
+    // at `target`), so any timestamp it freezes (`markOrderPaid`'s `paidAt`) is
+    // stamped exactly once and re-read verbatim on every later replay. `settled` is
+    // the source the registrant stamp derives its frozen amounts AND `paidAt` from,
+    // so a replay on a LATER date writes a byte-identical registrant record.
     const flipStatus = (
       form: FormId,
       orderId: string,
       target: RegistrationOrder['status'],
       guard: (current: RegistrationOrder['status']) => boolean,
+      transition: (
+        order: RegistrationOrder,
+      ) => Effect.Effect<RegistrationOrder>,
       registrantPayment: (
         order: RegistrationOrder,
       ) => Effect.Effect<PaymentState>,
@@ -352,11 +362,13 @@ export const layer = Layer.effect(
         if (order.status !== target && !guard(order.status)) return order;
         // Write the order only when it actually changes (a replay re-reads it
         // already at `target` and skips the write); the returned/settled order is
-        // the source the registrant stamp reads its frozen amounts from.
+        // the source the registrant stamp reads its frozen amounts from. The
+        // already-`target` order is re-read VERBATIM (its frozen `paidAt` intact),
+        // so the convergence re-stamp derives the same value the first flip froze.
         const settled: RegistrationOrder =
           order.status === target
             ? order
-            : yield* persistOrder(form, { ...order, status: target });
+            : yield* persistOrder(form, yield* transition(order));
         const payment = yield* registrantPayment(settled);
         // Stamp every named registrant in lock-step (idempotent — byte-identical on
         // replay). A `NotFound`/`StorageError` here propagates so Stripe retries and
@@ -372,27 +384,48 @@ export const layer = Layer.effect(
       orderId: string,
     ) {
       // Any non-`paid` order (pending/failed/expired) may settle to `paid`: a
-      // confirmed charge is authoritative over an earlier non-terminal state. Each
-      // registrant is stamped `paid` with the order's frozen mode/amount/currency
-      // plus the calendar date it settled (`paidAt`).
+      // confirmed charge is authoritative over an earlier non-terminal state. The
+      // settled-on calendar date (`paidAt`) is FROZEN onto the order the instant it
+      // transitions and never re-stamped, so a webhook replay on a LATER date
+      // re-reads it rather than the clock. Each registrant is stamped `paid` with
+      // the order's frozen mode/amount/currency plus that frozen `paidAt` —
+      // byte-identical on every replay (the idempotency invariant the webhook owes).
       return yield* flipStatus(
         form,
         orderId,
         'paid',
         () => true,
+        // Read the clock ONCE, here, on the real transition only — a replay
+        // re-reads the already-`paid` order verbatim and never enters this branch,
+        // so `paidAt` cannot drift across deliveries.
         (order) =>
           Effect.gen(function* () {
             const now = yield* Clock.currentTimeMillis;
             const paidAt = yield* decodeIsoDate(isoDateString(now)).pipe(
               Effect.orDie,
             );
+            return { ...order, status: 'paid', paidAt } satisfies RegistrationOrder;
+          }),
+        // Derive the registrant `paidAt` FROM the order's frozen stamp
+        // (`derive-dont-sync`), never from the clock — so order and registrant
+        // carry the same settled date and a replay rewrites neither. The settled
+        // order always carries `paidAt` (the transition froze it, and an already-
+        // `paid` order was written with it), so a missing value is bucket
+        // corruption and dies rather than masquerading as an undated paid stamp.
+        (order) =>
+          Effect.gen(function* () {
+            if (order.paidAt === undefined) {
+              return yield* Effect.die(
+                new Error(`paid order ${order.orderId} has no frozen paidAt`),
+              );
+            }
             return {
               _tag: 'paid',
               orderId: order.orderId,
               mode: order.mode,
               amount: order.amount,
               currency: order.currency,
-              paidAt,
+              paidAt: order.paidAt,
             } satisfies PaymentState;
           }),
       );
@@ -411,6 +444,8 @@ export const layer = Layer.effect(
         orderId,
         'failed',
         (current) => current !== 'paid',
+        // A failed transition freezes no timestamp — there is nothing settled.
+        (order) => Effect.succeed({ ...order, status: 'failed' } satisfies RegistrationOrder),
         (order) =>
           Effect.succeed({
             _tag: 'failed',

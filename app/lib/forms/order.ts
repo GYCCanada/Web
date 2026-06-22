@@ -59,5 +59,15 @@ export const RegistrationOrder = Schema.Struct({
   registrantIds: Schema.Array(ListItemId),
   // Copied from pricing.registrationDeadline at create-intent when present (Q4).
   deadline: Schema.optionalKey(IsoDate),
+  // FROZEN the instant the order first transitions to `paid` (C8 `markOrderPaid`),
+  // and NEVER re-stamped thereafter — so a Stripe webhook replay on a LATER date
+  // re-reads this same value rather than re-reading the clock. The registrant
+  // `paid` stamp derives its own `paidAt` FROM this field (`derive-dont-sync`), so
+  // a replayed `checkout.session.completed` writes a byte-identical registrant
+  // record (no `paidAt` drift) — the idempotent-replay invariant the webhook owes.
+  // `optionalKey` (never re-declared, backfill-safe): a `pending`/`failed`/`expired`
+  // order has nothing settled, so it carries no `paidAt`; a read-back of a legacy
+  // paid order written before this field existed tolerates its absence.
+  paidAt: Schema.optionalKey(IsoDate),
 });
 export type RegistrationOrder = typeof RegistrationOrder.Type;

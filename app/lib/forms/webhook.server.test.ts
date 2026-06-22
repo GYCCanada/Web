@@ -6,6 +6,7 @@ import {
   Result,
   Schema,
 } from 'effect';
+import { TestClock } from 'effect/testing';
 import { RouterContextProvider } from 'react-router';
 
 import { Content } from '../content.server';
@@ -164,6 +165,20 @@ const readRegistrantPaymentTag = (id: ListItemId) =>
     return decoded.payment?._tag ?? 'none';
   });
 
+/**
+ * Read one stored registrant submission's RAW JSON bytes off the SHARED bucket —
+ * the exact `submissions/registration/<id>.json` text on disk. Byte-identity of
+ * this string across a webhook replay is the idempotency invariant: a replayed
+ * `checkout.session.completed` on a LATER date must rewrite the SAME bytes (esp.
+ * `paidAt` unchanged), not just the same `payment._tag`.
+ */
+const readRegistrantJson = (id: ListItemId) =>
+  Effect.gen(function* () {
+    const storage = yield* Storage.Service;
+    const object = yield* storage.get(submissionKey('registration', id));
+    return yield* Effect.promise(() => new Response(object.stream).text());
+  });
+
 describe('Submissions order-state flips (C8 reconcile primitives)', () => {
   it('markOrderPaid flips a pending order to paid', async () => {
     const status = await runSubmissions(
@@ -209,6 +224,53 @@ describe('Submissions order-state flips (C8 reconcile primitives)', () => {
       }),
     );
     expect(tag).toBe('paid');
+  });
+
+  it('markOrderPaid freezes paidAt — a replay on a LATER date is byte-identical (R2-paidAt)', async () => {
+    // 2026-06-20 — the date the order first settles.
+    const FIRST_PAID = Date.UTC(2026, 5, 20);
+    // 2026-09-15 — Stripe re-delivers the SAME event months later. The registrant
+    // record (and order) must NOT pick up this later date: `paidAt` is frozen once.
+    const REPLAY_LATER = Date.UTC(2026, 8, 15);
+    const storage = layerTest(seed(pendingOrder('ord1', 15000)));
+    const [first, replay] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        // First delivery at FIRST_PAID — flips the order paid and stamps registrants.
+        yield* TestClock.setTime(FIRST_PAID);
+        yield* submissions.markOrderPaid('registration', 'ord1');
+        const firstJson = yield* readRegistrantJson(REGISTRANT_IDS[0]!);
+        const firstOrder = yield* submissions.getOrder('registration', 'ord1');
+        // Stripe replays the SAME event MONTHS later — advance the clock first.
+        yield* TestClock.setTime(REPLAY_LATER);
+        yield* submissions.markOrderPaid('registration', 'ord1');
+        const replayJson = yield* readRegistrantJson(REGISTRANT_IDS[0]!);
+        const replayOrder = yield* submissions.getOrder('registration', 'ord1');
+        return [
+          { json: firstJson, paidAt: firstOrder.paidAt },
+          { json: replayJson, paidAt: replayOrder.paidAt },
+        ] as const;
+      }).pipe(
+        Effect.provide(
+          Layer.provideMerge(
+            Submissions.layer,
+            Layer.provideMerge(Content.layer, storage),
+          ).pipe(Layer.provide(Env.defaultLayer)),
+        ),
+        // Control the clock so the two deliveries land on DIFFERENT calendar dates.
+        Effect.provide(TestClock.layer()),
+        // `TestClock.setTime` schedules its latch wakeups in a `Scope`.
+        Effect.scoped,
+      ),
+    );
+    // The registrant record is BYTE-IDENTICAL across the replay — the frozen
+    // `paidAt` did not drift to the later replay date.
+    expect(replay.json).toBe(first.json);
+    expect(first.json).toContain('"paidAt":"2026-06-20"');
+    expect(replay.json).not.toContain('2026-09-15');
+    // The order's own frozen stamp is the first-settled date, unchanged on replay.
+    expect(String(first.paidAt)).toBe('2026-06-20');
+    expect(String(replay.paidAt)).toBe('2026-06-20');
   });
 
   it('markOrderPaid is idempotent — replaying leaves it paid', async () => {
