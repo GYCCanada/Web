@@ -130,11 +130,12 @@ grep). The registrar is greenfield ON TOP of this engine.
    Order of operations: persist submission (pending) → create Checkout Session → freeze
    order → redirect to the hosted page → webhook marks paid. Failure/abandonment
    handling. **Cardinality TODAY:** `group` mints ONE session and redirects to its `url`
-   (complete). `perRegistrant` mints N sessions + persists N pending orders, but the action
-   redirects only to the FIRST (`registration-action.ts:333-334`) — registrants 2..N are
-   stranded `pending` (a single browser cannot start N hosted pages). This is a **KNOWN OPEN
-   GAP**; the intended follow-up emails each registrant their own Checkout `url`, but that
-   email fan-out is **not yet implemented**. (See the registrar plan's Checkout note.)
+   (complete). `perRegistrant` mints N sessions + persists N pending orders, then **emails each
+   registrant their own Checkout `url`** (`notifyPaymentLink` over the Mailer,
+   `registration-action.ts:317-339`, `registration-route.ts:70-87`) and redirects to a "payment
+   links sent" toast — a single browser cannot start N hosted pages, so each registrant settles
+   their own session independently on its `checkout.session.completed`. Persist-then-notify: a
+   mail failure cannot lose the durable pending sessions. (See the registrar plan's Checkout note.)
 5. **CMS authoring + the backfill hazard.** Pricing rules are CMS-editable data on the
    form object → `/admin` editor surface + the legacy-object read-boundary backfill so
    adding pricing to a published `forms/registration.json` doesn't break decode.
