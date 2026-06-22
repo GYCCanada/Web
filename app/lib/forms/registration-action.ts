@@ -151,17 +151,35 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
     }
 
     // On-site checkout (registrar plan Decision 2 / 2b / Decision 7), gated by the
-    // `Env.stripe` `None`-gate (Decision 8). When stripe is unconfigured the
-    // on-site payment path is INERT — registration persists + notifies + redirects
-    // exactly as the RegFox-era no-op did, so nothing changes until the gate flips.
-    // When configured AND the form authored a `party` section, the decoded
-    // `party._tag` drives cardinality + receipt routing (the orthogonality table
-    // row (ii), Decision 2b.6):
+    // `Env.stripe` `None`-gate (Decision 8) AND the presence of a `pricing`
+    // dimension on the definition. When stripe is unconfigured the on-site payment
+    // path is INERT — registration persists + notifies + redirects exactly as the
+    // RegFox-era no-op did, so nothing changes until the gate flips.
+    //
+    // The `definition.pricing !== undefined` clause is load-bearing, NOT cosmetic:
+    // `priceGroup`/`priceRegistrant` return `Cents(0)` for an UNPRICED form
+    // (`price.ts` — absent `pricing` ⇒ 0, correctly), so a Stripe-enabled form that
+    // authors a `party` section but NO pricing (the current default `registration`
+    // form) would otherwise mint a ZERO-amount PaymentIntent/order. Stripe is the
+    // gate for "is on-site payment configured"; `pricing` is the gate for "does this
+    // form actually charge". Both must hold — an unpriced form persists + notifies +
+    // redirects with NO payment path (the pre-registrar behaviour), even with Stripe
+    // configured. A computed amount of `0` for a PRICED submission is likewise
+    // skipped per-checkout below (a fully-discounted / nothing-selected registrant
+    // never mints a zero-amount intent).
+    //
+    // When all three hold (stripe configured, `party` authored, `pricing` present)
+    // the decoded `party._tag` drives cardinality + receipt routing (the
+    // orthogonality table row (ii), Decision 2b.6):
     //   - `group`         ⇒ ONE order for the party sum, ONE intent, receipt to the
     //                       NOMINATED payer (possibly a non-attendee);
     //   - `perRegistrant` ⇒ N orders/intents — one per registrant, each frozen on
     //                       that registrant's own price + email.
-    if (Option.isSome(env.stripe) && 'party' in shell) {
+    if (
+      Option.isSome(env.stripe) &&
+      'party' in shell &&
+      definition.pricing !== undefined
+    ) {
       const party = shell.party;
       const currency = env.stripe.value.currency;
       // ONE `now` for the whole submission (Decision 6) — every frozen amount in
@@ -171,37 +189,43 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
       if (party._tag === 'group') {
         // The party sum, frozen under the shared `now` (Decision 6) — the amount
         // the order records and the intent charges. `priceGroup` sums each
-        // registrant's price; an unpriced form sums to 0 (the gate is the only
-        // thing that makes the on-site path live, not pricing).
+        // registrant's price over the present `pricing` dimension (the gate above
+        // already proved `pricing` is present — an UNPRICED form never reaches here).
         const amount = priceGroup(definition, shell.registrants, now);
-        // The receipt routes to the NOMINATED payer (possibly a non-attendee),
-        // frozen here so a later edit cannot retro-redirect the receipt (2b.6).
-        const receiptEmail = party.payer.email;
-        // One PaymentIntent per party, keyed off the request fingerprint + mode
-        // (Decision 2): a verbatim retry re-derives the same key ⇒ Stripe replays
-        // the first intent (no double-charge); a changed payload ⇒ a new checkout.
-        const idempotencyKey = `registration:checkout:${requestFingerprint}:group`;
-        const intent = yield* payment.createIntent(
-          amount,
-          currency,
-          receiptEmail,
-          { orderId: requestFingerprint, mode: 'group' },
-          idempotencyKey,
-        );
-        // Freeze the order record (Decision 7 step 3) — ONE order keyed by the
-        // fingerprint, `registrantIds` = the whole party, amount + receiptEmail
-        // frozen. The webhook (C8) reads it back to mark it `paid`.
-        const order: RegistrationOrder = {
-          orderId: requestFingerprint,
-          mode: 'group',
-          intentId: intent.intentId,
-          amount,
-          currency,
-          receiptEmail,
-          status: 'pending',
-          registrantIds: stored.map((registrant) => registrant.id),
-        };
-        yield* submissions.persistOrder('registration', order);
+        // A zero party sum (e.g. a fully-discounted window or a priced form where
+        // nothing chargeable is selected) mints NO intent/order — Stripe rejects
+        // zero-amount intents and there is nothing to collect. The submission still
+        // persists + notifies + redirects.
+        if (amount > 0) {
+          // The receipt routes to the NOMINATED payer (possibly a non-attendee),
+          // frozen here so a later edit cannot retro-redirect the receipt (2b.6).
+          const receiptEmail = party.payer.email;
+          // One PaymentIntent per party, keyed off the request fingerprint + mode
+          // (Decision 2): a verbatim retry re-derives the same key ⇒ Stripe replays
+          // the first intent (no double-charge); a changed payload ⇒ a new checkout.
+          const idempotencyKey = `registration:checkout:${requestFingerprint}:group`;
+          const intent = yield* payment.createIntent(
+            amount,
+            currency,
+            receiptEmail,
+            { orderId: requestFingerprint, mode: 'group' },
+            idempotencyKey,
+          );
+          // Freeze the order record (Decision 7 step 3) — ONE order keyed by the
+          // fingerprint, `registrantIds` = the whole party, amount + receiptEmail
+          // frozen. The webhook (C8) reads it back to mark it `paid`.
+          const order: RegistrationOrder = {
+            orderId: requestFingerprint,
+            mode: 'group',
+            intentId: intent.intentId,
+            amount,
+            currency,
+            receiptEmail,
+            status: 'pending',
+            registrantIds: stored.map((registrant) => registrant.id),
+          };
+          yield* submissions.persistOrder('registration', order);
+        }
       } else {
         // `perRegistrant`: one order + one intent PER registrant (Decision 2b.6).
         // Each is keyed `<fingerprint>:<index>` so a verbatim retry replays the
@@ -210,6 +234,10 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
         // per-registrant order links the ONE registrant submission it pays for.
         for (const [index, registrant] of shell.registrants.entries()) {
           const amount = priceRegistrant(definition, registrant, now);
+          // A zero registrant price mints NO intent/order for THAT registrant (the
+          // others in the party still mint theirs) — Stripe rejects zero-amount
+          // intents and there is nothing to collect.
+          if (amount <= 0) continue;
           const receiptEmail = registrant['email'] as string;
           const orderId = `${requestFingerprint}:${index}`;
           const idempotencyKey = `registration:checkout:${requestFingerprint}:perRegistrant:${index}`;

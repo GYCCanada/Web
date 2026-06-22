@@ -3,6 +3,7 @@ import { ConfigProvider, DateTime, Effect, Layer, Option, Schema } from 'effect'
 import { RouterContextProvider } from 'react-router';
 
 import { defaultRegistrationForm } from '../content/pages/defaults';
+import { formObjectKey } from '../content/pages/registry';
 import { formValidationError } from '../effect/errors';
 import {
   type AppLayer,
@@ -15,6 +16,7 @@ import { type CreateIntentCall, Payment } from '../payment.server';
 import { type ObjectHead, NotFound, Storage, StorageError } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
 
+import { FormDefinition } from './definition';
 import { RegistrationOrder } from './order';
 import { registrationAction } from './registration-action';
 import { submissionSchema } from './submission';
@@ -382,6 +384,30 @@ const STRIPE_ENABLED_ENV: Record<string, string> = {
 };
 
 /**
+ * The default `registration` form authors a `party` section but NO `pricing`
+ * dimension (C7a/C7.5 — party scope without prices). Checkout is gated on BOTH
+ * the `Env.stripe` `Some` AND `definition.pricing` being present (the --deep M2
+ * finding: an unpriced form would otherwise mint ZERO-amount intents, which
+ * Stripe rejects and which collect nothing). So a checkout assertion needs a
+ * PRICED definition: this seeds `forms/registration.json` with the default form
+ * plus a flat `base` fee, encoded as the bucket JSON `Content.getForm` reads back
+ * and decodes (`derive-dont-sync` — the action prices off the stored definition,
+ * not a hard-coded one). The `BASE_FEE` is the per-registrant base every priced
+ * fixture charges.
+ */
+const BASE_FEE = 5000;
+const pricedRegistrationObject = (): Record<string, { body: string }> => {
+  const encoded = Schema.encodeSync(FormDefinition)(
+    defaultRegistrationForm,
+  ) as Record<string, unknown>;
+  const priced = {
+    ...encoded,
+    pricing: { currency: 'cad', base: BASE_FEE, rules: [] },
+  };
+  return { [formObjectKey('registration')]: { body: JSON.stringify(priced) } };
+};
+
+/**
  * An app layer with the stripe gate forced `Some` (a ConfigProvider override, no
  * process.env leak) and the supplied `Payment` layer — `Payment.testLayer` for a
  * checkout assertion, or the real layer for the disabled case (gate `None`).
@@ -454,7 +480,10 @@ describe('registrationAction — group checkout (registrar C7)', () => {
   it('mints ONE PaymentIntent + ONE frozen order for the party (stripe enabled)', async () => {
     const calls: Array<CreateIntentCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
-      stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
+      stripeEnabledLayer(
+        layerTest(pricedRegistrationObject()),
+        Payment.testLayer({ calls }),
+      ),
     );
     const action = registrationAction({ notify: () => Effect.void, success });
     const args = makeRegistrationArgs(runtime, groupBody(2));
@@ -494,7 +523,10 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     // full action + parseSubmission path, not just the schema (the --deep blocker).
     const calls: Array<CreateIntentCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
-      stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
+      stripeEnabledLayer(
+        layerTest(pricedRegistrationObject()),
+        Payment.testLayer({ calls }),
+      ),
     );
     const action = registrationAction({ notify: () => Effect.void, success });
     const body = groupBody(2, (i): Record<string, string> =>
@@ -572,6 +604,43 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     const orders = await listOrders(runtime, args);
     expect(orders.length).toBe(0);
   });
+
+  it('stripe ENABLED but the form has NO pricing mints NO zero-amount intent/order (M2)', async () => {
+    // The --deep MAJOR finding M2: the default `registration` form authors a
+    // `party` section but NO `pricing`. With Stripe configured, gating checkout
+    // purely on `Some(stripe) && 'party' in shell` enters the on-site path and
+    // mints a ZERO-amount PaymentIntent/order (`priceGroup` of an unpriced form is
+    // `Cents(0)`). Stripe rejects zero-amount intents and there is nothing to
+    // collect. The fix requires `definition.pricing` to ALSO be present: an
+    // unpriced form (the default seeded here — `layerTest({})` falls back to the
+    // bundled `defaultRegistrationForm`, which has no `pricing`) persists +
+    // notifies + redirects with NO payment path, even with Stripe enabled.
+    const calls: Array<CreateIntentCall> = [];
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({ notify: () => Effect.void, success });
+    const args = makeRegistrationArgs(runtime, groupBody(2));
+
+    let thrown: unknown;
+    try {
+      await action(args);
+    } catch (error) {
+      thrown = error;
+    }
+    // It SUCCEEDED — the submission still persists + notifies + redirects.
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(302);
+
+    // No intent was minted (Stripe enabled but the form is unpriced) ...
+    expect(calls.length).toBe(0);
+    // ... and NO order was written (the zero-amount checkout was skipped) ...
+    const orders = await listOrders(runtime, args);
+    expect(orders.length).toBe(0);
+    // ... while both registrants are durably persisted (the pre-registrar path).
+    const stored = await listRegistrations(runtime, args);
+    expect(stored.length).toBe(2);
+  });
 });
 
 /**
@@ -601,7 +670,10 @@ describe('registrationAction — perRegistrant checkout (registrar C7.5)', () =>
   it('mints N intents + N frozen orders (3 registrants ⇒ 3), keyed + receipt-routed per registrant', async () => {
     const calls: Array<CreateIntentCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
-      stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
+      stripeEnabledLayer(
+        layerTest(pricedRegistrationObject()),
+        Payment.testLayer({ calls }),
+      ),
     );
     const action = registrationAction({ notify: () => Effect.void, success });
     const args = makeRegistrationArgs(runtime, perRegistrantBody(3));
