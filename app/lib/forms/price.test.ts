@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'effect-bun-test';
-import { Schema } from 'effect';
+import { Result, Schema } from 'effect';
 
+import { decodeForm } from './decode';
 import { FormDefinition } from './definition';
 import { priceGroup, priceRegistrant } from './price';
 
@@ -310,5 +311,194 @@ describe('priceGroup — sum of each registrant under one instant', () => {
     expect(
       cents(priceGroup(windowedDefinition, party, Date.UTC(2026, 1, 15))),
     ).toBe(8000);
+  });
+});
+
+/**
+ * C4c — activation × pricing orthogonality (Decision 4/5). The C3 fold already
+ * routes every rule through the shared `isActiveByName` guard; here we exercise
+ * the conditional path: a priced `activeWhenEquals` target contributes ONLY when
+ * its predicate holds over a sibling, and an inactive field contributes 0
+ * regardless of any rule keyed to it.
+ *
+ * `price-eligibility = isActive(field) ∧ ∃ pricingRule(field)` — two independent
+ * predicates AND-ed. The four combos are all representable and all pinned below:
+ * active∧priced charges, active∧unpriced 0, inactive∧priced 0, inactive∧unpriced
+ * 0. The activation guard and the pricing-rule presence are NEVER conflated — an
+ * active field with no rule adds 0; an inactive field with a rule adds 0.
+ *
+ * The complementary half — a PRESENT-but-inactive value can never reach `price()`
+ * because the decode boundary rejects it as an out-of-form payload — is asserted
+ * directly against `decodeForm` (the smuggle test), so the orthogonality holds end
+ * to end, not only inside this pure fold.
+ */
+
+/** A field/option set carrying two gated targets — one priced, one unpriced. */
+const gatedFields = [
+  {
+    _tag: 'literal',
+    name: 'addBanquet',
+    label: text('Banquet?', 'Banquet?'),
+    requiredMessage: 'registration.form.gender.required',
+    options: [
+      { value: 'yes', label: text('Yes', 'Oui') },
+      { value: 'no', label: text('No', 'Non') },
+    ],
+  },
+  {
+    // The PRICED gated target — a `choice` rule keys off it (active∧priced).
+    _tag: 'literal',
+    name: 'banquetSeats',
+    label: text('Seats', 'Places'),
+    requiredMessage: 'registration.form.church.required',
+    options: [
+      { value: 'single', label: text('Single', 'Simple') },
+      { value: 'couple', label: text('Couple', 'Couple') },
+    ],
+  },
+  {
+    // The UNPRICED gated target — NO pricing rule names it (active∧unpriced).
+    _tag: 'optionalText',
+    name: 'banquetNote',
+    label: text('Note', 'Note'),
+    invalidMessage: 'registration.form.other.required',
+  },
+] as const;
+
+/** Both targets active only when `addBanquet == 'yes'` (same-scope sibling). */
+const gatedRules = [
+  {
+    _tag: 'activeWhenEquals',
+    predicate: { _tag: 'literalEquals', when: 'addBanquet', equals: ['yes'] },
+    target: 'banquetSeats',
+  },
+  {
+    _tag: 'activeWhenEquals',
+    predicate: { _tag: 'literalEquals', when: 'addBanquet', equals: ['yes'] },
+    target: 'banquetNote',
+  },
+] as const;
+
+/** Base 5000; only `banquetSeats` carries a price (the unpriced target has none). */
+const gatedDefinition = Schema.decodeUnknownSync(FormDefinition)({
+  title: text('Registration', 'Inscription'),
+  fields: gatedFields,
+  pricing: {
+    currency: 'cad',
+    base: 5000,
+    rules: [
+      {
+        _tag: 'choice',
+        field: 'banquetSeats',
+        prices: [
+          { option: 'single', amount: 2000 },
+          { option: 'couple', amount: 3500 },
+        ],
+      },
+    ],
+  },
+  rules: gatedRules,
+});
+
+describe('priceRegistrant — activation gates a priced contribution (C4c)', () => {
+  test('when ∈ predicate ⇒ the priced active target is INCLUDED', () => {
+    // addBanquet == 'yes' ⇒ banquetSeats active ⇒ its choice price adds.
+    expect(
+      cents(
+        priceRegistrant(
+          gatedDefinition,
+          { addBanquet: 'yes', banquetSeats: 'couple' },
+          NOW_BETWEEN_WINDOWS,
+        ),
+      ),
+    ).toBe(8500); // 5000 + 3500
+  });
+
+  test('when ∉ predicate ⇒ the priced inactive target is EXCLUDED', () => {
+    // addBanquet == 'no' ⇒ banquetSeats inactive ⇒ contributes 0 even though a
+    // rule keys off it (the absent target is the only valid decoded shape).
+    expect(
+      cents(
+        priceRegistrant(
+          gatedDefinition,
+          { addBanquet: 'no' },
+          NOW_BETWEEN_WINDOWS,
+        ),
+      ),
+    ).toBe(5000); // base only — the inactive rule contributes nothing
+  });
+
+  test('a present-but-inactive value is rejected at DECODE — price never sees it', () => {
+    // The smuggle: a `banquetSeats` value while `addBanquet == 'no'`. The decode
+    // boundary rejects it as an out-of-form payload (registrar-plan Decision 5),
+    // so a smuggled priced value can NEVER reach the pure fold above.
+    const smuggled = decodeForm(gatedDefinition, {
+      addBanquet: 'no',
+      banquetSeats: 'couple',
+    });
+    expect(Result.isSuccess(smuggled)).toBe(false);
+
+    // And the legitimate inactive submission (target absent) decodes, then prices
+    // to base only — proving the guard and the boundary agree.
+    const inactive = decodeForm(gatedDefinition, { addBanquet: 'no' });
+    expect(Result.isSuccess(inactive)).toBe(true);
+    if (Result.isSuccess(inactive)) {
+      expect(
+        cents(priceRegistrant(gatedDefinition, inactive.success, NOW_BETWEEN_WINDOWS)),
+      ).toBe(5000);
+    }
+  });
+});
+
+describe('priceRegistrant — the four orthogonality combos (C4c)', () => {
+  test('active ∧ priced ⇒ charges (the rule contributes)', () => {
+    expect(
+      cents(
+        priceRegistrant(
+          gatedDefinition,
+          { addBanquet: 'yes', banquetSeats: 'single' },
+          NOW_BETWEEN_WINDOWS,
+        ),
+      ),
+    ).toBe(7000); // 5000 + 2000
+  });
+
+  test('active ∧ unpriced ⇒ 0 (no rule names the active target)', () => {
+    // banquetNote is active (addBanquet == 'yes') but has NO pricing rule ⇒ it
+    // contributes 0; the priced sibling adds, the unpriced one does not.
+    expect(
+      cents(
+        priceRegistrant(
+          gatedDefinition,
+          { addBanquet: 'yes', banquetSeats: 'single', banquetNote: 'window seat' },
+          NOW_BETWEEN_WINDOWS,
+        ),
+      ),
+    ).toBe(7000); // 5000 + 2000 — the active unpriced note adds nothing
+  });
+
+  test('inactive ∧ priced ⇒ 0 (the rule is gated off)', () => {
+    expect(
+      cents(
+        priceRegistrant(
+          gatedDefinition,
+          { addBanquet: 'no' },
+          NOW_BETWEEN_WINDOWS,
+        ),
+      ),
+    ).toBe(5000); // base only — the priced target is inactive
+  });
+
+  test('inactive ∧ unpriced ⇒ 0 (no rule, gated off — base only)', () => {
+    // Both gated targets inactive; one priced, one unpriced — neither contributes.
+    expect(
+      cents(
+        priceRegistrant(
+          gatedDefinition,
+          { addBanquet: 'no' },
+          NOW_BETWEEN_WINDOWS,
+        ),
+      ),
+    ).toBe(5000);
   });
 });
