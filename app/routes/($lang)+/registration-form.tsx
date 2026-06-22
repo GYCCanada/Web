@@ -273,12 +273,34 @@ export function RegistrationForm({
   });
 
   const registrants = fields.registrants.getFieldList();
-  // The party block's accessors (registrar plan C7): the nominated-payer name +
-  // email inputs render from the CMS-authored `definition.party.*` Text, never
-  // route-static keys (Constraint 4). The mode SELECTOR is C7.5 (shown only when
-  // ≥2 modes are authored); C7 authors group-only, so only the payer block draws.
+  // The party block's accessors (registrar plan C7 / C7.5): the nominated-payer
+  // name + email inputs and the mode-selector radios render from the CMS-authored
+  // `definition.party.*` Text, never route-static keys (Constraint 4).
   const party = definition.party;
-  const payerFieldset = fields.party.getFieldset().payer.getFieldset();
+  const partyFieldset = fields.party.getFieldset();
+  const payerFieldset = partyFieldset.payer.getFieldset();
+
+  // The authored billing modes, in a stable order — the allow-list (an absent
+  // option key ⇒ that mode is not offered). The mode SELECTOR renders only when ≥2
+  // modes are authored (a single-mode form has nothing to choose, the shell
+  // defaults it); the payer block renders only when the LIVE mode is `group`
+  // (`perRegistrant` carries no payer). C7.5 — the orthogonality table rows
+  // (i)/(ii) made visible.
+  const partyModes = party
+    ? (['group', 'perRegistrant'] as const).filter(
+        (mode) => party.billingMode.options[mode] !== undefined,
+      )
+    : [];
+  // The live mode drives the payer block's visibility. `/future` field metadata
+  // exposes no `.value`, so read `party._tag` from the live form data; the SSR
+  // fallback is the first authored mode (the shell's absent-mode default), so the
+  // server renders the payer block iff the default mode is `group` — matching what
+  // the shell then decodes.
+  const liveMode = useFormData(
+    form.id,
+    (formData) => formData.get(partyFieldset._tag.name),
+    { fallback: partyModes[0] ?? null },
+  );
 
   // `/future` field metadata exposes no live `.value`; read the current `type`
   // and `dateOfBirth` for each registrant from the live form data instead. The
@@ -338,47 +360,65 @@ export function RegistrationForm({
           {...form.props}
         >
           {/*
-            The CMS-authored party block (registrar plan C7). Rendered only for a
-            party-offering form (registration); the labels are the authored
+            The CMS-authored party block (registrar plan C7 / C7.5). Rendered only
+            for a party-offering form (registration); the labels are the authored
             `definition.party.*` Text projected to the active locale (NOT
-            route-static keys, Constraint 4). C7 authors GROUP-only, so the mode
-            selector is not shown (C7.5 shows it when ≥2 modes are authored); the
-            nominated-payer name + email always render for a group-offering form.
-            The "I'm paying" affordance copies the first registrant's name + email
-            into the payer inputs — a client-side convenience; the server still
-            decodes + freezes `party.payer.{name,email}` from these inputs.
+            route-static keys, Constraint 4). The mode SELECTOR shows only when ≥2
+            modes are authored (a single-mode form has nothing to choose). The
+            nominated-payer name + email render only when the LIVE mode is `group`
+            (`perRegistrant` carries no payer — each registrant self-pays). The
+            "I'm paying" affordance copies the first registrant's name + email into
+            the payer inputs — a client-side convenience; the server still decodes +
+            freezes `party.payer.{name,email}` from these inputs.
           */}
-          {party && party.payer ? (
+          {party ? (
             <fieldset className="flex flex-col gap-4">
               {party.intro ? <p>{party.intro[locale]}</p> : null}
-              <h2>{party.payer.label[locale]}</h2>
-              <TextField name={payerFieldset.name.name}>
-                <Label>{party.payer.nameField.label[locale]}</Label>
-                <TextField.Input type="text" />
-                <FieldErrors />
-              </TextField>
-              <TextField name={payerFieldset.email.name}>
-                <Label>{party.payer.emailField.label[locale]}</Label>
-                <TextField.Input type="text" />
-                <FieldErrors />
-              </TextField>
-              <div>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    intent.update({
-                      name: payerFieldset.name.name,
-                      value: payerSource[0]?.name ?? '',
-                    });
-                    intent.update({
-                      name: payerFieldset.email.name,
-                      value: payerSource[0]?.email ?? '',
-                    });
-                  }}
-                >
-                  {locale === 'fr' ? "C'est moi qui paie" : "I'm paying"}
-                </Button>
-              </div>
+              {partyModes.length >= 2 ? (
+                <RadioGroup name={partyFieldset._tag.name}>
+                  <Label>{party.billingMode.label[locale]}</Label>
+                  <Radios>
+                    {partyModes.map((mode) => (
+                      <Radio key={mode} value={mode}>
+                        {party.billingMode.options[mode]![locale]}
+                      </Radio>
+                    ))}
+                  </Radios>
+                  <FieldErrors />
+                </RadioGroup>
+              ) : null}
+              {party.payer && liveMode === 'group' ? (
+                <>
+                  <h2>{party.payer.label[locale]}</h2>
+                  <TextField name={payerFieldset.name.name}>
+                    <Label>{party.payer.nameField.label[locale]}</Label>
+                    <TextField.Input type="text" />
+                    <FieldErrors />
+                  </TextField>
+                  <TextField name={payerFieldset.email.name}>
+                    <Label>{party.payer.emailField.label[locale]}</Label>
+                    <TextField.Input type="text" />
+                    <FieldErrors />
+                  </TextField>
+                  <div>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        intent.update({
+                          name: payerFieldset.name.name,
+                          value: payerSource[0]?.name ?? '',
+                        });
+                        intent.update({
+                          name: payerFieldset.email.name,
+                          value: payerSource[0]?.email ?? '',
+                        });
+                      }}
+                    >
+                      {locale === 'fr' ? "C'est moi qui paie" : "I'm paying"}
+                    </Button>
+                  </div>
+                </>
+              ) : null}
             </fieldset>
           ) : null}
           {registrants.map((registrant, index) => {

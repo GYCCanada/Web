@@ -128,13 +128,14 @@ const renderedNames = (
 };
 
 /**
- * The party block's submit-`name`s the live form renders (registrar plan C7). The
- * default `registration` form authors a GROUP-only `party` with a nominated payer,
- * so the payer name + email inputs always render OUTSIDE the `registrants[n].`
- * namespace; the mode selector is NOT rendered (group-only — C7.5 renders it when
- * ≥2 modes are authored). These names extend the strict render-parity sets below.
+ * The party block's submit-`name`s the live form renders (registrar plan C7.5).
+ * The default `registration` form now authors BOTH billing modes, so the mode
+ * SELECTOR renders (`party._tag`, ≥2 authored modes); the default mode is `group`
+ * (the first authored), so the nominated-payer name + email inputs also render
+ * (the live mode is `group`) OUTSIDE the `registrants[n].` namespace. All three
+ * names extend the strict render-parity sets below.
  */
-const partyNames = ['party.payer.name', 'party.payer.email'];
+const partyNames = ['party._tag', 'party.payer.name', 'party.payer.email'];
 
 describe('registration render-level field-name + default-value parity', () => {
   // RENDER parity: the LIVE form is rendered and its emitted submit-names are

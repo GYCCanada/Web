@@ -54,7 +54,7 @@ describe('registrationShellSchema — group arm', () => {
     if (Result.isSuccess(result)) {
       const shell = result.success as Extract<
         RegistrationShellDecoded,
-        { party: unknown }
+        { party: { _tag: 'group' } }
       >;
       expect(shell.party._tag).toBe('group');
       expect(shell.party.payer).toEqual({
@@ -134,13 +134,114 @@ describe('registrationShellSchema — group arm', () => {
     if (Result.isSuccess(result)) {
       const shell = result.success as Extract<
         RegistrationShellDecoded,
-        { party: unknown }
+        { party: { _tag: 'group' } }
       >;
       expect(shell.party.payer).toEqual({
         name: 'Self Payer',
         email: 'self@example.com',
       });
     }
+  });
+});
+
+/**
+ * C7.5 — the mode union: `perRegistrant` cardinality + per-registrant email
+ * re-imposition + the allow-list smuggle reject. The default `registration` form
+ * now authors BOTH modes; a group-only form is derived by dropping the
+ * `perRegistrant` option (the allow-list IS the authored option-struct keys).
+ */
+const groupOnlyForm = (() => {
+  const encoded = Schema.encodeSync(FormDefinition)(defaultRegistrationForm);
+  // Drop the `perRegistrant` option key so the allow-list is `['group']` only.
+  const { perRegistrant: _drop, ...groupOnlyOptions } =
+    encoded.party!.billingMode.options;
+  return Schema.decodeUnknownSync(FormDefinition)({
+    ...encoded,
+    party: {
+      ...encoded.party!,
+      billingMode: { ...encoded.party!.billingMode, options: groupOnlyOptions },
+    },
+  });
+})();
+
+describe('registrationShellSchema — perRegistrant arm + allow-list (C7.5)', () => {
+  test('present perRegistrant on a GROUP-ONLY form REJECTS (allow-list smuggle)', () => {
+    const result = decode(groupOnlyForm, {
+      party: { _tag: 'perRegistrant' },
+      registrants: [exhibitor()],
+    });
+    expect(Result.isFailure(result)).toBe(true);
+  });
+
+  test('present perRegistrant on a TWO-MODE form ACCEPTS (no payer, registrant emails present)', () => {
+    const result = decode(defaultRegistrationForm, {
+      party: { _tag: 'perRegistrant' },
+      registrants: [exhibitor(), exhibitor({ email: 'two@example.com' })],
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      const shell = result.success as Extract<
+        RegistrationShellDecoded,
+        { party: { _tag: 'perRegistrant' } }
+      >;
+      expect(shell.party._tag).toBe('perRegistrant');
+      // No payer is decoded in perRegistrant (unrepresentable).
+      expect('payer' in shell.party).toBe(false);
+      expect(shell.registrants.length).toBe(2);
+    }
+  });
+
+  test('present group on a TWO-MODE form ACCEPTS (the payer arm still works)', () => {
+    const result = decode(defaultRegistrationForm, {
+      party: { _tag: 'group', payer: payer() },
+      registrants: [exhibitor()],
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+  });
+
+  test('an ABSENT mode on a TWO-MODE form decodes to the FIRST authored arm (group), requirements intact', () => {
+    // `group` is the first authored option; an absent `_tag` fills it — so the
+    // payer is REQUIRED (the first arm's requirement is not skipped by falling
+    // through to perRegistrant).
+    const ok = decode(defaultRegistrationForm, {
+      party: { payer: payer() },
+      registrants: [exhibitor()],
+    });
+    expect(Result.isSuccess(ok)).toBe(true);
+    if (Result.isSuccess(ok)) {
+      const shell = ok.success as Extract<
+        RegistrationShellDecoded,
+        { party: { _tag: 'group' } }
+      >;
+      expect(shell.party._tag).toBe('group');
+    }
+    // Absent mode + NO payer must NOT silently fall through to perRegistrant — the
+    // first arm's payer requirement holds.
+    const missingPayer = decode(defaultRegistrationForm, {
+      party: {},
+      registrants: [exhibitor()],
+    });
+    expect(Result.isFailure(missingPayer)).toBe(true);
+  });
+
+  test('perRegistrant re-imposes EVERY registrant email — a blank registrant email FAILS', () => {
+    // The engine sees email as optional-at-key; perRegistrant re-imposes presence,
+    // so a blank (un-filled) registrant email FAILS — the orthogonal opposite of
+    // the group blank-drop.
+    const result = decode(defaultRegistrationForm, {
+      party: { _tag: 'perRegistrant' },
+      registrants: [exhibitor(), exhibitor({ email: '' })],
+    });
+    expect(Result.isFailure(result)).toBe(true);
+  });
+
+  test('perRegistrant with an ABSENT registrant email also FAILS (presence required, not just non-blank)', () => {
+    const { email: _absent, ...noEmail } = exhibitor();
+    const result = decode(defaultRegistrationForm, {
+      party: { _tag: 'perRegistrant' },
+      registrants: [noEmail],
+    });
+    expect(Result.isFailure(result)).toBe(true);
   });
 });
 

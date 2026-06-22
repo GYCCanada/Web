@@ -1,8 +1,9 @@
-import { Effect, Schema, SchemaGetter } from 'effect';
+import { Schema, SchemaGetter } from 'effect';
 
 import { type DecodedForm, definitionToSchema, email, requiredString } from './decode';
 import type { FormDefinition } from './definition';
 import { type BillingMode, type PartySection } from './party';
+import { MessageKey } from './tokens';
 
 /**
  * The route-owned, party-aware registration SHELL decoder (registrar plan
@@ -23,18 +24,20 @@ import { type BillingMode, type PartySection } from './party';
  * one (`make-impossible-states-unrepresentable`); keeping them at the route's own
  * hand-authored boundary is exactly where party-level facts already live.
  *
- * SCOPE (C7): the `group` arm + the no-`party` legacy arm only. The
- * `perRegistrant` arm (the full `buildModeUnion`, `requireRegistrantEmails`, the
- * present-off-list smuggle reject) is added in C7.5, AFTER this server branch
- * exists — the C7a authored `party` offers GROUP-ONLY modes, so a group-only
- * allow-list is the only reachable shape this commit must decode. The mode-union
- * machinery is written union-ready (a single authored mode collapses to one arm),
- * so C7.5 widens rather than rewrites.
+ * SCOPE (C7.5): the full mode union — the `group` arm, the `perRegistrant` arm,
+ * and the no-`party` legacy arm. C7 landed the `group` arm + the union-ready
+ * machinery; this commit widens `buildModeUnion` into a real `Schema.Union` over
+ * the authored arms (`derive-dont-sync` off the `billingMode.options` allow-list),
+ * adds `requireRegistrantEmails` (the `perRegistrant` re-imposition, 2b row (i)),
+ * and earns the present-off-list smuggle reject (a `_tag` not in the authored
+ * allow-list matches NO arm ⇒ hard-reject). A single authored mode still collapses
+ * to one arm with its discriminant defaulted; an absent mode on a multi-mode form
+ * decodes to the FIRST authored arm (the union tries members in allow-list order).
  *
  * Modelling principles (`~/.brain/principles`):
  *   - `make-impossible-states-unrepresentable`: the DECODED party is a
  *     `_tag`-discriminated value — the `group` arm carries exactly one nominated
- *     `payer` (name + required email); a `perRegistrant` arm (C7.5) carries none.
+ *     `payer` (name + required email); the `perRegistrant` arm carries none.
  *     A payer in `perRegistrant`, or a `group` with no payer, is unrepresentable.
  *   - `derive-dont-sync`: the payer's `name`/`email` codecs are the engine's own
  *     exported `requiredString`/`email` (one decode boundary, one email shape);
@@ -47,14 +50,20 @@ export type Payer = { readonly name: string; readonly email: string };
 /**
  * The DECODED registration shell (registrar plan Decision 2b.2) — a `_tag`-
  * discriminated value where impossible states die: the `group` arm carries exactly
- * one nominated `payer`; a `perRegistrant` arm (C7.5) carries none; a no-`party`
- * legacy form is the bare `{ registrants }` shell. The route branches on this
- * single discriminant for cardinality + receipt routing (Decision 2b.6).
+ * one nominated `payer`; the `perRegistrant` arm carries none (each registrant
+ * self-pays); a no-`party` legacy form is the bare `{ registrants }` shell. The
+ * route branches on this single discriminant for cardinality + receipt routing
+ * (Decision 2b.6): `group` ⇒ one order/intent for the party sum keyed off the
+ * payer; `perRegistrant` ⇒ N orders/intents, each keyed off that registrant.
  */
 export type RegistrationShellDecoded =
   | { readonly registrants: ReadonlyArray<DecodedForm> }
   | {
       readonly party: { readonly _tag: 'group'; readonly payer: Payer };
+      readonly registrants: ReadonlyArray<DecodedForm>;
+    }
+  | {
+      readonly party: { readonly _tag: 'perRegistrant' };
       readonly registrants: ReadonlyArray<DecodedForm>;
     };
 
@@ -146,24 +155,106 @@ const groupRegistrants = (registrant: Schema.Codec<Record<string, unknown>>) =>
   );
 
 /**
- * Build the discriminated mode union over the authored arms (registrar plan
- * 2b.4). C7 only ever passes the `group` arm (C7a authors group-only), so a
- * single-mode allow-list collapses to that ONE arm with the absent-mode
- * discriminant default applied; C7.5 passes both arms and this becomes a real
- * `Schema.Union` discriminated on `party._tag`. Spelling the discriminant as
- * `optionalKey(Literals(allowed)).pipe(withDecodingDefaultKey(...))` is what makes
- * an ABSENT mode fill to the lone/first authored mode at DECODE time (a constructor
- * default via `Schema.tag` would not fire on decode — `toast.server.ts:17-25`).
+ * The `perRegistrant` re-imposition (registrar plan 2b row (i) / the "crux" 2b.4) —
+ * the ONE closed enclosing-scope law: everyone self-pays ⇒ everyone needs a
+ * receipt-capable email, so EVERY registrant email is required (no blank-drop, the
+ * `group`-only normalization is never applied here). The engine sees the registrant
+ * `email` as merely optional-at-key (C7a); this same-scope sibling filter re-imposes
+ * presence at the shell, exactly where party-level facts live — never the engine's
+ * cross-scope activation limit.
+ *
+ * Reports at `['registrants', i, 'email']` (the conform field name the live form
+ * renders) with the registrant email field's OWN authored `requiredMessage`
+ * (`derive-dont-sync`: the message a present-blank email already emits in the
+ * engine, read off the definition's `email`-kind field, never a re-declared key).
+ */
+const requireRegistrantEmails = (requiredMessage: MessageKey) =>
+  Schema.makeFilter(
+    (shell: { readonly registrants: ReadonlyArray<Record<string, unknown>> }) => {
+      for (let index = 0; index < shell.registrants.length; index += 1) {
+        const value = shell.registrants[index]?.['email'];
+        if (value === undefined || value === '') {
+          return { path: ['registrants', index, 'email'], issue: requiredMessage };
+        }
+      }
+      return undefined;
+    },
+    { title: 'registrationShell.requireRegistrantEmails' },
+  );
+
+/**
+ * The registrant email field's authored `requiredMessage` — the key
+ * `requireRegistrantEmails` reports a missing `perRegistrant` email with
+ * (`derive-dont-sync`). Read off the definition's top-level `email`-kind field
+ * (registration's `email` field, `defaults.ts`); a definition with no such field
+ * has no `perRegistrant` mode authored anyway (the registration form is the only
+ * party-offering form), so the fallback is unreachable in practice and exists only
+ * to keep the lookup total.
+ */
+const registrantEmailRequiredMessage = (
+  definition: FormDefinition,
+): MessageKey => {
+  for (const field of definition.fields) {
+    if (field._tag === 'email' && field.name === 'email') {
+      return field.requiredMessage;
+    }
+  }
+  return MessageKey.make('registration.form.email.required');
+};
+
+/**
+ * Pre-fill the chosen-mode discriminant on the RAW shell input (registrar plan
+ * 2b.4 — "the absent-mode default is applied to the DISCRIMINANT inside
+ * buildModeUnion"). The union dispatches PURELY on `party._tag`, so the absent-mode
+ * default must be resolved BEFORE dispatch — not as a per-arm `optionalKey` fill,
+ * which would let a payload that fails the first arm STRUCTURALLY (e.g. a `group`
+ * with a blank payer email) silently fall through to a second arm. So an absent /
+ * `undefined` `party._tag` is filled to the first authored mode here, on the raw
+ * record, and each arm then carries a REQUIRED `Schema.Literal(mode)` discriminant:
+ *   - an absent mode lands on the FIRST authored arm (the fill) and is validated by
+ *     ONLY that arm's structure (`group` ⇒ payer required; no fallthrough);
+ *   - a PRESENT off-list `_tag` is left untouched, matches NO arm's literal ⇒ the
+ *     union hard-rejects (the smuggle attack — e.g. `perRegistrant` on a group-only
+ *     form, or a bogus mode on a two-mode form).
+ */
+const fillDefaultMode = (
+  defaultMode: BillingMode,
+  input: Record<string, unknown>,
+): Record<string, unknown> => {
+  const party = input['party'];
+  if (party === null || typeof party !== 'object' || Array.isArray(party)) {
+    return input;
+  }
+  const partyRecord = party as Record<string, unknown>;
+  if (partyRecord['_tag'] !== undefined) return input;
+  return { ...input, party: { ...partyRecord, _tag: defaultMode } };
+};
+
+/**
+ * Build the discriminated mode union over the AUTHORED arms (registrar plan 2b.4) —
+ * the allow-list IS the set of arms (`derive-dont-sync` off `billingMode.options`).
+ * The raw input's discriminant is pre-filled to the first authored mode
+ * ({@link fillDefaultMode}), then the arms are tried in allow-list order, each
+ * pinned to its own required `_tag` literal so `anyOf` can only match the arm whose
+ * literal equals the (now-present) tag — a discriminated dispatch, no structural
+ * fallthrough. A single authored mode collapses to that one arm (still wrapped in
+ * the pre-fill so an absent `_tag` decodes).
  */
 const buildModeUnion = (
-  allowed: ReadonlyArray<BillingMode>,
-  arms: { readonly group: Schema.Top },
+  defaultMode: BillingMode,
+  arms: ReadonlyArray<Schema.Top>,
 ): Schema.Top => {
-  // C7: group-only. The single authored arm IS the shell — its `_tag` discriminant
-  // already defaults to the lone allowed mode. C7.5 widens `arms`/`allowed` and
-  // returns a `Schema.Union(...)` discriminated on `_tag` here.
-  void allowed;
-  return arms.group;
+  const union = arms.length === 1 ? arms[0]! : Schema.Union(arms);
+  return Schema.Unknown.pipe(
+    Schema.decodeTo(union, {
+      decode: SchemaGetter.transform((input: unknown) =>
+        input !== null && typeof input === 'object' && !Array.isArray(input)
+          ? fillDefaultMode(defaultMode, input as Record<string, unknown>)
+          : input,
+      ),
+      encode: SchemaGetter.passthrough({ strict: false }),
+    }),
+  );
 };
 
 /**
@@ -211,19 +302,47 @@ export const registrationShellSchema = (
   }
 
   // The `group` arm: a nominated payer + registrants whose blank emails are
-  // dropped to absent (2b.3). The `_tag` discriminant defaults to the lone/first
-  // allowed mode when absent; a present value is checked against the allow-list.
+  // dropped to absent (2b.3). The `_tag` is a REQUIRED literal — the union
+  // dispatches on it after {@link fillDefaultMode} resolved an absent mode. `payer`
+  // is present whenever `group` is offered (the FormDefinition biconditional), so
+  // this codec is only reached on a group-offering form.
   const groupShell = Schema.Struct({
     party: Schema.Struct({
-      _tag: Schema.optionalKey(Schema.Literals(allowed)).pipe(
-        Schema.withDecodingDefaultKey(Effect.succeed(defaultMode)),
-      ),
-      // `payer` is present whenever `group` is offered (the FormDefinition
-      // biconditional), so this codec is only reached on a group-offering form.
+      // A REQUIRED tag literal — the union dispatches on it after
+      // {@link fillDefaultMode} resolved an absent mode. `Schema.tag` is a
+      // decode-time `Literal('group')` (its constructor default never fires on
+      // decode); the absent-mode fill is the pre-transform, not this field.
+      _tag: Schema.tag('group'),
       payer: payerCodec(party.payer as NonNullable<PartySection['payer']>),
     }),
     registrants: groupRegistrants(registrant),
   }).check(nonEmptyParty as never);
 
-  return asShell(buildModeUnion(allowed, { group: groupShell }));
+  // The `perRegistrant` arm: NO payer (unrepresentable — each registrant
+  // self-pays), and EVERY registrant email re-imposed (2b row (i)) — the blank
+  // emails are NOT dropped here, the engine codec runs verbatim and the shell
+  // filter requires presence on top.
+  const perRegistrantShell = Schema.Struct({
+    party: Schema.Struct({ _tag: Schema.tag('perRegistrant') }),
+    registrants: Schema.mutable(Schema.Array(registrant)),
+  })
+    .check(nonEmptyParty as never)
+    .check(
+      requireRegistrantEmails(
+        registrantEmailRequiredMessage(definition),
+      ) as never,
+    );
+
+  // Union ONLY the authored arms, in allow-list order (the absent-mode default
+  // lands on the first authored arm). A single authored mode collapses to one arm.
+  const armByMode: Record<BillingMode, Schema.Top> = {
+    group: groupShell,
+    perRegistrant: perRegistrantShell,
+  };
+  return asShell(
+    buildModeUnion(
+      defaultMode,
+      allowed.map((mode) => armByMode[mode]),
+    ),
+  );
 };

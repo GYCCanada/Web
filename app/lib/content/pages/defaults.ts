@@ -1062,10 +1062,13 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
       },
     ],
   },
-  // The CMS-authored party scope (registrar plan Decision 2b / C7a). C7a authors
-  // GROUP-ONLY options — the `perRegistrant` option is added in C7.5, AFTER the
-  // server branch that fans out per-registrant intents exists (the C7-standalone
-  // hazard: offering a mode the server cannot yet handle). The biconditional on
+  // The CMS-authored party scope (registrar plan Decision 2b / C7a + C7.5). C7a
+  // authored GROUP-ONLY options; C7.5 adds the `perRegistrant` option NOW that the
+  // server branch which fans out per-registrant intents exists (the C7-standalone
+  // hazard the plan calls out: never offer a mode the server cannot yet handle).
+  // With BOTH modes offered the shell builds a real two-arm union — the selector
+  // renders (≥2 authored modes) and the live mode drives email-required + payment
+  // cardinality (the orthogonality table rows (i)/(ii)). The biconditional on
   // FormDefinition requires a `payer` block here because `group` ∈ options keys.
   // Every label is CMS-editable `Text`; the message keys are the tokens that
   // shipped in `translations.ts` in C7a.
@@ -1081,6 +1084,10 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
         group: {
           en: 'One person pays for everyone',
           fr: 'Une personne paie pour tout le monde',
+        },
+        perRegistrant: {
+          en: 'Each person pays for themselves',
+          fr: 'Chaque personne paie pour soi',
         },
       },
     },

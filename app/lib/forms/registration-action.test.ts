@@ -573,3 +573,109 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     expect(orders.length).toBe(0);
   });
 });
+
+/**
+ * A `perRegistrant` POST body: `count` exhibitors + `party._tag = 'perRegistrant'`
+ * and NO payer (the perRegistrant arm carries none). The default `registration`
+ * form now authors BOTH modes (C7.5), so this submission decodes the perRegistrant
+ * arm and the action fans out one order/intent per registrant.
+ */
+const perRegistrantBody = (count: number): URLSearchParams =>
+  new URLSearchParams(
+    Object.assign(
+      {},
+      ...Array.from({ length: count }, (_, i) => exhibitorFields(i)),
+      { 'party._tag': 'perRegistrant' },
+    ),
+  );
+
+/**
+ * Registrar C7.5 — the `perRegistrant` cardinality: the decoded `party._tag` drives
+ * a fan-out, one PaymentIntent + one frozen order PER registrant (Decision 2b.6),
+ * each keyed `<fingerprint>:<index>` and frozen on that registrant's OWN price +
+ * email (the receipt routing). Plus the email orthogonality: a perRegistrant blank
+ * registrant email FAILS at decode (re-imposition), where a group blank non-leader
+ * passes (proven in the C7 block above).
+ */
+describe('registrationAction — perRegistrant checkout (registrar C7.5)', () => {
+  it('mints N intents + N frozen orders (3 registrants ⇒ 3), keyed + receipt-routed per registrant', async () => {
+    const calls: Array<CreateIntentCall> = [];
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({ notify: () => Effect.void, success });
+    const args = makeRegistrationArgs(runtime, perRegistrantBody(3));
+
+    await action(args).catch(() => {});
+
+    // (a) Exactly THREE create-intent calls — one per registrant.
+    expect(calls.length).toBe(3);
+    // Each intent's receipt routes to ITS OWN registrant email (booth{i}@…), and
+    // its idempotency key carries the `:perRegistrant:<index>` suffix (a retry
+    // replays the same per-registrant intents).
+    const byKey = [...calls].sort((a, b) =>
+      a.idempotencyKey.localeCompare(b.idempotencyKey),
+    );
+    byKey.forEach((call, index) => {
+      expect(call.idempotencyKey).toMatch(
+        new RegExp(`^registration:checkout:[a-f0-9]+:perRegistrant:${index}$`),
+      );
+      expect(call.receiptEmail).toBe(`booth${index}@example.com`);
+      expect(call.metadata).toEqual(
+        expect.objectContaining({ mode: 'perRegistrant' }),
+      );
+    });
+
+    // (b) Exactly THREE frozen orders landed, each keyed `<fingerprint>:<index>`,
+    // each linking exactly ONE registrant submission, receipt-routed to that
+    // registrant.
+    const orders = await listOrders(runtime, args);
+    expect(orders.length).toBe(3);
+    for (const { order } of orders) {
+      expect(order.mode).toBe('perRegistrant');
+      expect(order.status).toBe('pending');
+      expect(order.registrantIds.length).toBe(1);
+      expect(order.orderId).toMatch(/^[a-f0-9]+:\d+$/);
+      // The order's frozen receipt is the same as the intent that charged it.
+      const matchingCall = calls.find(
+        (call) => `pi_test_${call.idempotencyKey}` === order.intentId,
+      );
+      expect(matchingCall?.receiptEmail).toBe(order.receiptEmail);
+      expect(order.receiptEmail).toMatch(/^booth\d+@example\.com$/);
+    }
+    // Every registrant's own email is the receipt of exactly one order.
+    const receipts = orders.map((entry) => entry.order.receiptEmail).sort();
+    expect(receipts).toEqual([
+      'booth0@example.com',
+      'booth1@example.com',
+      'booth2@example.com',
+    ]);
+  });
+
+  it('a perRegistrant submission with a blank registrant email FAILS before any checkout (email re-imposition)', async () => {
+    const calls: Array<CreateIntentCall> = [];
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
+    );
+    const action = registrationAction({ notify: () => Effect.void, success });
+    // Registrant #1 renders `email: ''` — in perRegistrant the shell re-imposes
+    // presence on EVERY registrant, so this rejects (the orthogonal opposite of the
+    // group blank-drop, which passes).
+    const body = new URLSearchParams(
+      Object.assign(
+        {},
+        exhibitorFields(0),
+        Object.fromEntries(
+          Object.entries(exhibitorFields(1)).map(([key, value]) =>
+            key.endsWith('.email') ? [key, ''] : [key, value],
+          ),
+        ),
+        { 'party._tag': 'perRegistrant' },
+      ),
+    );
+    const result = await action(makeRegistrationArgs(runtime, body));
+
+    expect(result.status).toBe('error');
+    expect(calls.length).toBe(0);
+  });
+});

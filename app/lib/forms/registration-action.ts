@@ -18,7 +18,7 @@ import { Toast } from '../toast.server';
 
 import type { SuccessToast } from './action';
 import type { RegistrationOrder } from './order';
-import { priceGroup } from './price';
+import { priceGroup, priceRegistrant } from './price';
 import { registrationShellSchema } from './registration-shell';
 import type { Submission } from './submission';
 import { Submissions } from './submissions.server';
@@ -150,24 +150,30 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
       );
     }
 
-    // Group checkout (registrar plan Decision 2 / 2b / Decision 7), gated by the
+    // On-site checkout (registrar plan Decision 2 / 2b / Decision 7), gated by the
     // `Env.stripe` `None`-gate (Decision 8). When stripe is unconfigured the
     // on-site payment path is INERT — registration persists + notifies + redirects
     // exactly as the RegFox-era no-op did, so nothing changes until the gate flips.
-    // When configured AND the form authored a `party` section, the `group` arm
-    // freezes ONE order for the party sum and mints ONE PaymentIntent for it.
-    // (The `perRegistrant` cardinality is C7.5; this commit handles the `group`
-    // arm + the no-party legacy arm only.)
+    // When configured AND the form authored a `party` section, the decoded
+    // `party._tag` drives cardinality + receipt routing (the orthogonality table
+    // row (ii), Decision 2b.6):
+    //   - `group`         ⇒ ONE order for the party sum, ONE intent, receipt to the
+    //                       NOMINATED payer (possibly a non-attendee);
+    //   - `perRegistrant` ⇒ N orders/intents — one per registrant, each frozen on
+    //                       that registrant's own price + email.
     if (Option.isSome(env.stripe) && 'party' in shell) {
       const party = shell.party;
+      const currency = env.stripe.value.currency;
+      // ONE `now` for the whole submission (Decision 6) — every frozen amount in
+      // this checkout reads the same instant, so a window boundary cannot split a
+      // single submit across two prices.
+      const now = yield* Clock.currentTimeMillis;
       if (party._tag === 'group') {
-        const now = yield* Clock.currentTimeMillis;
-        // The party sum, frozen under ONE `now` (Decision 6) — the amount the
-        // order records and the intent charges. `priceGroup` sums each
+        // The party sum, frozen under the shared `now` (Decision 6) — the amount
+        // the order records and the intent charges. `priceGroup` sums each
         // registrant's price; an unpriced form sums to 0 (the gate is the only
         // thing that makes the on-site path live, not pricing).
         const amount = priceGroup(definition, shell.registrants, now);
-        const currency = env.stripe.value.currency;
         // The receipt routes to the NOMINATED payer (possibly a non-attendee),
         // frozen here so a later edit cannot retro-redirect the receipt (2b.6).
         const receiptEmail = party.payer.email;
@@ -196,6 +202,36 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
           registrantIds: stored.map((registrant) => registrant.id),
         };
         yield* submissions.persistOrder('registration', order);
+      } else {
+        // `perRegistrant`: one order + one intent PER registrant (Decision 2b.6).
+        // Each is keyed `<fingerprint>:<index>` so a verbatim retry replays the
+        // SAME per-registrant intents (no double-charge), and the receipt routes to
+        // that registrant's OWN email (re-imposed present by the shell). The
+        // per-registrant order links the ONE registrant submission it pays for.
+        for (const [index, registrant] of shell.registrants.entries()) {
+          const amount = priceRegistrant(definition, registrant, now);
+          const receiptEmail = registrant['email'] as string;
+          const orderId = `${requestFingerprint}:${index}`;
+          const idempotencyKey = `registration:checkout:${requestFingerprint}:perRegistrant:${index}`;
+          const intent = yield* payment.createIntent(
+            amount,
+            currency,
+            receiptEmail,
+            { orderId, mode: 'perRegistrant' },
+            idempotencyKey,
+          );
+          const order: RegistrationOrder = {
+            orderId,
+            mode: 'perRegistrant',
+            intentId: intent.intentId,
+            amount,
+            currency,
+            receiptEmail,
+            status: 'pending',
+            registrantIds: [stored[index]!.id],
+          };
+          yield* submissions.persistOrder('registration', order);
+        }
       }
     }
 
