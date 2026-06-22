@@ -16,10 +16,11 @@ import {
  *
  *   - the `Env.stripe` `None`-gate: when stripe is unconfigured BOTH operations
  *     fail `PaymentDisabled` (the inert on-site path), mirroring `SendgridDisabled`;
- *   - the `Payment.testLayer` double proves the create-intent SHAPE — a fake
- *     intent comes back with no network, threading amount/currency/receiptEmail/
- *     metadata/idempotencyKey, and a verbatim retry (same idempotency key) yields
- *     the SAME intent (the idempotency contract the registrar relies on).
+ *   - the `Payment.testLayer` double proves the create-session SHAPE — a fake
+ *     Checkout Session comes back with no network, threading amount/currency/
+ *     receiptEmail/urls/metadata/idempotencyKey, and a verbatim retry (same
+ *     idempotency key) yields the SAME session (the idempotency contract the
+ *     registrar relies on so a retry never starts a second checkout).
  *
  * A live Stripe round-trip is deliberately NOT exercised here (it would require a
  * real key + network); the SDK call path typechecks against distilled's exported
@@ -35,18 +36,21 @@ const disabledEnv = Layer.provide(
 );
 
 describe('Payment — Env.stripe None-gate', () => {
-  it.effect('createIntent fails PaymentDisabled when stripe is unconfigured', () =>
+  it.effect('createCheckoutSession fails PaymentDisabled when stripe is unconfigured', () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(
         Effect.gen(function* () {
           const payment = yield* Payment.Service;
-          yield* payment.createIntent(
-            Cents.make(5000),
-            CurrencyCode.make('cad'),
-            'payer@example.com',
-            { orderId: 'order-1' },
-            'registration:checkout:fp:group',
-          );
+          yield* payment.createCheckoutSession({
+            amount: Cents.make(5000),
+            currency: CurrencyCode.make('cad'),
+            receiptEmail: 'payer@example.com',
+            productName: 'GYC Canada registration',
+            successUrl: 'https://gyc.test/2026/form?checkout=success',
+            cancelUrl: 'https://gyc.test/2026/form?checkout=cancelled',
+            metadata: { orderId: 'order-1' },
+            idempotencyKey: 'registration:checkout:fp:group',
+          });
         }),
       );
       expect(error).toBeInstanceOf(PaymentDisabled);
@@ -66,26 +70,30 @@ describe('Payment — Env.stripe None-gate', () => {
   );
 });
 
-describe('Payment.testLayer — create-intent double (no network)', () => {
-  it.effect('returns a fake intent and threads every create-intent argument', () => {
+describe('Payment.testLayer — create-session double (no network)', () => {
+  it.effect('returns a fake session and threads every create-session argument', () => {
     // The test owns the `calls` array the double pushes into, so it can assert
-    // exactly what `createIntent` was invoked with.
-    const calls: Array<Payment.CreateIntentCall> = [];
+    // exactly what `createCheckoutSession` was invoked with.
+    const calls: Array<Payment.CreateCheckoutSessionCall> = [];
     return Effect.gen(function* () {
       const payment = yield* Payment.Service;
 
-      const intent = yield* payment.createIntent(
-        Cents.make(12_000),
-        CurrencyCode.make('cad'),
-        'payer@example.com',
-        { orderId: 'order-42', mode: 'group' },
-        'registration:checkout:fp42:group',
-      );
+      const session = yield* payment.createCheckoutSession({
+        amount: Cents.make(12_000),
+        currency: CurrencyCode.make('cad'),
+        receiptEmail: 'payer@example.com',
+        productName: 'GYC Canada registration',
+        successUrl: 'https://gyc.test/2026/form?checkout=success',
+        cancelUrl: 'https://gyc.test/2026/form?checkout=cancelled',
+        metadata: { orderId: 'order-42', mode: 'group' },
+        idempotencyKey: 'registration:checkout:fp42:group',
+      });
 
-      // No network — a deterministic fake intent derived from the idempotency key.
-      expect(intent.intentId).toBe('pi_test_registration:checkout:fp42:group');
-      expect(intent.clientSecret).toBe(
-        'pi_test_registration:checkout:fp42:group_secret',
+      // No network — a deterministic fake session derived from the idempotency key,
+      // carrying the hosted URL the registrar redirects the browser to.
+      expect(session.sessionId).toBe('cs_test_registration:checkout:fp42:group');
+      expect(session.url).toBe(
+        'https://checkout.stripe.test/registration:checkout:fp42:group',
       );
 
       // Every argument threaded through verbatim (the wiring C7 freezes onto an order).
@@ -93,6 +101,13 @@ describe('Payment.testLayer — create-intent double (no network)', () => {
       expect(calls[0]?.amount).toBe(Cents.make(12_000));
       expect(calls[0]?.currency).toBe(CurrencyCode.make('cad'));
       expect(calls[0]?.receiptEmail).toBe('payer@example.com');
+      expect(calls[0]?.productName).toBe('GYC Canada registration');
+      expect(calls[0]?.successUrl).toBe(
+        'https://gyc.test/2026/form?checkout=success',
+      );
+      expect(calls[0]?.cancelUrl).toBe(
+        'https://gyc.test/2026/form?checkout=cancelled',
+      );
       expect(calls[0]?.metadata).toEqual({ orderId: 'order-42', mode: 'group' });
       expect(calls[0]?.idempotencyKey).toBe(
         'registration:checkout:fp42:group',
@@ -100,29 +115,35 @@ describe('Payment.testLayer — create-intent double (no network)', () => {
     }).pipe(Effect.provide(Payment.testLayer({ calls })));
   });
 
-  it.effect('replays the same intent for a verbatim retry (same idempotency key)', () =>
+  it.effect('replays the same session for a verbatim retry (same idempotency key)', () =>
     Effect.gen(function* () {
       const payment = yield* Payment.Service;
       const key = 'registration:checkout:fp99:perRegistrant:0';
 
-      const first = yield* payment.createIntent(
-        Cents.make(8000),
-        CurrencyCode.make('cad'),
-        'one@example.com',
-        {},
-        key,
-      );
-      const retry = yield* payment.createIntent(
-        Cents.make(8000),
-        CurrencyCode.make('cad'),
-        'one@example.com',
-        {},
-        key,
-      );
+      const first = yield* payment.createCheckoutSession({
+        amount: Cents.make(8000),
+        currency: CurrencyCode.make('cad'),
+        receiptEmail: 'one@example.com',
+        productName: 'GYC Canada registration',
+        successUrl: 'https://gyc.test/2026/form?checkout=success',
+        cancelUrl: 'https://gyc.test/2026/form?checkout=cancelled',
+        metadata: {},
+        idempotencyKey: key,
+      });
+      const retry = yield* payment.createCheckoutSession({
+        amount: Cents.make(8000),
+        currency: CurrencyCode.make('cad'),
+        receiptEmail: 'one@example.com',
+        productName: 'GYC Canada registration',
+        successUrl: 'https://gyc.test/2026/form?checkout=success',
+        cancelUrl: 'https://gyc.test/2026/form?checkout=cancelled',
+        metadata: {},
+        idempotencyKey: key,
+      });
 
-      // Same idempotency key ⇒ same fake intent (the no-double-charge contract).
-      expect(retry.intentId).toBe(first.intentId);
-      expect(retry.clientSecret).toBe(first.clientSecret);
+      // Same idempotency key ⇒ same fake session (the no-second-checkout contract).
+      expect(retry.sessionId).toBe(first.sessionId);
+      expect(retry.url).toBe(first.url);
     }).pipe(Effect.provide(Payment.testLayer())),
   );
 
@@ -130,11 +151,11 @@ describe('Payment.testLayer — create-intent double (no network)', () => {
     Effect.gen(function* () {
       const payment = yield* Payment.Service;
       const event = yield* payment.constructEvent('{}', 't=1,v1=abc');
-      expect(event.type).toBe('payment_intent.succeeded');
+      expect(event.type).toBe('checkout.session.completed');
     }).pipe(
       Effect.provide(
         Payment.testLayer({
-          event: { type: 'payment_intent.succeeded' },
+          event: { type: 'checkout.session.completed' },
         }),
       ),
     ),

@@ -38,9 +38,11 @@ import { Submissions } from './submissions.server';
  *   2. The route (`/api/stripe/webhook`) end-to-end through the real request
  *      runtime over an in-memory bucket + a configured-stripe `Env` (so the REAL
  *      `Payment.constructEvent` runs WebCrypto HMAC with no network): a forged
- *      signature ⇒ 400, a valid `succeeded` with a matching amount flips the order
- *      to `paid`, an amount MISMATCH ⇒ 400 + the order stays pending, replaying
- *      the same event is idempotent, and `payment_failed` ⇒ `failed`.
+ *      signature ⇒ 400, a valid `checkout.session.completed` (paid) with a matching
+ *      `amount_total` flips the order to `paid`, an amount MISMATCH ⇒ 400 + the
+ *      order stays pending, an `unpaid` completion ⇒ 200 ack + the order stays
+ *      pending, replaying the same event is idempotent, and an
+ *      `checkout.session.async_payment_failed` ⇒ `failed`.
  */
 
 const WEBHOOK_SECRET = 'whsec_test_c8';
@@ -68,7 +70,7 @@ const REGISTRANT_IDS: readonly ListItemId[] = [newListItemId(), newListItemId()]
 const pendingOrder = (orderId: string, amount: number): RegistrationOrder => ({
   orderId,
   mode: 'group',
-  intentId: `pi_${orderId}`,
+  sessionId: `cs_${orderId}`,
   amount: Cents.make(amount),
   currency: CurrencyCode.make('cad'),
   receiptEmail: 'leader@example.com',
@@ -315,19 +317,26 @@ const signPayload = async (body: string, timestamp: number): Promise<string> => 
   return `t=${timestamp},v1=${hex}`;
 };
 
-/** A `payment_intent.*` event body whose intent carries `{ id, amount, metadata }`. */
+/**
+ * A `checkout.session.*` event body whose session carries
+ * `{ id, amount_total, payment_status, metadata }`. `paymentStatus` defaults to
+ * `'paid'` (a settled completion); pass `'unpaid'` to model a completion that did
+ * NOT collect payment.
+ */
 const eventBody = (
   type: string,
   orderId: string,
   amount: number,
+  paymentStatus: 'no_payment_required' | 'paid' | 'unpaid' = 'paid',
 ): string =>
   JSON.stringify({
     id: `evt_${orderId}`,
     type,
     data: {
       object: {
-        id: `pi_${orderId}`,
-        amount,
+        id: `cs_${orderId}`,
+        amount_total: amount,
+        payment_status: paymentStatus,
         metadata: { orderId, mode: 'group' },
       },
     },
@@ -377,7 +386,7 @@ describe('/api/stripe/webhook (C8 route)', () => {
     const runtime = makeRequestRuntimeFromLayer(
       stripeAppLayer(seed(pendingOrder('ord1', 15000))),
     );
-    const body = eventBody('payment_intent.succeeded', 'ord1', 15000);
+    const body = eventBody('checkout.session.completed', 'ord1', 15000);
     const args = webhookArgs(runtime, body, 't=1,v1=deadbeef');
     const { action } = await import('../../routes/api.stripe-webhook');
     const response = await action(args);
@@ -386,11 +395,11 @@ describe('/api/stripe/webhook (C8 route)', () => {
     expect(await readStatus(runtime, args, 'ord1')).toBe('pending');
   });
 
-  it('flips the order to paid on a valid succeeded event with a matching amount', async () => {
+  it('flips the order to paid on a valid completed (paid) event with a matching amount', async () => {
     const runtime = makeRequestRuntimeFromLayer(
       stripeAppLayer(seed(pendingOrder('ord1', 15000))),
     );
-    const body = eventBody('payment_intent.succeeded', 'ord1', 15000);
+    const body = eventBody('checkout.session.completed', 'ord1', 15000);
     const signature = await signPayload(body, Math.floor(Date.now() / 1000));
     const args = webhookArgs(runtime, body, signature);
     const { action } = await import('../../routes/api.stripe-webhook');
@@ -408,7 +417,7 @@ describe('/api/stripe/webhook (C8 route)', () => {
       stripeAppLayer(seed(pendingOrder('ord1', 15000))),
     );
     // The charged amount (9999) differs from the frozen order amount (15000).
-    const body = eventBody('payment_intent.succeeded', 'ord1', 9999);
+    const body = eventBody('checkout.session.completed', 'ord1', 9999);
     const signature = await signPayload(body, Math.floor(Date.now() / 1000));
     const args = webhookArgs(runtime, body, signature);
     const { action } = await import('../../routes/api.stripe-webhook');
@@ -419,11 +428,11 @@ describe('/api/stripe/webhook (C8 route)', () => {
     expect(await readRegistrantTag(runtime, args, REGISTRANT_IDS[0]!)).toBe('none');
   });
 
-  it('is idempotent — replaying the same succeeded event keeps it paid', async () => {
+  it('is idempotent — replaying the same completed event keeps it paid', async () => {
     const runtime = makeRequestRuntimeFromLayer(
       stripeAppLayer(seed(pendingOrder('ord1', 15000))),
     );
-    const body = eventBody('payment_intent.succeeded', 'ord1', 15000);
+    const body = eventBody('checkout.session.completed', 'ord1', 15000);
     const signature = await signPayload(body, Math.floor(Date.now() / 1000));
     const { action } = await import('../../routes/api.stripe-webhook');
     // Each delivery is its OWN Request (a Request body streams once) — Stripe
@@ -435,17 +444,34 @@ describe('/api/stripe/webhook (C8 route)', () => {
     ).toBe('paid');
   });
 
-  it('flips the order to failed on a payment_failed event', async () => {
+  it('flips the order to failed on an async_payment_failed event', async () => {
     const runtime = makeRequestRuntimeFromLayer(
       stripeAppLayer(seed(pendingOrder('ord1', 15000))),
     );
-    const body = eventBody('payment_intent.payment_failed', 'ord1', 15000);
+    const body = eventBody('checkout.session.async_payment_failed', 'ord1', 15000);
     const signature = await signPayload(body, Math.floor(Date.now() / 1000));
     const args = webhookArgs(runtime, body, signature);
     const { action } = await import('../../routes/api.stripe-webhook');
     const response = await action(args);
     expect(response.status).toBe(200);
     expect(await readStatus(runtime, args, 'ord1')).toBe('failed');
+  });
+
+  it('acks an unpaid completed session with 200 and leaves the order pending', async () => {
+    const runtime = makeRequestRuntimeFromLayer(
+      stripeAppLayer(seed(pendingOrder('ord1', 15000))),
+    );
+    // A `checkout.session.completed` whose `payment_status` is `unpaid` is NOT a
+    // settlement (e.g. an async/delayed payment method that never cleared) — the
+    // endpoint acks it (200) without flipping the order or stamping registrants.
+    const body = eventBody('checkout.session.completed', 'ord1', 15000, 'unpaid');
+    const signature = await signPayload(body, Math.floor(Date.now() / 1000));
+    const args = webhookArgs(runtime, body, signature);
+    const { action } = await import('../../routes/api.stripe-webhook');
+    const response = await action(args);
+    expect(response.status).toBe(200);
+    expect(await readStatus(runtime, args, 'ord1')).toBe('pending');
+    expect(await readRegistrantTag(runtime, args, REGISTRANT_IDS[0]!)).toBe('none');
   });
 
   it('acks an unknown event type with 200 without touching the order', async () => {

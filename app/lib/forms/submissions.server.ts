@@ -150,7 +150,7 @@ export class Service extends Context.Service<
      * lock-step, returning the resulting order (registrar plan C8 :904 — "mark
      * order + registrants paid", the webhook's terminal reconcile step, after the
      * route has verified the charged amount matches the order's frozen `amount`).
-     * **Idempotent**: replaying the same `payment_intent.succeeded` event (Stripe
+     * **Idempotent**: replaying the same `checkout.session.completed` event (Stripe
      * retries until 200, and the `c8c4abd` idempotency fix proves a verbatim retry
      * must not double-apply) re-reads an already-`paid` order, returns it UNCHANGED
      * — no second write — and re-stamps each registrant with a byte-identical
@@ -167,7 +167,7 @@ export class Service extends Context.Service<
     ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
     /**
      * Flip the order to `failed` AND stamp each registrant it names `failed` in
-     * lock-step, returning the order (a `payment_intent.payment_failed` event).
+     * lock-step, returning the order (a `checkout.session.async_payment_failed` event).
      * Idempotent in the same shape as {@link markOrderPaid}: a re-read of an
      * already-`failed` order returns it unchanged and re-stamps each registrant
      * byte-identically. A `paid` order is NEVER downgraded to `failed` (a succeeded
@@ -402,8 +402,8 @@ export const layer = Layer.effect(
       form: FormId,
       orderId: string,
     ) {
-      // Never downgrade a `paid` order: a succeeded event already reconciled it,
-      // so a stray later failure for the same intent is ignored (the `guard`).
+      // Never downgrade a `paid` order: a completed session already reconciled it,
+      // so a stray later failure for the same session is ignored (the `guard`).
       // Each registrant is stamped `failed`, carrying the order link + a short
       // reason (no amount/paidAt — there is nothing settled).
       return yield* flipStatus(
@@ -416,7 +416,7 @@ export const layer = Layer.effect(
             _tag: 'failed',
             orderId: order.orderId,
             mode: order.mode,
-            reason: 'payment_intent.payment_failed',
+            reason: 'checkout.session.async_payment_failed',
           } satisfies PaymentState),
       );
     });

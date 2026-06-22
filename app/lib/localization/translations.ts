@@ -125,6 +125,12 @@ const en = {
   'registration.form.success.title': 'Thank you for registering!',
   'registration.form.success.description':
     'Your registration has been received. We will be in touch with more details soon.',
+  'registration.checkout.success.title': 'Payment received',
+  'registration.checkout.success.description':
+    "Thanks for your payment. We're confirming it now — watch your email for your receipt and registration details. You don't need to submit the form again.",
+  'registration.checkout.cancelled.title': 'Payment not completed',
+  'registration.checkout.cancelled.description':
+    'Your registration was saved but payment was not completed. Submit the form again when you are ready to finish paying.',
   'registration.form.attendee': 'Attendee',
   'registration.form.exhibitor': 'Exhibitor',
   'registration.form.type.required':
@@ -403,6 +409,12 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.success.title': 'Merci de votre inscription!',
   'registration.form.success.description':
     'Votre inscription a bien été reçue. Nous vous contacterons bientôt avec plus de détails.',
+  'registration.checkout.success.title': 'Paiement reçu',
+  'registration.checkout.success.description':
+    "Merci pour votre paiement. Nous le confirmons en ce moment — surveillez votre courriel pour votre reçu et les détails de votre inscription. Vous n'avez pas besoin de soumettre le formulaire à nouveau.",
+  'registration.checkout.cancelled.title': "Paiement non complété",
+  'registration.checkout.cancelled.description':
+    "Votre inscription a été enregistrée mais le paiement n'a pas été complété. Soumettez le formulaire à nouveau lorsque vous serez prêt à finaliser le paiement.",
   'registration.form.attendee': 'Participant',
   'registration.form.exhibitor': 'Exposant',
   'registration.form.type.required':

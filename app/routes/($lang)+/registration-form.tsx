@@ -1,7 +1,7 @@
 import type { SubmissionResult } from '@conform-to/react/future';
 import * as React from 'react';
 import { Schema } from 'effect';
-import { Form } from 'react-router';
+import { Form, useSearchParams } from 'react-router';
 import dayjs from 'dayjs';
 
 import { FormProvider, useForm, useFormData } from '~/lib/conform';
@@ -213,10 +213,17 @@ export const makeDefaultParty = () => ({
  * heading year. This is a plain module (not referenced in `routes.ts`), so it
  * is not itself a route.
  *
- * `actionData` is passed in by the route wrapper. The registration action is a
- * deliberate no-op, so `useActionData` is `undefined` today and `lastResult` is
- * effectively unused — it is kept wired (typed as conform's `SubmissionResult`)
- * so a future real action's result flows straight through.
+ * `actionData` is passed in by the route wrapper and flows into conform's
+ * `lastResult` so a failed submit re-renders with its field errors.
+ *
+ * Checkout return state (registrar Checkout-Session redirect): when on-site
+ * payment is configured the action redirects the visitor to a HOSTED Stripe
+ * Checkout page; Stripe returns them here with `?checkout=success` (they paid —
+ * the order is reconciled by the `checkout.session.completed` webhook, so the copy
+ * is the honest "payment received, watch your email", NOT "registration complete")
+ * or `?checkout=cancelled` (they backed out — the copy invites them to finish
+ * paying). A submission with NO payment path still flashes the legacy success
+ * toast via the action's redirect, so this banner is purely the post-Stripe return.
  */
 export function RegistrationForm({
   year,
@@ -242,6 +249,14 @@ export function RegistrationForm({
 }) {
   const translate = useTranslate();
   const locale = useLocale();
+
+  // The checkout return state (registrar Checkout-Session redirect): Stripe sends
+  // the visitor back to this form with `?checkout=success|cancelled` after the
+  // hosted Checkout page. `success` is honest about pending-vs-paid: the order is
+  // marked paid by the webhook, so the copy is "payment received, watch your email"
+  // rather than implying the whole registration is finalized synchronously.
+  const [searchParams] = useSearchParams();
+  const checkout = searchParams.get('checkout');
 
   // The loader JSON crossed a boundary; re-decode it through `FormDefinition` so
   // the client codec is built from a branded definition (`boundary-discipline`),
@@ -353,6 +368,26 @@ export function RegistrationForm({
   return (
     <Main className="gap-10 px-3 py-12 text-2xl md:px-16">
       <h1>{translate('registration.form.title', { year })}</h1>
+      {checkout === 'success' && (
+        <div role="status" className="rounded-md bg-green-50 p-4 text-green-900">
+          <p className="font-semibold">
+            {translate('registration.checkout.success.title')}
+          </p>
+          <p className="text-base">
+            {translate('registration.checkout.success.description')}
+          </p>
+        </div>
+      )}
+      {checkout === 'cancelled' && (
+        <div role="status" className="rounded-md bg-amber-50 p-4 text-amber-900">
+          <p className="font-semibold">
+            {translate('registration.checkout.cancelled.title')}
+          </p>
+          <p className="text-base">
+            {translate('registration.checkout.cancelled.description')}
+          </p>
+        </div>
+      )}
       <FormProvider context={form.context}>
         <Form
           method="POST"

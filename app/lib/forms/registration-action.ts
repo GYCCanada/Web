@@ -4,7 +4,8 @@ import { Clock, Effect, Option, Result } from 'effect';
 
 import { Content } from '../content.server';
 import { Env } from '../env.server';
-import { formValidationError } from '../effect/errors';
+import { formValidationError, redirect } from '../effect/errors';
+import { getLocale } from '../localization/localization';
 import {
   type FormSuccess,
   routeFormAction,
@@ -90,7 +91,7 @@ export interface RegistrationActionConfig<E> {
  */
 export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
   routeFormAction(function* () {
-    const { url } = yield* ReactRouterContext;
+    const { url, params } = yield* ReactRouterContext;
     const submission = yield* SubmissionContext;
     const content = yield* Content.Service;
     const submissions = yield* Submissions.Service;
@@ -160,21 +161,31 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
     // `priceGroup`/`priceRegistrant` return `Cents(0)` for an UNPRICED form
     // (`price.ts` — absent `pricing` ⇒ 0, correctly), so a Stripe-enabled form that
     // authors a `party` section but NO pricing (the current default `registration`
-    // form) would otherwise mint a ZERO-amount PaymentIntent/order. Stripe is the
+    // form) would otherwise mint a ZERO-amount Checkout Session/order. Stripe is the
     // gate for "is on-site payment configured"; `pricing` is the gate for "does this
     // form actually charge". Both must hold — an unpriced form persists + notifies +
     // redirects with NO payment path (the pre-registrar behaviour), even with Stripe
     // configured. A computed amount of `0` for a PRICED submission is likewise
     // skipped per-checkout below (a fully-discounted / nothing-selected registrant
-    // never mints a zero-amount intent).
+    // never mints a zero-amount session).
     //
     // When all three hold (stripe configured, `party` authored, `pricing` present)
     // the decoded `party._tag` drives cardinality + receipt routing (the
     // orthogonality table row (ii), Decision 2b.6):
-    //   - `group`         ⇒ ONE order for the party sum, ONE intent, receipt to the
+    //   - `group`         ⇒ ONE order for the party sum, ONE session, receipt to the
     //                       NOMINATED payer (possibly a non-attendee);
-    //   - `perRegistrant` ⇒ N orders/intents — one per registrant, each frozen on
+    //   - `perRegistrant` ⇒ N orders/sessions — one per registrant, each frozen on
     //                       that registrant's own price + email.
+    //
+    // Checkout handoff (the `--deep` BLOCKER fix): each session is a HOSTED Stripe
+    // Checkout page where the card is actually collected + charged. The order stays
+    // `pending` and we REDIRECT the browser to the (first) session's hosted `url`
+    // (303) so the visitor really pays — the old bare-PaymentIntent path discarded
+    // the secret and "succeeded" with no money collected. The success notification
+    // moves to webhook reconciliation (`checkout.session.completed`, C8); on a
+    // checkout we do NOT notify here (nothing is settled yet). When NO chargeable
+    // session is minted (no party / unpriced / zero amount) the submission falls
+    // through to the legacy persist→notify→success-redirect below.
     if (
       Option.isSome(env.stripe) &&
       'party' in shell &&
@@ -182,42 +193,63 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
     ) {
       const party = shell.party;
       const currency = env.stripe.value.currency;
+      // Absolute, lang-aware return URLs derived from THIS request's URL (the
+      // pathname already carries the `:lang?` prefix, e.g. `/fr/2026/form`). On
+      // completion Stripe returns the visitor to the form with `?checkout=success`
+      // (the form shows the honest "payment received — check your email" state); on
+      // cancel, `?checkout=cancelled` returns them to the form to retry.
+      const successUrl = `${url.origin}${url.pathname}?checkout=success`;
+      const cancelUrl = `${url.origin}${url.pathname}?checkout=cancelled`;
+      // The line-item product name on the hosted page — the form's localized title
+      // (picked for THIS request's locale) is the closest human label the
+      // definition carries.
+      const productName = definition.title[getLocale(params)];
+      // The hosted session URLs minted this submission, in registrant order. We
+      // redirect to the FIRST so the visitor begins paying; each order is its own
+      // independently-reconciled `checkout.session.completed` (perRegistrant fans
+      // out to N receipt-routed payers — a single browser can only start one).
+      const sessionUrls: Array<string> = [];
       // ONE `now` for the whole submission (Decision 6) — every frozen amount in
       // this checkout reads the same instant, so a window boundary cannot split a
       // single submit across two prices.
       const now = yield* Clock.currentTimeMillis;
       if (party._tag === 'group') {
         // The party sum, frozen under the shared `now` (Decision 6) — the amount
-        // the order records and the intent charges. `priceGroup` sums each
+        // the order records and the session charges. `priceGroup` sums each
         // registrant's price over the present `pricing` dimension (the gate above
         // already proved `pricing` is present — an UNPRICED form never reaches here).
         const amount = priceGroup(definition, shell.registrants, now);
         // A zero party sum (e.g. a fully-discounted window or a priced form where
-        // nothing chargeable is selected) mints NO intent/order — Stripe rejects
-        // zero-amount intents and there is nothing to collect. The submission still
-        // persists + notifies + redirects.
+        // nothing chargeable is selected) mints NO session/order — Stripe rejects
+        // zero-amount line items and there is nothing to collect. The submission
+        // still persists + notifies + redirects.
         if (amount > 0) {
           // The receipt routes to the NOMINATED payer (possibly a non-attendee),
           // frozen here so a later edit cannot retro-redirect the receipt (2b.6).
           const receiptEmail = party.payer.email;
-          // One PaymentIntent per party, keyed off the request fingerprint + mode
+          // One Checkout Session per party, keyed off the request fingerprint + mode
           // (Decision 2): a verbatim retry re-derives the same key ⇒ Stripe replays
-          // the first intent (no double-charge); a changed payload ⇒ a new checkout.
+          // the first session (no second checkout); a changed payload ⇒ a new one.
           const idempotencyKey = `registration:checkout:${requestFingerprint}:group`;
-          const intent = yield* payment.createIntent(
+          const session = yield* payment.createCheckoutSession({
             amount,
             currency,
             receiptEmail,
-            { orderId: requestFingerprint, mode: 'group' },
+            productName,
+            successUrl,
+            cancelUrl,
+            metadata: { orderId: requestFingerprint, mode: 'group' },
             idempotencyKey,
-          );
+          });
+          sessionUrls.push(session.url);
           // Freeze the order record (Decision 7 step 3) — ONE order keyed by the
           // fingerprint, `registrantIds` = the whole party, amount + receiptEmail
-          // frozen. The webhook (C8) reads it back to mark it `paid`.
+          // frozen, `sessionId` = the Checkout Session. The webhook (C8) reads it
+          // back to mark it `paid`.
           const order: RegistrationOrder = {
             orderId: requestFingerprint,
             mode: 'group',
-            intentId: intent.intentId,
+            sessionId: session.sessionId,
             amount,
             currency,
             receiptEmail,
@@ -240,31 +272,35 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
           }
         }
       } else {
-        // `perRegistrant`: one order + one intent PER registrant (Decision 2b.6).
+        // `perRegistrant`: one order + one session PER registrant (Decision 2b.6).
         // Each is keyed `<fingerprint>:<index>` so a verbatim retry replays the
-        // SAME per-registrant intents (no double-charge), and the receipt routes to
-        // that registrant's OWN email (re-imposed present by the shell). The
+        // SAME per-registrant sessions (no second checkout), and the receipt routes
+        // to that registrant's OWN email (re-imposed present by the shell). The
         // per-registrant order links the ONE registrant submission it pays for.
         for (const [index, registrant] of shell.registrants.entries()) {
           const amount = priceRegistrant(definition, registrant, now);
-          // A zero registrant price mints NO intent/order for THAT registrant (the
+          // A zero registrant price mints NO session/order for THAT registrant (the
           // others in the party still mint theirs) — Stripe rejects zero-amount
-          // intents and there is nothing to collect.
+          // line items and there is nothing to collect.
           if (amount <= 0) continue;
           const receiptEmail = registrant['email'] as string;
           const orderId = `${requestFingerprint}:${index}`;
           const idempotencyKey = `registration:checkout:${requestFingerprint}:perRegistrant:${index}`;
-          const intent = yield* payment.createIntent(
+          const session = yield* payment.createCheckoutSession({
             amount,
             currency,
             receiptEmail,
-            { orderId, mode: 'perRegistrant' },
+            productName,
+            successUrl,
+            cancelUrl,
+            metadata: { orderId, mode: 'perRegistrant' },
             idempotencyKey,
-          );
+          });
+          sessionUrls.push(session.url);
           const order: RegistrationOrder = {
             orderId,
             mode: 'perRegistrant',
-            intentId: intent.intentId,
+            sessionId: session.sessionId,
             amount,
             currency,
             receiptEmail,
@@ -288,6 +324,17 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
           );
         }
       }
+
+      // At least one chargeable session was minted ⇒ hand the browser off to the
+      // hosted Stripe Checkout page (303 See Other — a POST action redirecting to a
+      // GET). The order(s) stay `pending`; the success notification + paid status
+      // are owned by the `checkout.session.completed` webhook (C8). No success toast
+      // here — nothing is settled until the visitor actually pays on Stripe.
+      if (sessionUrls.length > 0) {
+        return yield* redirect(sessionUrls[0]!, { status: 303 });
+      }
+      // Otherwise (every amount was zero) fall through to the legacy
+      // persist→notify→success-redirect path below.
     }
 
     yield* config.notify(stored);

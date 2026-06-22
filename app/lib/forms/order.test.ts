@@ -17,7 +17,7 @@ import { Cents, CurrencyCode } from './pricing';
 const validOrder = {
   orderId: 'abc123fingerprint',
   mode: 'group' as const,
-  intentId: 'pi_test_1',
+  sessionId: 'cs_test_1',
   amount: Cents.make(15000),
   currency: CurrencyCode.make('cad'),
   receiptEmail: 'leader@example.com',

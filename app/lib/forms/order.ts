@@ -10,7 +10,7 @@ import { Cents, CurrencyCode } from './pricing';
  * durable, amount-frozen receipt one checkout mints, stored as its own bucket
  * object at `submissions/registration/orders/<orderId>.json` (`orderKey`). It is
  * NOT the registrant `Submission` (that is the attendee's durable record); the
- * order is the PAYMENT's source of truth, linking a Stripe PaymentIntent to the
+ * order is the PAYMENT's source of truth, linking a Stripe Checkout Session to the
  * registrant submission(s) it pays for.
  *
  * Cardinality (Decision 2, derived from the decoded `party._tag`):
@@ -44,7 +44,10 @@ export const RegistrationOrder = Schema.Struct({
   // which cardinality reconciled it. Closed `BillingMode`, shared with the party
   // section + the shell discriminant (one definition, `derive-dont-sync`).
   mode: BillingMode,
-  intentId: Schema.String,
+  // The Stripe Checkout Session this order was minted against — the visitor is
+  // redirected to its hosted URL to pay, and the `checkout.session.completed`
+  // webhook (C8) carries this id back. Frozen at create-session time.
+  sessionId: Schema.String,
   amount: Cents, // FROZEN at create-intent time
   currency: CurrencyCode,
   // FROZEN — group: party.payer.email (nominated, possibly a non-attendee);

@@ -12,7 +12,7 @@ import {
   type RequestRuntime,
 } from '../effect/runtime';
 import type { RouteArgs } from '../effect/router-context';
-import { type CreateIntentCall, Payment } from '../payment.server';
+import { type CreateCheckoutSessionCall, Payment } from '../payment.server';
 import { type ObjectHead, NotFound, Storage, StorageError } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
 
@@ -370,12 +370,14 @@ describe('registrationAction', () => {
  * Registrar C7 — the GROUP checkout the action mints when the `Env.stripe` gate is
  * `Some` and the form authored a `party` section. The default `registration` form
  * authors a GROUP-only party (C7a), so a party submission decodes the group arm:
- * the action freezes ONE order for the party sum and mints ONE PaymentIntent via
- * `Payment` — proven end-to-end through `Payment.testLayer` (NO network). When the
- * gate is `None` the on-site path is INERT (no intent, no order) — the RegFox-era
- * no-op behaviour. Both halves are pinned here (the `--deep` blocker: the
- * blank-non-leader-email drop is proven on the REAL rendered `email: ''` payload,
- * not just the schema).
+ * the action freezes ONE order for the party sum and mints ONE Checkout Session via
+ * `Payment`, then REDIRECTS the browser (303) to the session's hosted `url` so the
+ * visitor actually pays on Stripe — proven end-to-end through `Payment.testLayer`
+ * (NO network). The order stays `pending`; the success notification moves to the
+ * `checkout.session.completed` webhook (C8). When the gate is `None` the on-site
+ * path is INERT (no session, no order) — the RegFox-era no-op behaviour. Both
+ * halves are pinned here (the `--deep` blocker: the blank-non-leader-email drop is
+ * proven on the REAL rendered `email: ''` payload, not just the schema).
  */
 const STRIPE_ENABLED_ENV: Record<string, string> = {
   STRIPE_API_KEY: 'sk_test_123',
@@ -477,8 +479,8 @@ const stripRegistrantPrefix = (
   );
 
 describe('registrationAction — group checkout (registrar C7)', () => {
-  it('mints ONE PaymentIntent + ONE frozen order for the party (stripe enabled)', async () => {
-    const calls: Array<CreateIntentCall> = [];
+  it('mints ONE Checkout Session + ONE frozen order and redirects to the hosted url (stripe enabled)', async () => {
+    const calls: Array<CreateCheckoutSessionCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(
         layerTest(pricedRegistrationObject()),
@@ -488,16 +490,34 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     const action = registrationAction({ notify: () => Effect.void, success });
     const args = makeRegistrationArgs(runtime, groupBody(2));
 
-    await action(args).catch(() => {});
+    let thrown: unknown;
+    try {
+      await action(args);
+    } catch (error) {
+      thrown = error;
+    }
 
-    // (a) Exactly ONE create-intent call (the group: one intent for the party).
-    expect(calls.length).toBe(1);
+    // The action redirects the browser (303) to the hosted Checkout url — the
+    // visitor actually pays on Stripe, the order stays pending. NOT a 302 success
+    // toast (that would imply settlement the webhook hasn't confirmed yet).
+    expect(thrown).toBeInstanceOf(Response);
+    const response = thrown as Response;
+    expect(response.status).toBe(303);
     const call = calls[0]!;
+    expect(response.headers.get('location')).toBe(
+      `https://checkout.stripe.test/${call.idempotencyKey}`,
+    );
+
+    // (a) Exactly ONE create-session call (the group: one session for the party).
+    expect(calls.length).toBe(1);
     // The receipt routes to the NOMINATED payer (frozen), not a registrant.
     expect(call.receiptEmail).toBe('leader@example.com');
     expect(String(call.currency)).toBe('cad');
+    // The return URLs are absolute + carry the checkout-outcome query the form reads.
+    expect(call.successUrl).toBe('http://localhost/2026/form?checkout=success');
+    expect(call.cancelUrl).toBe('http://localhost/2026/form?checkout=cancelled');
     // The idempotency key is the request-fingerprint + mode (Decision 2) — a
-    // verbatim retry re-derives it ⇒ Stripe replays the first intent.
+    // verbatim retry re-derives it ⇒ Stripe replays the first session.
     expect(call.idempotencyKey).toMatch(/^registration:checkout:[a-f0-9]+:group$/);
     expect(call.metadata).toEqual(
       expect.objectContaining({ mode: 'group' }),
@@ -512,8 +532,8 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     expect(order.status).toBe('pending');
     expect(order.receiptEmail).toBe('leader@example.com');
     expect(order.registrantIds.length).toBe(2);
-    expect(order.intentId).toBe(`pi_test_${call.idempotencyKey}`);
-    // The order amount is the frozen Cents the intent charged.
+    expect(order.sessionId).toBe(`cs_test_${call.idempotencyKey}`);
+    // The order amount is the frozen Cents the session charged.
     expect(order.amount).toBe(call.amount);
   });
 
@@ -521,7 +541,7 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     // The REAL rendered payload: registrant #1 POSTs `email: ''`. The shell drops
     // it to absent so the optional-at-key email decodes valid — proven through the
     // full action + parseSubmission path, not just the schema (the --deep blocker).
-    const calls: Array<CreateIntentCall> = [];
+    const calls: Array<CreateCheckoutSessionCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(
         layerTest(pricedRegistrationObject()),
@@ -539,18 +559,18 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     } catch (error) {
       thrown = error;
     }
-    // It SUCCEEDED → the terminal redirect (a present-blank that still rejected
-    // would surface as a form error, no redirect).
+    // It SUCCEEDED → the 303 redirect to the hosted Checkout url (a present-blank
+    // that still rejected would surface as a form error, no redirect).
     expect(thrown).toBeInstanceOf(Response);
-    expect((thrown as Response).status).toBe(302);
-    // And it still minted the group intent + order.
+    expect((thrown as Response).status).toBe(303);
+    // And it still minted the group session + order.
     expect(calls.length).toBe(1);
     const orders = await listOrders(runtime, makeRegistrationArgs(runtime, body));
     expect(orders.length).toBe(1);
   });
 
   it('a group submission with a blank PAYER email FAILS (payer email required)', async () => {
-    const calls: Array<CreateIntentCall> = [];
+    const calls: Array<CreateCheckoutSessionCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
     );
@@ -569,7 +589,7 @@ describe('registrationAction — group checkout (registrar C7)', () => {
   });
 
   it('an empty party (zero registrants) FAILS before any checkout', async () => {
-    const calls: Array<CreateIntentCall> = [];
+    const calls: Array<CreateCheckoutSessionCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
     );
@@ -609,13 +629,13 @@ describe('registrationAction — group checkout (registrar C7)', () => {
     // The --deep MAJOR finding M2: the default `registration` form authors a
     // `party` section but NO `pricing`. With Stripe configured, gating checkout
     // purely on `Some(stripe) && 'party' in shell` enters the on-site path and
-    // mints a ZERO-amount PaymentIntent/order (`priceGroup` of an unpriced form is
+    // mints a ZERO-amount Checkout Session/order (`priceGroup` of an unpriced form is
     // `Cents(0)`). Stripe rejects zero-amount intents and there is nothing to
     // collect. The fix requires `definition.pricing` to ALSO be present: an
     // unpriced form (the default seeded here — `layerTest({})` falls back to the
     // bundled `defaultRegistrationForm`, which has no `pricing`) persists +
     // notifies + redirects with NO payment path, even with Stripe enabled.
-    const calls: Array<CreateIntentCall> = [];
+    const calls: Array<CreateCheckoutSessionCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
     );
@@ -660,15 +680,17 @@ const perRegistrantBody = (count: number): URLSearchParams =>
 
 /**
  * Registrar C7.5 — the `perRegistrant` cardinality: the decoded `party._tag` drives
- * a fan-out, one PaymentIntent + one frozen order PER registrant (Decision 2b.6),
+ * a fan-out, one Checkout Session + one frozen order PER registrant (Decision 2b.6),
  * each keyed `<fingerprint>:<index>` and frozen on that registrant's OWN price +
- * email (the receipt routing). Plus the email orthogonality: a perRegistrant blank
- * registrant email FAILS at decode (re-imposition), where a group blank non-leader
- * passes (proven in the C7 block above).
+ * email (the receipt routing). The browser is redirected (303) to the FIRST
+ * session's hosted url — a single browser can only begin one checkout, and each
+ * order reconciles independently off its own `checkout.session.completed`. Plus the
+ * email orthogonality: a perRegistrant blank registrant email FAILS at decode
+ * (re-imposition), where a group blank non-leader passes (proven in the C7 block).
  */
 describe('registrationAction — perRegistrant checkout (registrar C7.5)', () => {
-  it('mints N intents + N frozen orders (3 registrants ⇒ 3), keyed + receipt-routed per registrant', async () => {
-    const calls: Array<CreateIntentCall> = [];
+  it('mints N sessions + N frozen orders (3 registrants ⇒ 3), keyed + receipt-routed per registrant', async () => {
+    const calls: Array<CreateCheckoutSessionCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(
         layerTest(pricedRegistrationObject()),
@@ -678,13 +700,27 @@ describe('registrationAction — perRegistrant checkout (registrar C7.5)', () =>
     const action = registrationAction({ notify: () => Effect.void, success });
     const args = makeRegistrationArgs(runtime, perRegistrantBody(3));
 
-    await action(args).catch(() => {});
+    let thrown: unknown;
+    try {
+      await action(args);
+    } catch (error) {
+      thrown = error;
+    }
+    // The action redirects (303) to the FIRST registrant's hosted Checkout url.
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(303);
+    const firstByIndex = [...calls].sort((a, b) =>
+      a.idempotencyKey.localeCompare(b.idempotencyKey),
+    )[0]!;
+    expect((thrown as Response).headers.get('location')).toBe(
+      `https://checkout.stripe.test/${firstByIndex.idempotencyKey}`,
+    );
 
-    // (a) Exactly THREE create-intent calls — one per registrant.
+    // (a) Exactly THREE create-session calls — one per registrant.
     expect(calls.length).toBe(3);
-    // Each intent's receipt routes to ITS OWN registrant email (booth{i}@…), and
+    // Each session's receipt routes to ITS OWN registrant email (booth{i}@…), and
     // its idempotency key carries the `:perRegistrant:<index>` suffix (a retry
-    // replays the same per-registrant intents).
+    // replays the same per-registrant sessions).
     const byKey = [...calls].sort((a, b) =>
       a.idempotencyKey.localeCompare(b.idempotencyKey),
     );
@@ -708,9 +744,9 @@ describe('registrationAction — perRegistrant checkout (registrar C7.5)', () =>
       expect(order.status).toBe('pending');
       expect(order.registrantIds.length).toBe(1);
       expect(order.orderId).toMatch(/^[a-f0-9]+:\d+$/);
-      // The order's frozen receipt is the same as the intent that charged it.
+      // The order's frozen receipt is the same as the session that charged it.
       const matchingCall = calls.find(
-        (call) => `pi_test_${call.idempotencyKey}` === order.intentId,
+        (call) => `cs_test_${call.idempotencyKey}` === order.sessionId,
       );
       expect(matchingCall?.receiptEmail).toBe(order.receiptEmail);
       expect(order.receiptEmail).toMatch(/^booth\d+@example\.com$/);
@@ -725,7 +761,7 @@ describe('registrationAction — perRegistrant checkout (registrar C7.5)', () =>
   });
 
   it('a perRegistrant submission with a blank registrant email FAILS before any checkout (email re-imposition)', async () => {
-    const calls: Array<CreateIntentCall> = [];
+    const calls: Array<CreateCheckoutSessionCall> = [];
     const runtime = makeRequestRuntimeFromLayer(
       stripeEnabledLayer(layerTest({}), Payment.testLayer({ calls })),
     );

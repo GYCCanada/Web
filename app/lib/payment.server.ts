@@ -15,7 +15,7 @@ import {
   DEFAULT_API_BASE_URL,
   Webhooks,
 } from '@distilled.cloud/stripe';
-import { PostPaymentIntents } from '@distilled.cloud/stripe/Operations';
+import { PostCheckoutSessions } from '@distilled.cloud/stripe/Operations';
 
 import type { Cents, CurrencyCode } from './forms/pricing';
 import { Env } from './env.server';
@@ -26,24 +26,39 @@ import { Env } from './env.server';
  * pattern (`submissions.server.ts:68-94`, `sendgrid.server.ts:25-33`). It exposes
  * exactly two operations the registrar needs:
  *
- *   - `createIntent` — mint a Stripe PaymentIntent for one frozen amount and
- *     return its `{ intentId, clientSecret }`. The `idempotencyKey` rides the
- *     request's `Idempotency-Key` HEADER (NOT the body), so a verbatim retry of
- *     the same checkout replays the first intent rather than double-charging
- *     (Decision 2 / 2b: the key derives from the request fingerprint + chosen
- *     mode). `receiptEmail` threads to `PostPaymentIntents.receipt_email` — the
- *     frozen payer (group) or per-registrant (perRegistrant) receipt recipient
- *     (Decision 2b.6).
+ *   - `createCheckoutSession` — mint a Stripe **Checkout Session** (the hosted
+ *     redirect flow) for one frozen amount and return its `{ sessionId, url }`.
+ *     The registrar redirects the browser to that hosted `url`; the payment is
+ *     actually confirmed ON Stripe (a card is collected + charged there), and the
+ *     `checkout.session.completed` webhook (C8) reconciles the order. The single
+ *     `price_data` line item carries the SERVER-frozen `amount`/`currency` (no
+ *     client-supplied price), `mode: 'payment'`, `customer_email` = the frozen
+ *     `receiptEmail` (the nominated group payer or per-registrant recipient,
+ *     Decision 2b.6), `success_url`/`cancel_url` (absolute, lang-aware), and the
+ *     `orderId` linkage on BOTH `client_reference_id` and `metadata` so the
+ *     webhook reconciles by it. The `idempotencyKey` rides the request's
+ *     `Idempotency-Key` HEADER (NOT the body), so a verbatim retry of the same
+ *     checkout replays the first session rather than minting a second
+ *     (Decision 2 / 2b: the key derives from the request fingerprint + mode).
  *   - `constructEvent` — verify a webhook's `Stripe-Signature` against the raw
  *     body (HMAC-SHA256, 300s tolerance) and parse it to a `StripeEvent`. The
  *     webhook route (C8) reconciles orders off the verified event.
+ *
+ * Why Checkout (hosted redirect) over a bare PaymentIntent: a created
+ * PaymentIntent still needs a payment method + a client-side confirmation, so the
+ * old `createIntent` path discarded the `clientSecret`, redirected to success, and
+ * left the order pending with NO payment ever collected (the `--deep` BLOCKER).
+ * A Checkout Session moves the card collection + charge onto Stripe's hosted page;
+ * the order legitimately stays `pending` until the `checkout.session.completed`
+ * webhook confirms it.
  *
  * Principles (`~/.brain/principles`):
  *
  *   - `small-interface-deep-implementation`: two operations, no leaked SDK types.
  *     `amount` is raw minor units (the `Cents` brand already guarantees an
- *     integer ≥0 — no dollar→cents helper); `clientSecret` is unwrapped from its
- *     `Redacted` exactly once, here at the boundary, so callers never coerce.
+ *     integer ≥0 — no dollar→cents helper); the hosted `url` is the only thing a
+ *     caller needs back (plus the `sessionId` it freezes onto the order for the
+ *     webhook to reconcile by).
  *   - `make-impossible-states-unrepresentable`: the registrar lands behind the
  *     `Env.stripe` `None`-gate (Stripe test mode). When stripe is unconfigured
  *     BOTH operations fail `PaymentDisabled` — there is no half-wired "configured
@@ -59,14 +74,13 @@ import { Env } from './env.server';
  */
 
 /**
- * A create-intent failure. The distilled `PostPaymentIntents` operation declares
- * an EMPTY typed-error channel (the SDK surfaces card/idempotency/invalid-request
- * failures at runtime via the request cause, not in the static type), so we catch
- * the whole `Cause` and collapse it here into ONE user-facing error: the
- * registrar action cannot meaningfully branch on a declined card vs an
- * invalid-request at the call site (the amount is server-frozen, so a 4xx is an
- * upstream bug, not a field the user retries). `cause` carries the raw squashed
- * SDK error for logging.
+ * A create-session failure. The distilled `PostCheckoutSessions` operation
+ * declares an EMPTY typed-error channel (the SDK surfaces idempotency/invalid-
+ * request failures at runtime via the request cause, not in the static type), so
+ * we catch the whole `Cause` and collapse it here into ONE user-facing error: the
+ * registrar action cannot meaningfully branch on the failure kind at the call site
+ * (the amount is server-frozen, so a 4xx is an upstream bug, not a field the user
+ * retries). `cause` carries the raw squashed SDK error for logging.
  */
 export class PaymentError extends Schema.TaggedErrorClass<PaymentError>()(
   'Payment.Error',
@@ -96,10 +110,14 @@ export class PaymentDisabled extends Schema.TaggedErrorClass<PaymentDisabled>()(
   {},
 ) {}
 
-/** The minted intent — exactly what a checkout needs to confirm client-side. */
-export interface CreatedIntent {
-  readonly intentId: string;
-  readonly clientSecret: string;
+/**
+ * The minted Checkout Session — the `sessionId` the order freezes (and the
+ * webhook reconciles by) plus the hosted `url` the registrar redirects the
+ * browser to so the visitor actually pays on Stripe.
+ */
+export interface CreatedSession {
+  readonly sessionId: string;
+  readonly url: string;
 }
 
 /** The verified, parsed webhook event (distilled's open `StripeEvent` shape). */
@@ -109,20 +127,28 @@ export class Service extends Context.Service<
   Service,
   {
     /**
-     * Create a Stripe PaymentIntent for one frozen `amount` (minor units) in
-     * `currency`, routing the receipt to `receiptEmail` and tagging the intent
-     * with `metadata` (the order/fingerprint linkage the webhook reconciles by).
-     * `idempotencyKey` is sent as the `Idempotency-Key` HEADER, never the body —
-     * a verbatim retry replays the first intent. Fails `PaymentDisabled` when
-     * stripe is unconfigured; `PaymentError` on any SDK/transport failure.
+     * Create a Stripe Checkout Session (the hosted redirect flow) for one frozen
+     * `amount` (minor units) in `currency`, charged via a single server-authored
+     * `price_data` line item named `productName`. The receipt + customer is the
+     * frozen `receiptEmail`; `metadata` (and `client_reference_id` = its
+     * `orderId`) carry the order/fingerprint linkage the `checkout.session.completed`
+     * webhook reconciles by. The visitor is redirected to the returned `url` to
+     * pay; on completion Stripe returns them to `successUrl`, on cancel to
+     * `cancelUrl` (both absolute, lang-aware). `idempotencyKey` is sent as the
+     * `Idempotency-Key` HEADER, never the body — a verbatim retry replays the first
+     * session. Fails `PaymentDisabled` when stripe is unconfigured; `PaymentError`
+     * on any SDK/transport failure.
      */
-    readonly createIntent: (
-      amount: Cents,
-      currency: CurrencyCode,
-      receiptEmail: string,
-      metadata: Readonly<Record<string, string>>,
-      idempotencyKey: string,
-    ) => Effect.Effect<CreatedIntent, PaymentError | PaymentDisabled>;
+    readonly createCheckoutSession: (params: {
+      readonly amount: Cents;
+      readonly currency: CurrencyCode;
+      readonly receiptEmail: string;
+      readonly productName: string;
+      readonly successUrl: string;
+      readonly cancelUrl: string;
+      readonly metadata: Readonly<Record<string, string>>;
+      readonly idempotencyKey: string;
+    }) => Effect.Effect<CreatedSession, PaymentError | PaymentDisabled>;
     /**
      * Verify `signature` against the RAW `rawBody` (HMAC-SHA256 over the exact
      * bytes Stripe sent — never reserialized JSON) and parse the event. Fails
@@ -162,7 +188,7 @@ const credentialsLayer = Layer.effect(
  * The `Payment` layer. Reads the stripe gate off `Env`: `None` ⇒ both operations
  * fail `PaymentDisabled` (the inert on-site path); `Some` ⇒ the captured
  * operation handle (over the `Credentials` + `FetchHttpClient` layer deps) runs
- * each call. The `PostPaymentIntents` handle is captured once via the yield-first
+ * each call. The `PostCheckoutSessions` handle is captured once via the yield-first
  * form so the transport requirements are resolved at layer build, not per call.
  */
 export const layer = Layer.effect(
@@ -171,71 +197,95 @@ export const layer = Layer.effect(
     const env = yield* Env.Service;
     // Capture the requirement-free operation handle once (yield-first): the
     // `Credentials` + `HttpClient` deps are satisfied by this layer's context.
-    const postPaymentIntents = yield* PostPaymentIntents;
+    const postCheckoutSessions = yield* PostCheckoutSessions;
 
     if (Option.isNone(env.stripe)) {
       return Service.of({
-        createIntent: () => Effect.fail(new PaymentDisabled()),
+        createCheckoutSession: () => Effect.fail(new PaymentDisabled()),
         constructEvent: () => Effect.fail(new PaymentDisabled()),
       });
     }
 
     const config = env.stripe.value;
 
-    const createIntent = Effect.fn('Payment.createIntent')(function* (
-      amount: Cents,
-      currency: CurrencyCode,
-      receiptEmail: string,
-      metadata: Readonly<Record<string, string>>,
-      idempotencyKey: string,
-    ) {
-      const intent = yield* postPaymentIntents(
-        {
-          amount,
-          currency,
-          receipt_email: receiptEmail,
-          metadata: { ...metadata },
-        },
-        { idempotencyKey },
-      ).pipe(
-        // The operation's static error channel is empty (the SDK reports
-        // card/idempotency/invalid-request failures at runtime, not in the
-        // type), so catch the whole `Cause` and squash it into ONE `PaymentError`
-        // — a server-frozen amount means any failure is an upstream/transport
-        // fault, not a user field. `Cause.squash` recovers the raw SDK error.
-        Effect.catchCause((cause) => {
-          const squashed = Cause.squash(cause);
-          const message =
-            typeof squashed === 'object' &&
-            squashed !== null &&
-            'message' in squashed &&
-            typeof (squashed as { readonly message?: unknown }).message ===
-              'string'
-              ? (squashed as { readonly message: string }).message
-              : undefined;
-          return Effect.fail(new PaymentError({ message, cause: squashed }));
-        }),
-      );
-
-      // `client_secret` is a `SensitiveNullableString` ⇒ `Redacted<string> | null`;
-      // unwrap it once here at the boundary. A confirmable intent always carries a
-      // secret, so a `null` is an upstream Stripe contract violation (it dies).
-      if (intent.client_secret === null) {
-        return yield* Effect.die(
-          new PaymentError({
-            message: 'Stripe PaymentIntent returned no client_secret',
+    const createCheckoutSession = Effect.fn('Payment.createCheckoutSession')(
+      function* (params: {
+        readonly amount: Cents;
+        readonly currency: CurrencyCode;
+        readonly receiptEmail: string;
+        readonly productName: string;
+        readonly successUrl: string;
+        readonly cancelUrl: string;
+        readonly metadata: Readonly<Record<string, string>>;
+        readonly idempotencyKey: string;
+      }) {
+        const session = yield* postCheckoutSessions(
+          {
+            mode: 'payment',
+            // The single server-frozen line item: an inline `price_data` carrying
+            // the `Cents` amount + currency, so NOTHING about the price is
+            // client-supplied. `quantity: 1` — the amount is the whole frozen
+            // total (group sum or one registrant's price), already summed upstream.
+            line_items: [
+              {
+                quantity: 1,
+                price_data: {
+                  currency: params.currency,
+                  unit_amount: params.amount,
+                  product_data: { name: params.productName },
+                },
+              },
+            ],
+            // The frozen receipt recipient — also the customer Stripe emails the
+            // receipt to. Set on BOTH the session (`customer_email`) and the
+            // resulting PaymentIntent so the hosted page pre-fills it.
+            customer_email: params.receiptEmail,
+            success_url: params.successUrl,
+            cancel_url: params.cancelUrl,
+            // `client_reference_id` + `metadata.orderId` are the order linkage the
+            // `checkout.session.completed` webhook reconciles by (the metadata
+            // already carries `{ orderId, mode }`).
+            client_reference_id: params.metadata['orderId'],
+            metadata: { ...params.metadata },
+          },
+          { idempotencyKey: params.idempotencyKey },
+        ).pipe(
+          // The operation's static error channel is empty (the SDK reports
+          // idempotency/invalid-request failures at runtime, not in the type), so
+          // catch the whole `Cause` and squash it into ONE `PaymentError` — a
+          // server-frozen amount means any failure is an upstream/transport fault,
+          // not a user field. `Cause.squash` recovers the raw SDK error.
+          Effect.catchCause((cause) => {
+            const squashed = Cause.squash(cause);
+            const message =
+              typeof squashed === 'object' &&
+              squashed !== null &&
+              'message' in squashed &&
+              typeof (squashed as { readonly message?: unknown }).message ===
+                'string'
+                ? (squashed as { readonly message: string }).message
+                : undefined;
+            return Effect.fail(new PaymentError({ message, cause: squashed }));
           }),
         );
-      }
 
-      // The decoded `client_secret` is `string | Redacted<string>` (the SDK's
-      // input-friendly `Sensitive` codec); normalize to the raw string here.
-      const clientSecret = Redacted.isRedacted(intent.client_secret)
-        ? Redacted.value(intent.client_secret)
-        : intent.client_secret;
+        // A `mode: 'payment'` session ALWAYS carries a hosted `url` (the redirect
+        // target); a `null` is an upstream Stripe contract violation, so it dies
+        // rather than redirecting the visitor to nowhere.
+        if (session.url === null) {
+          return yield* Effect.die(
+            new PaymentError({
+              message: 'Stripe Checkout Session returned no url',
+            }),
+          );
+        }
 
-      return { intentId: intent.id, clientSecret } satisfies CreatedIntent;
-    });
+        return {
+          sessionId: session.id,
+          url: session.url,
+        } satisfies CreatedSession;
+      },
+    );
 
     const constructEvent = Effect.fn('Payment.constructEvent')(function* (
       rawBody: string,
@@ -253,7 +303,7 @@ export const layer = Layer.effect(
       );
     });
 
-    return Service.of({ createIntent, constructEvent });
+    return Service.of({ createCheckoutSession, constructEvent });
   }),
 ).pipe(
   Layer.provide(FetchHttpClient.layer),
@@ -267,46 +317,53 @@ export const layer = Layer.effect(
  */
 export const defaultLayer = layer.pipe(Layer.provide(Env.defaultLayer));
 
-/** The argument record `createIntent` was last called with — what a test asserts. */
-export interface CreateIntentCall {
+/** The argument record `createCheckoutSession` was last called with — what a test asserts. */
+export interface CreateCheckoutSessionCall {
   readonly amount: Cents;
   readonly currency: CurrencyCode;
   readonly receiptEmail: string;
+  readonly productName: string;
+  readonly successUrl: string;
+  readonly cancelUrl: string;
   readonly metadata: Readonly<Record<string, string>>;
   readonly idempotencyKey: string;
 }
 
 /**
  * A network-free `Payment` test double (`Layer.succeed(Service, fake)`). The
- * registrar checkout tests (C7/C7.5) provide this to prove the create-intent
- * wiring (amount/currency/receiptEmail/metadata/idempotencyKey threading) WITHOUT
- * touching Stripe. `createIntent` records each call into `calls` and returns a
- * deterministic intent whose ids derive from the `idempotencyKey` (so a retry
- * with the same key yields the same fake intent — the idempotency contract is
- * observable in tests). `constructEvent` returns the supplied `event`.
+ * registrar checkout tests (C7/C7.5) provide this to prove the create-session
+ * wiring (amount/currency/receiptEmail/urls/metadata/idempotencyKey threading)
+ * WITHOUT touching Stripe. `createCheckoutSession` records each call into `calls`
+ * and returns a deterministic session whose id + hosted `url` derive from the
+ * `idempotencyKey` (so a retry with the same key yields the same fake session —
+ * the idempotency contract is observable in tests). `constructEvent` returns the
+ * supplied `event`.
  *
  * Pass `calls` (a mutable array the test owns) to capture invocations, and
  * optionally `event` to fix what `constructEvent` returns.
  */
 export const testLayer = (options?: {
-  readonly calls?: Array<CreateIntentCall>;
+  readonly calls?: Array<CreateCheckoutSessionCall>;
   readonly event?: StripeEvent;
 }): Layer.Layer<Service> =>
   Layer.succeed(
     Service,
     Service.of({
-      createIntent: (amount, currency, receiptEmail, metadata, idempotencyKey) =>
+      createCheckoutSession: (params) =>
         Effect.sync(() => {
           options?.calls?.push({
-            amount,
-            currency,
-            receiptEmail,
-            metadata,
-            idempotencyKey,
+            amount: params.amount,
+            currency: params.currency,
+            receiptEmail: params.receiptEmail,
+            productName: params.productName,
+            successUrl: params.successUrl,
+            cancelUrl: params.cancelUrl,
+            metadata: params.metadata,
+            idempotencyKey: params.idempotencyKey,
           });
           return {
-            intentId: `pi_test_${idempotencyKey}`,
-            clientSecret: `pi_test_${idempotencyKey}_secret`,
+            sessionId: `cs_test_${params.idempotencyKey}`,
+            url: `https://checkout.stripe.test/${params.idempotencyKey}`,
           };
         }),
       constructEvent: () => Effect.succeed(options?.event ?? {}),
