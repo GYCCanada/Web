@@ -9,7 +9,11 @@ import {
   disabledRegistrationCopySection,
   disabledTravelSection,
 } from "./conference-section-defaults";
-import { deterministicListItemId, SiteContent } from "./schema";
+import {
+  deterministicListItemId,
+  DraftSiteContent,
+  SiteContent,
+} from "./schema";
 
 /**
  * The bundled-default `SiteContent` document (CMS plan §"Defaults / seed",
@@ -526,3 +530,12 @@ lives in Michigan with his wife and daughter where he works as a pastor.
     fr: { ...root.fr },
   },
 });
+
+/**
+ * The editor fallback: the same document as `defaultContent`, but decoded through
+ * `DraftSiteContent` so optional URL fields are plain `string | undefined` (not
+ * `Option`) and the admin loader can encode for the form without a schema mismatch.
+ */
+export const defaultDraftContent: DraftSiteContent = Schema.decodeUnknownSync(
+  DraftSiteContent,
+)(Schema.encodeUnknownSync(SiteContent)(defaultContent));

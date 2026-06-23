@@ -17,7 +17,7 @@ import {
   setAtPath,
   type Json,
 } from './admin-form';
-import { defaultContent } from './defaults';
+import { defaultDraftContent } from './defaults';
 import { backfillListItemIds } from './id-backfill';
 import { applyListEdit, type ListOp } from './list-edit';
 import {
@@ -321,7 +321,7 @@ const encodeSitePublishJson = Schema.encodeUnknownEffect(
 
 const siteCodec: ScopeCodec = {
   keys: scopeKeys(siteScope),
-  default: defaultContent,
+  default: defaultDraftContent,
   fromBucket: (json) =>
     parseJson(json).pipe(
       Effect.map(backfillListItemIds),
