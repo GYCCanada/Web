@@ -507,6 +507,8 @@ export const TeamPosition = Schema.Literals([
   'team.position.vp-communications',
   'team.position.vp-networking',
   'team.position.vp-missions',
+  'team.position.vp-marketing',
+  'team.position.vp-production',
   'team.position.secretary',
   'team.position.treasurer',
 ]);
