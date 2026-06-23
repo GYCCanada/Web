@@ -456,10 +456,7 @@ describe('DraftSiteContent (draft-lax / publish-strict)', () => {
 });
 
 /**
- * Append `extraHotel` to the /2024 conference's `hotels`. Typed `unknown`→record
- * so a deliberately-empty / half-filled `Hotel` (the present-but-empty cases
- * under test) can be constructed without satisfying the strict encoded `Hotel`
- * shape.
+ * Append `extraHotel` to the /2024 conference's `accommodations.hotels`.
  */
 const withExtraHotel = (
   encoded: typeof SiteContent.Encoded,
@@ -468,37 +465,34 @@ const withExtraHotel = (
   const doc = encoded as unknown as {
     conferences: ReadonlyArray<{
       slug: string;
-      hotels: readonly unknown[];
+      accommodations: { hotels: readonly unknown[] };
     }>;
   };
   return {
     ...doc,
     conferences: doc.conferences.map((c) =>
       c.slug === '/2024'
-        ? { ...c, hotels: [...c.hotels, extraHotel] }
+        ? {
+            ...c,
+            accommodations: {
+              ...c.accommodations,
+              hotels: [...c.accommodations.hotels, extraHotel],
+            },
+          }
         : c,
     ),
   };
 };
 
-/**
- * Section-skip is section-LEVEL, never item-level (registration-launch Branch 4,
- * settled #3, CONTEXT §"Section skip"): an *absent* `hotels` list omits the
- * hotels column (proven render-side in `conference-detail.test.tsx`), but a
- * *present* hotel with a blank required bilingual `name` is a hard `Text` decode
- * error — the both-locales invariant lives in the schema, never the component, so
- * the component can never receive half-filled content. These pin that the
- * tolerance is for absence, not for half-filled presence.
- */
-describe('Hotel present-but-empty hard-error (skip is section-level, items stay strict)', () => {
+describe('AccommodationHotel present-but-empty hard-error (skip is section-level, items stay strict)', () => {
   it.effect('a present hotel with a blank `name` locale fails strict decode (publish-invalid)', () =>
     Effect.gen(function* () {
       const encoded = yield* encodeStrict(defaultContent);
-      // An empty EN `name` locale: `Text` requires both locales non-empty, so a
-      // present-but-empty hotel name is rejected by publish.
       const blankName = withExtraHotel(encoded, {
         id: String(newListItemId()),
         name: { en: '', fr: 'Hôtel' },
+        address: { en: 'Kelowna', fr: 'Kelowna' },
+        roomRates: [],
       });
       expect(decodeStrict(blankName)._tag).toBe('Failure');
     }));
@@ -506,27 +500,25 @@ describe('Hotel present-but-empty hard-error (skip is section-level, items stay 
   it.effect('a present hotel missing `name` entirely fails strict decode', () =>
     Effect.gen(function* () {
       const encoded = yield* encodeStrict(defaultContent);
-      // `name` is a required field on `Hotel` — a present hotel that omits it
-      // (only `id`) cannot publish. (Skip is for an absent *list*, never a
-      // half-built *item*.)
       const noName = withExtraHotel(encoded, {
         id: String(newListItemId()),
+        address: { en: 'Kelowna', fr: 'Kelowna' },
+        roomRates: [],
       });
       expect(decodeStrict(noName)._tag).toBe('Failure');
     }));
 
-  it.effect('a present hotel with a half-filled bilingual `note` fails strict decode', () =>
+  it.effect('a present hotel with a half-filled bilingual `description` fails strict decode', () =>
     Effect.gen(function* () {
       const encoded = yield* encodeStrict(defaultContent);
-      // `note` is optional (`optionalKey`), but once PRESENT it is a strict
-      // `Text`: a present note with one empty locale is rejected — optionality is
-      // about absence, not about tolerating a half-filled present value.
-      const halfNote = withExtraHotel(encoded, {
+      const halfDescription = withExtraHotel(encoded, {
         id: String(newListItemId()),
         name: { en: 'Lakeview Inn', fr: 'Auberge du Lac' },
-        note: { en: 'Group code: GYC', fr: '' },
+        address: { en: 'Kelowna', fr: 'Kelowna' },
+        roomRates: [],
+        description: { en: 'Group code: GYC', fr: '' },
       });
-      expect(decodeStrict(halfNote)._tag).toBe('Failure');
+      expect(decodeStrict(halfDescription)._tag).toBe('Failure');
     }));
 
   it.effect('a fully-populated present hotel decodes strictly (the inverse: complete items publish)', () =>
@@ -535,7 +527,9 @@ describe('Hotel present-but-empty hard-error (skip is section-level, items stay 
       const complete = withExtraHotel(encoded, {
         id: String(newListItemId()),
         name: { en: 'Lakeview Inn', fr: 'Auberge du Lac' },
-        note: { en: 'Group code: GYC', fr: 'Code de groupe : GYC' },
+        address: { en: 'Kelowna', fr: 'Kelowna' },
+        roomRates: [],
+        description: { en: 'Group code: GYC', fr: 'Code de groupe : GYC' },
       });
       expect(decodeStrict(complete)._tag).toBe('Success');
     }));

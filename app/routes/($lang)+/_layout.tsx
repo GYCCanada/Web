@@ -134,7 +134,7 @@ export function TopNav() {
             className="size-[44px]"
           />
         </Link>
-        <NavItem to={`/`}>
+        <NavItem to={`/${new Date().getFullYear()}`}>
           {translate("nav.home", {
             year: new Date().getFullYear(),
           })}
@@ -375,7 +375,7 @@ export function Footer() {
             <p className="text-neutral-50 dark:text-neutral-500">
               {translate("footer.links")}
             </p>
-            <Link to={`/`} className={linkStyle}>
+            <Link to={currentConference.slug} className={linkStyle}>
               {currentConference.title}{" "}
               {dayjs(currentConference.dates[0]).format("YYYY")}
             </Link>

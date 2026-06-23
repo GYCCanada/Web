@@ -121,6 +121,10 @@ const en = {
     "There are quite a few hotels in Kelowna, BC which can make it daunting to find the right one. We've listed the closest hotels to the Venue below. Please keep in mind that you may be able to save a considerable amount of money by getting a room with friends, using Airbnb or by using our {{facebook}}",
   'registration.hotels.description.facebook':
     'Facebook Rides & Roommates Group',
+  'registration.accommodations.check_in': 'Check in',
+  'registration.accommodations.check_out': 'Check-out',
+  'registration.accommodations.navigate': 'Navigate',
+  'registration.accommodations.reserve': 'Reserve',
   'registration.form.title': 'Register for GYC Canada {{year}}',
   'registration.form.error':
     'An error occurred while submitting your registration. Please try again later.',
@@ -388,6 +392,10 @@ const fr: Record<TranslationKey, string> = {
   'registration.hotels.description': `Il y a plusieurs hôtels à Kelowna, en Colombie-Britannique, ce qui peut rendre difficile de trouver les bons. Nous avons répertorié les hôtels les plus proches du lieu ci-dessous. Veuillez noter que vous pourriez économiser des sommes considérables en partageant des chambres avec des amis, en utilisant Airbnb ou en utilisant notre {{facebook}}`,
   'registration.hotels.description.facebook':
     'Groupe Facebook Rides & Roommates',
+  'registration.accommodations.check_in': 'Arrivée',
+  'registration.accommodations.check_out': 'Départ',
+  'registration.accommodations.navigate': 'Itinéraire',
+  'registration.accommodations.reserve': 'Réserver',
 
   'registration.form.title': 'Inscrivez-vous à GYC Canada {{year}}',
   'registration.form.error':

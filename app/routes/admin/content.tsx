@@ -12,6 +12,7 @@ import {
   AddItemButton,
   Bilingual,
   type ActionResult,
+  Checkbox,
   ImageUpload,
   ItemControls,
   Section,
@@ -307,6 +308,65 @@ export default function AdminContentEditor() {
     location: { en: string; fr: string };
     dates: { start: string; end: string };
     bible: { book: { en: string; fr: string }; chapter: number; verse: number };
+    registrationUrl?: string;
+    scheduleUrl?: string;
+    learnMoreEnabled?: boolean;
+    travel?: {
+      enabled?: boolean;
+      headerCopy?: { en: string; fr: string };
+      bodyCopy?: { en: string; fr: string };
+      mapEmbedUrl?: string;
+    };
+    parking?: {
+      enabled?: boolean;
+      headerCopy?: { en: string; fr: string };
+      options?: ReadonlyArray<{
+        id: string;
+        title?: { en: string; fr: string };
+        link?: string;
+        address?: { en: string; fr: string };
+        description?: { en: string; fr: string };
+      }>;
+    };
+    accommodations?: {
+      enabled?: boolean;
+      headerCopy?: { en: string; fr: string };
+      hotels?: ReadonlyArray<{
+        id: string;
+        name?: { en: string; fr: string };
+        address?: { en: string; fr: string };
+        checkIn?: { en: string; fr: string };
+        checkOut?: { en: string; fr: string };
+        roomRates?: ReadonlyArray<{
+          id: string;
+          description?: { en: string; fr: string };
+        }>;
+        description?: { en: string; fr: string };
+        navigateUrl?: string;
+        reservationUrl?: string;
+      }>;
+    };
+    meals?: {
+      enabled?: boolean;
+      headerCopy?: { en: string; fr: string };
+      bodyCopy?: { en: string; fr: string };
+      items?: ReadonlyArray<{
+        id: string;
+        label?: { en: string; fr: string };
+        price?: { en: string; fr: string };
+      }>;
+    };
+    registrationCopy?: {
+      enabled?: boolean;
+      title?: { en: string; fr: string };
+      subtitle?: { en: string; fr: string };
+      buttonLabel?: { en: string; fr: string };
+    };
+    faqCopy?: {
+      enabled?: boolean;
+      title?: { en: string; fr: string };
+      subtitle?: { en: string; fr: string };
+    };
     hero: {
       desktop: { key: { en: string; fr: string }; alt: { en: string; fr: string } };
       mobile: { key: { en: string; fr: string }; alt: { en: string; fr: string } };
@@ -317,6 +377,16 @@ export default function AdminContentEditor() {
       activity?: { en: string; fr: string };
       bio?: { en: string; fr: string };
       photo?: { key: string; alt: { en: string; fr: string } };
+    }>;
+    seminars: ReadonlyArray<{
+      id: string;
+      title?: { en: string; fr: string };
+      description?: { en: string; fr: string };
+      speaker?: {
+        name?: { en: string; fr: string };
+        bio?: { en: string; fr: string };
+        photo?: { key: string; alt: { en: string; fr: string } };
+      };
     }>;
   }>;
   const team = (document.team ?? []) as ReadonlyArray<{
@@ -385,6 +455,47 @@ export default function AdminContentEditor() {
           const conf = `conferences.${conference.slug}`;
           const speakersPath = `${conf}.speakers`;
           const speakerIds = conference.speakers.map((s) => s.id);
+          const seminarsPath = `${conf}.seminars`;
+          const seminarIds = (conference.seminars ?? []).map((s) => s.id);
+          const parkingPath = `${conf}.parking.options`;
+          const parkingOptionIds = (conference.parking?.options ?? []).map((o) => o.id);
+          const hotelsPath = `${conf}.accommodations.hotels`;
+          const hotelIds = (conference.accommodations?.hotels ?? []).map((h) => h.id);
+          const mealsPath = `${conf}.meals.items`;
+          const mealIds = (conference.meals?.items ?? []).map((m) => m.id);
+          const travel = {
+            enabled: conference.travel?.enabled ?? false,
+            headerCopy: conference.travel?.headerCopy ?? emptyText,
+            bodyCopy: conference.travel?.bodyCopy ?? emptyText,
+            mapEmbedUrl: conference.travel?.mapEmbedUrl ?? '',
+          };
+          const parking = conference.parking ?? {
+            enabled: false,
+            headerCopy: emptyText,
+            options: [],
+          };
+          const accommodations = conference.accommodations ?? {
+            enabled: false,
+            headerCopy: emptyText,
+            hotels: [],
+          };
+          const meals = conference.meals ?? {
+            enabled: false,
+            headerCopy: emptyText,
+            bodyCopy: emptyText,
+            items: [],
+          };
+          const registrationCopy = conference.registrationCopy ?? {
+            enabled: false,
+            title: emptyText,
+            subtitle: emptyText,
+            buttonLabel: emptyText,
+          };
+          const faqCopy = conference.faqCopy ?? {
+            enabled: false,
+            title: emptyText,
+            subtitle: emptyText,
+          };
           return (
             <Section key={conference.slug} title={`Conference ${conference.slug}`}>
               <Bilingual
@@ -437,6 +548,320 @@ export default function AdminContentEditor() {
                   defaultValue={String(conference.bible.verse)}
                 />
               </div>
+              <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
+                <legend className="text-sm font-medium text-neutral-800">
+                  Links
+                </legend>
+                <Text
+                  label="Registration URL (RegFox)"
+                  name={`${conf}.registrationUrl`}
+                  defaultValue={conference.registrationUrl ?? ''}
+                />
+                <Text
+                  label="Schedule URL"
+                  name={`${conf}.scheduleUrl`}
+                  defaultValue={conference.scheduleUrl ?? ''}
+                />
+                <Checkbox
+                  label="Show Learn More on home page"
+                  name={`${conf}.learnMoreEnabled`}
+                  defaultChecked={conference.learnMoreEnabled ?? false}
+                />
+              </fieldset>
+              <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
+                <legend className="text-sm font-medium text-neutral-800">
+                  Travel section
+                </legend>
+                <Checkbox
+                  label="Enabled"
+                  name={`${conf}.travel.enabled`}
+                  defaultChecked={travel.enabled ?? false}
+                />
+                <Bilingual
+                  label="Header"
+                  name={`${conf}.travel.headerCopy`}
+                  value={travel.headerCopy ?? emptyText}
+                />
+                <Bilingual
+                  label="Body copy"
+                  name={`${conf}.travel.bodyCopy`}
+                  value={travel.bodyCopy ?? emptyText}
+                  multiline
+                />
+                <Text
+                  label="Map embed URL"
+                  name={`${conf}.travel.mapEmbedUrl`}
+                  defaultValue={travel.mapEmbedUrl ?? ''}
+                />
+              </fieldset>
+              <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
+                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
+                  <span>Parking section</span>
+                  <AddItemButton
+                    listPath={parkingPath}
+                    label="+ Add parking option"
+                    newId={newListItemId()}
+                  />
+                </legend>
+                <Checkbox
+                  label="Enabled"
+                  name={`${conf}.parking.enabled`}
+                  defaultChecked={parking.enabled ?? false}
+                />
+                <Bilingual
+                  label="Header"
+                  name={`${conf}.parking.headerCopy`}
+                  value={parking.headerCopy ?? emptyText}
+                />
+                {(parking.options ?? []).map((option, oi) => {
+                  const optionId = ListItemId.make(option.id);
+                  return (
+                    <div
+                      key={option.id}
+                      className="space-y-2 rounded-md bg-neutral-50 p-3"
+                    >
+                      <div className="flex items-center justify-end">
+                        <ItemControls
+                          listPath={parkingPath}
+                          ids={parkingOptionIds}
+                          index={oi}
+                        />
+                      </div>
+                      <Bilingual
+                        label="Title"
+                        name={fieldName(parkingPath, optionId, 'title')}
+                        value={option.title ?? emptyText}
+                      />
+                      <Text
+                        label="Link (optional)"
+                        name={fieldName(parkingPath, optionId, 'link')}
+                        defaultValue={option.link ?? ''}
+                      />
+                      <Bilingual
+                        label="Address (optional)"
+                        name={fieldName(parkingPath, optionId, 'address')}
+                        value={option.address ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Description (optional)"
+                        name={fieldName(parkingPath, optionId, 'description')}
+                        value={option.description ?? emptyText}
+                        multiline
+                      />
+                    </div>
+                  );
+                })}
+              </fieldset>
+              <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
+                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
+                  <span>Accommodations section</span>
+                  <AddItemButton
+                    listPath={hotelsPath}
+                    label="+ Add hotel"
+                    newId={newListItemId()}
+                  />
+                </legend>
+                <Checkbox
+                  label="Enabled"
+                  name={`${conf}.accommodations.enabled`}
+                  defaultChecked={accommodations.enabled ?? false}
+                />
+                <Bilingual
+                  label="Header"
+                  name={`${conf}.accommodations.headerCopy`}
+                  value={accommodations.headerCopy ?? emptyText}
+                  multiline
+                />
+                {(accommodations.hotels ?? []).map((hotel, hi) => {
+                  const hotelId = ListItemId.make(hotel.id);
+                  const roomRatesPath = `${hotelsPath}.${hotelId}.roomRates`;
+                  const roomRateIds = (hotel.roomRates ?? []).map((r) => r.id);
+                  return (
+                    <div
+                      key={hotel.id}
+                      className="space-y-2 rounded-md bg-neutral-50 p-3"
+                    >
+                      <div className="flex items-center justify-end">
+                        <ItemControls
+                          listPath={hotelsPath}
+                          ids={hotelIds}
+                          index={hi}
+                        />
+                      </div>
+                      <Bilingual
+                        label="Name"
+                        name={fieldName(hotelsPath, hotelId, 'name')}
+                        value={hotel.name ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Address"
+                        name={fieldName(hotelsPath, hotelId, 'address')}
+                        value={hotel.address ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Check-in (optional)"
+                        name={fieldName(hotelsPath, hotelId, 'checkIn')}
+                        value={hotel.checkIn ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Check-out (optional)"
+                        name={fieldName(hotelsPath, hotelId, 'checkOut')}
+                        value={hotel.checkOut ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Description (optional)"
+                        name={fieldName(hotelsPath, hotelId, 'description')}
+                        value={hotel.description ?? emptyText}
+                        multiline
+                      />
+                      <Text
+                        label="Navigate URL (optional)"
+                        name={fieldName(hotelsPath, hotelId, 'navigateUrl')}
+                        defaultValue={hotel.navigateUrl ?? ''}
+                      />
+                      <Text
+                        label="Reservation URL (optional)"
+                        name={fieldName(hotelsPath, hotelId, 'reservationUrl')}
+                        defaultValue={hotel.reservationUrl ?? ''}
+                      />
+                      <div className="space-y-2 border-t border-neutral-200 pt-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-neutral-600">
+                            Room rates
+                          </span>
+                          <AddItemButton
+                            listPath={roomRatesPath}
+                            label="+ Add rate"
+                            newId={newListItemId()}
+                          />
+                        </div>
+                        {(hotel.roomRates ?? []).map((rate, ri) => {
+                          const rateId = ListItemId.make(rate.id);
+                          return (
+                            <div
+                              key={rate.id}
+                              className="space-y-2 rounded border border-neutral-200 bg-white p-2"
+                            >
+                              <div className="flex items-center justify-end">
+                                <ItemControls
+                                  listPath={roomRatesPath}
+                                  ids={roomRateIds}
+                                  index={ri}
+                                />
+                              </div>
+                              <Bilingual
+                                label="Rate description"
+                                name={fieldName(roomRatesPath, rateId, 'description')}
+                                value={rate.description ?? emptyText}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </fieldset>
+              <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
+                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
+                  <span>Meals section</span>
+                  <AddItemButton
+                    listPath={mealsPath}
+                    label="+ Add meal"
+                    newId={newListItemId()}
+                  />
+                </legend>
+                <Checkbox
+                  label="Enabled"
+                  name={`${conf}.meals.enabled`}
+                  defaultChecked={meals.enabled ?? false}
+                />
+                <Bilingual
+                  label="Header"
+                  name={`${conf}.meals.headerCopy`}
+                  value={meals.headerCopy ?? emptyText}
+                />
+                <Bilingual
+                  label="Body copy (optional)"
+                  name={`${conf}.meals.bodyCopy`}
+                  value={meals.bodyCopy ?? emptyText}
+                  multiline
+                />
+                {(meals.items ?? []).map((meal, mi) => {
+                  const mealId = ListItemId.make(meal.id);
+                  return (
+                    <div
+                      key={meal.id}
+                      className="space-y-2 rounded-md bg-neutral-50 p-3"
+                    >
+                      <div className="flex items-center justify-end">
+                        <ItemControls
+                          listPath={mealsPath}
+                          ids={mealIds}
+                          index={mi}
+                        />
+                      </div>
+                      <Bilingual
+                        label="Label"
+                        name={fieldName(mealsPath, mealId, 'label')}
+                        value={meal.label ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Price"
+                        name={fieldName(mealsPath, mealId, 'price')}
+                        value={meal.price ?? emptyText}
+                      />
+                    </div>
+                  );
+                })}
+              </fieldset>
+              <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
+                <legend className="text-sm font-medium text-neutral-800">
+                  Register Now section
+                </legend>
+                <Checkbox
+                  label="Enabled"
+                  name={`${conf}.registrationCopy.enabled`}
+                  defaultChecked={registrationCopy.enabled ?? false}
+                />
+                <Bilingual
+                  label="Title"
+                  name={`${conf}.registrationCopy.title`}
+                  value={registrationCopy.title ?? emptyText}
+                />
+                <Bilingual
+                  label="Subtitle"
+                  name={`${conf}.registrationCopy.subtitle`}
+                  value={registrationCopy.subtitle ?? emptyText}
+                  multiline
+                />
+                <Bilingual
+                  label="Button label"
+                  name={`${conf}.registrationCopy.buttonLabel`}
+                  value={registrationCopy.buttonLabel ?? emptyText}
+                />
+              </fieldset>
+              <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
+                <legend className="text-sm font-medium text-neutral-800">
+                  Got Questions section
+                </legend>
+                <Checkbox
+                  label="Enabled"
+                  name={`${conf}.faqCopy.enabled`}
+                  defaultChecked={faqCopy.enabled ?? false}
+                />
+                <Bilingual
+                  label="Title"
+                  name={`${conf}.faqCopy.title`}
+                  value={faqCopy.title ?? emptyText}
+                />
+                <Bilingual
+                  label="Subtitle"
+                  name={`${conf}.faqCopy.subtitle`}
+                  value={faqCopy.subtitle ?? emptyText}
+                  multiline
+                />
+              </fieldset>
               <fieldset className="space-y-3">
                 <legend className="text-sm font-medium text-neutral-800">
                   Hero artwork
@@ -516,6 +941,64 @@ export default function AdminContentEditor() {
                         label="Photo alt text"
                         name={fieldName(speakersPath, speakerId, 'photo.alt')}
                         value={speaker.photo?.alt ?? emptyText}
+                      />
+                    </div>
+                  );
+                })}
+              </fieldset>
+              <fieldset className="space-y-3">
+                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
+                  <span>Seminars</span>
+                  <AddItemButton
+                    listPath={seminarsPath}
+                    label="+ Add seminar"
+                    newId={newListItemId()}
+                  />
+                </legend>
+                {(conference.seminars ?? []).map((seminar, sei) => {
+                  const seminarId = ListItemId.make(seminar.id);
+                  return (
+                    <div
+                      key={seminar.id}
+                      className="space-y-2 rounded-md bg-neutral-50 p-3"
+                    >
+                      <div className="flex items-center justify-end">
+                        <ItemControls
+                          listPath={seminarsPath}
+                          ids={seminarIds}
+                          index={sei}
+                        />
+                      </div>
+                      <Bilingual
+                        label="Title"
+                        name={fieldName(seminarsPath, seminarId, 'title')}
+                        value={seminar.title ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Description"
+                        name={fieldName(seminarsPath, seminarId, 'description')}
+                        value={seminar.description ?? emptyText}
+                        multiline
+                      />
+                      <Bilingual
+                        label="Speaker name"
+                        name={fieldName(seminarsPath, seminarId, 'speaker.name')}
+                        value={seminar.speaker?.name ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Speaker bio"
+                        name={fieldName(seminarsPath, seminarId, 'speaker.bio')}
+                        value={seminar.speaker?.bio ?? emptyText}
+                        multiline
+                      />
+                      <ImageUpload
+                        keyPath={fieldName(seminarsPath, seminarId, 'speaker.photo.key')}
+                        currentKey={seminar.speaker?.photo?.key ?? ''}
+                      />
+                      <Bilingual
+                        label="Speaker photo alt"
+                        name={fieldName(seminarsPath, seminarId, 'speaker.photo.alt')}
+                        value={seminar.speaker?.photo?.alt ?? emptyText}
                       />
                     </div>
                   );

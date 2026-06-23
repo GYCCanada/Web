@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { Schema } from 'effect';
+import { Effect, Schema } from 'effect';
 import { nanoid } from 'nanoid';
 
 /**
@@ -419,21 +419,97 @@ export const Hero = Schema.Struct({
 export type Hero = typeof Hero.Type;
 
 /**
- * A recommended hotel for a conference (registration-launch Branch 3, settled
- * #4) — replaces the hard-coded `<li>` list in the forked detail pages with
- * editable data. A list item, so it carries a stable `ListItemId` (ADR 0006) and
- * lives in an `IdListArray`. `name` is a bilingual `Text` (both locales required
- * and non-empty, like every other content string); `note` is an optional
- * bilingual line for booking detail (a discount code, a phone number). The
- * `hotels` array is empty-able and the whole `MapSection` is section-skippable
- * (Branch 4): a year with no hotels simply omits them.
+ * Conference section visibility: defaults to `false` when the key is absent on
+ * stored JSON, so new sections ship disabled until explicitly enabled in CMS.
  */
-export const Hotel = Schema.Struct({
+const SectionEnabledFlag = Schema.Boolean.pipe(
+  Schema.withDecodingDefaultKey(Effect.succeed(false)),
+);
+
+/** Home-page Learn More button visibility for the conference shown on `/`. */
+const LearnMoreEnabledFlag = Schema.Boolean.pipe(
+  Schema.withDecodingDefaultKey(Effect.succeed(false)),
+);
+
+export const RoomRate = Schema.Struct({
+  id: ListItemId,
+  description: Text,
+});
+export type RoomRate = typeof RoomRate.Type;
+
+export const ParkingOption = Schema.Struct({
+  id: ListItemId,
+  title: Text,
+  link: Schema.OptionFromOptionalKey(ExternalHttpsUrl),
+  address: Schema.optionalKey(Text),
+  description: Schema.optionalKey(Text),
+});
+export type ParkingOption = typeof ParkingOption.Type;
+
+export const AccommodationHotel = Schema.Struct({
   id: ListItemId,
   name: Text,
-  note: Schema.optionalKey(Text),
+  address: Text,
+  checkIn: Schema.optionalKey(Text),
+  checkOut: Schema.optionalKey(Text),
+  roomRates: IdListArray(RoomRate),
+  description: Schema.optionalKey(Text),
+  navigateUrl: Schema.OptionFromOptionalKey(ExternalHttpsUrl),
+  reservationUrl: Schema.OptionFromOptionalKey(ExternalHttpsUrl),
 });
-export type Hotel = typeof Hotel.Type;
+export type AccommodationHotel = typeof AccommodationHotel.Type;
+
+export const MealItem = Schema.Struct({
+  id: ListItemId,
+  label: Text,
+  price: Text,
+});
+export type MealItem = typeof MealItem.Type;
+
+export const TravelSection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  headerCopy: Text,
+  bodyCopy: Text,
+  mapEmbedUrl: Schema.OptionFromOptionalKey(GoogleMapsEmbedUrl),
+});
+export type TravelSection = typeof TravelSection.Type;
+
+export const ParkingSection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  headerCopy: Text,
+  options: IdListArray(ParkingOption),
+});
+export type ParkingSection = typeof ParkingSection.Type;
+
+export const AccommodationsSection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  headerCopy: Text,
+  hotels: IdListArray(AccommodationHotel),
+});
+export type AccommodationsSection = typeof AccommodationsSection.Type;
+
+export const MealsSection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  headerCopy: Text,
+  bodyCopy: Schema.optionalKey(Text),
+  items: IdListArray(MealItem),
+});
+export type MealsSection = typeof MealsSection.Type;
+
+export const RegistrationCopySection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  title: Text,
+  subtitle: Text,
+  buttonLabel: Text,
+});
+export type RegistrationCopySection = typeof RegistrationCopySection.Type;
+
+export const FaqCopySection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  title: Text,
+  subtitle: Text,
+});
+export type FaqCopySection = typeof FaqCopySection.Type;
 
 /**
  * A single annual conference.
@@ -470,24 +546,15 @@ export const Conference = Schema.Struct({
   speakers: IdListArray(Speaker),
   seminars: IdListArray(Seminar),
   promos: Schema.Array(Schema.NonEmptyString),
-  /**
-   * The conference's optional detail-page data (registration-launch Branch 3,
-   * settled #4). Each is modelled as `OptionFromOptionalKey` at the document
-   * layer so an *absent* field is `Option.none()` (never an empty string), which
-   * gives Branch 4's section-skip a real `Option.some`/`Option.none`
-   * discriminator (`make-impossible-states-unrepresentable`): an empty-string URL
-   * is not representable as "present". `hotels` is an empty-able id-keyed list
-   * (absence = `[]`, skipped). The `Content` boundary (Branch 3.2) projects each
-   * to `string | undefined` / `[]` so React never sees an `Option`.
-   *   - `registrationUrl` — the external registrar (RegFox) Register button.
-   *   - `scheduleUrl` — the published schedule link (was a hard-coded Google Docs URL).
-   *   - `mapEmbedUrl` — the venue map iframe (constrained to the Google Maps embed endpoint).
-   *   - `hotels` — recommended-hotel list (was a hard-coded `<li>` list).
-   */
   registrationUrl: Schema.OptionFromOptionalKey(ExternalHttpsUrl),
   scheduleUrl: Schema.OptionFromOptionalKey(ExternalHttpsUrl),
-  mapEmbedUrl: Schema.OptionFromOptionalKey(GoogleMapsEmbedUrl),
-  hotels: IdListArray(Hotel),
+  learnMoreEnabled: LearnMoreEnabledFlag,
+  travel: TravelSection,
+  parking: ParkingSection,
+  accommodations: AccommodationsSection,
+  meals: MealsSection,
+  registrationCopy: RegistrationCopySection,
+  faqCopy: FaqCopySection,
 });
 export type Conference = typeof Conference.Type;
 
@@ -683,22 +750,89 @@ const DraftBoardMember = Schema.Struct({
 });
 
 /**
- * A draft hotel: a freshly-added item carries only its `id` (settled #10), with
- * `name`/`note` filled in incrementally. Both relax to optional `DraftText`
- * (publish re-enforces the strict bilingual `Text`).
+ * Placeholder bilingual copy for draft section fields not yet filled in.
  */
-const DraftHotel = Schema.Struct({
+const DraftRoomRate = Schema.Struct({
   id: ListItemId,
-  name: Schema.optionalKey(DraftText),
-  note: Schema.optionalKey(DraftText),
+  description: Schema.optionalKey(DraftText),
 });
 
-/** The draft variant of `Conference`: only its list items are draft-lax. */
+const DraftParkingOption = Schema.Struct({
+  id: ListItemId,
+  title: Schema.optionalKey(DraftText),
+  link: Schema.optionalKey(Schema.String),
+  address: Schema.optionalKey(DraftText),
+  description: Schema.optionalKey(DraftText),
+});
+
+const DraftAccommodationHotel = Schema.Struct({
+  id: ListItemId,
+  name: Schema.optionalKey(DraftText),
+  address: Schema.optionalKey(DraftText),
+  checkIn: Schema.optionalKey(DraftText),
+  checkOut: Schema.optionalKey(DraftText),
+  roomRates: IdListArray(DraftRoomRate),
+  description: Schema.optionalKey(DraftText),
+  navigateUrl: Schema.optionalKey(Schema.String),
+  reservationUrl: Schema.optionalKey(Schema.String),
+});
+
+const DraftMealItem = Schema.Struct({
+  id: ListItemId,
+  label: Schema.optionalKey(DraftText),
+  price: Schema.optionalKey(DraftText),
+});
+
+const DraftTravelSection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  headerCopy: Schema.optionalKey(DraftText),
+  bodyCopy: Schema.optionalKey(DraftText),
+  mapEmbedUrl: Schema.optionalKey(Schema.String),
+});
+
+const DraftParkingSection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  headerCopy: Schema.optionalKey(DraftText),
+  options: IdListArray(DraftParkingOption),
+});
+
+const DraftAccommodationsSection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  headerCopy: Schema.optionalKey(DraftText),
+  hotels: IdListArray(DraftAccommodationHotel),
+});
+
+const DraftMealsSection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  headerCopy: Schema.optionalKey(DraftText),
+  bodyCopy: Schema.optionalKey(DraftText),
+  items: IdListArray(DraftMealItem),
+});
+
+const DraftRegistrationCopySection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  title: Schema.optionalKey(DraftText),
+  subtitle: Schema.optionalKey(DraftText),
+  buttonLabel: Schema.optionalKey(DraftText),
+});
+
+const DraftFaqCopySection = Schema.Struct({
+  enabled: SectionEnabledFlag,
+  title: Schema.optionalKey(DraftText),
+  subtitle: Schema.optionalKey(DraftText),
+});
+
+/** The draft variant of `Conference`: list items and section copy are draft-lax. */
 const DraftConference = Schema.Struct({
   ...Conference.fields,
   speakers: IdListArray(DraftSpeaker),
   seminars: IdListArray(DraftSeminar),
-  hotels: IdListArray(DraftHotel),
+  travel: DraftTravelSection,
+  parking: DraftParkingSection,
+  accommodations: DraftAccommodationsSection,
+  meals: DraftMealsSection,
+  registrationCopy: DraftRegistrationCopySection,
+  faqCopy: DraftFaqCopySection,
 });
 
 /**

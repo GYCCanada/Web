@@ -1,6 +1,14 @@
 import { Schema } from "effect";
 
 import { root } from "../localization/translations";
+import {
+  disabledAccommodationsSection,
+  disabledFaqCopySection,
+  disabledMealsSection,
+  disabledParkingSection,
+  disabledRegistrationCopySection,
+  disabledTravelSection,
+} from "./conference-section-defaults";
 import { deterministicListItemId, SiteContent } from "./schema";
 
 /**
@@ -93,46 +101,106 @@ export const defaultContent: SiteContent = Schema.decodeUnknownSync(
         "https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day",
       scheduleUrl:
         "https://docs.google.com/document/d/1gNAOfdW2Yhgg7FABjUqQt2k2mXV_AdhARWUOyiVL9dA/pub",
-      mapEmbedUrl:
-        "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2570.54720532797!2d-119.4124495876084!3d49.888529227544645!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x537d8d28862f4bfd%3A0xd41402dfff0455f4!2s130%20Gerstmar%20Rd%2C%20Kelowna%2C%20BC%20V1X%204A7!5e0!3m2!1sen!2sca!4v1720988332743!5m2!1sen!2sca",
-      hotels: [
-        {
-          id: "hQ1c8mZrT0vK4nXpL9aWd",
-          name: {
-            en: "Super 8 by Wyndham Kelowna BC",
-            fr: "Super 8 by Wyndham Kelowna BC",
-          },
+      learnMoreEnabled: false,
+      travel: {
+        enabled: true,
+        headerCopy: { en: "Travel", fr: "Voyage" },
+        bodyCopy: {
+          en: "The conference will be at 130 Gerstmar Rd, Kelowna, BC V1X 4A7.",
+          fr: "La conférence aura lieu au 130 Gerstmar Rd, Kelowna, BC V1X 4A7.",
         },
-        {
-          id: "rB7yN2eJ5sU0wG3kP8xQv",
-          name: {
-            en: "Fairfield Inn & Suites Kelowna",
-            fr: "Fairfield Inn & Suites Kelowna",
-          },
-          note: {
-            en: 'Holiday Inn Express & Suites Kelowna — "GYC Canada" or Group Code: "GYC" (call 778-484-2999 for discount)',
-            fr: 'Holiday Inn Express & Suites Kelowna — « GYC Canada » ou code de groupe : « GYC » (appelez le 778-484-2999 pour le rabais)',
-          },
+        mapEmbedUrl:
+          "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2570.54720532797!2d-119.4124495876084!3d49.888529227544645!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x537d8d28862f4bfd%3A0xd41402dfff0455f4!2s130%20Gerstmar%20Rd%2C%20Kelowna%2C%20BC%20V1X%204A7!5e0!3m2!1sen!2sca!4v1720988332743!5m2!1sen!2sca",
+      },
+      parking: { ...disabledParkingSection },
+      accommodations: {
+        enabled: true,
+        headerCopy: {
+          en: "There are quite a few hotels in Kelowna, BC. We've listed the closest hotels to the venue below.",
+          fr: "Il y a plusieurs hôtels à Kelowna, en Colombie-Britannique. Nous avons répertorié les hôtels les plus proches du lieu ci-dessous.",
         },
-        {
-          id: "tF9pX4kW6mD1cR8vN3sLb",
-          name: {
-            en: "Microtel Inn & Suites by Wyndham Kelowna",
-            fr: "Microtel Inn & Suites by Wyndham Kelowna",
+        hotels: [
+          {
+            id: "hQ1c8mZrT0vK4nXpL9aWd",
+            name: {
+              en: "Super 8 by Wyndham Kelowna BC",
+              fr: "Super 8 by Wyndham Kelowna BC",
+            },
+            address: {
+              en: "Kelowna, BC",
+              fr: "Kelowna, BC",
+            },
+            roomRates: [],
           },
-        },
-        {
-          id: "yK2nV7bH5jQ0dT8wM4xPc",
-          name: { en: "Comfort Suites", fr: "Comfort Suites" },
-        },
-        {
-          id: "zL6mC3gR9pW1kN7vX5sQt",
-          name: {
-            en: "Kelowna Days Inn by Wyndham Kelowna",
-            fr: "Kelowna Days Inn by Wyndham Kelowna",
+          {
+            id: "rB7yN2eJ5sU0wG3kP8xQv",
+            name: {
+              en: "Fairfield Inn & Suites Kelowna",
+              fr: "Fairfield Inn & Suites Kelowna",
+            },
+            address: {
+              en: "Kelowna, BC",
+              fr: "Kelowna, BC",
+            },
+            description: {
+              en: 'Holiday Inn Express & Suites Kelowna — "GYC Canada" or Group Code: "GYC" (call 778-484-2999 for discount)',
+              fr: 'Holiday Inn Express & Suites Kelowna — « GYC Canada » ou code de groupe : « GYC » (appelez le 778-484-2999 pour le rabais)',
+            },
+            roomRates: [],
           },
+          {
+            id: "tF9pX4kW6mD1cR8vN3sLb",
+            name: {
+              en: "Microtel Inn & Suites by Wyndham Kelowna",
+              fr: "Microtel Inn & Suites by Wyndham Kelowna",
+            },
+            address: {
+              en: "Kelowna, BC",
+              fr: "Kelowna, BC",
+            },
+            roomRates: [],
+          },
+          {
+            id: "yK2nV7bH5jQ0dT8wM4xPc",
+            name: { en: "Comfort Suites", fr: "Comfort Suites" },
+            address: {
+              en: "Kelowna, BC",
+              fr: "Kelowna, BC",
+            },
+            roomRates: [],
+          },
+          {
+            id: "zL6mC3gR9pW1kN7vX5sQt",
+            name: {
+              en: "Kelowna Days Inn by Wyndham Kelowna",
+              fr: "Kelowna Days Inn by Wyndham Kelowna",
+            },
+            address: {
+              en: "Kelowna, BC",
+              fr: "Kelowna, BC",
+            },
+            roomRates: [],
+          },
+        ],
+      },
+      meals: { ...disabledMealsSection },
+      registrationCopy: {
+        enabled: true,
+        title: { en: "Register Now!", fr: "Inscrivez-vous!" },
+        subtitle: {
+          en: "Registration is now open. Secure your spot today!",
+          fr: "Les inscriptions sont ouvertes. Réservez votre place dès aujourd’hui!",
         },
-      ],
+        buttonLabel: { en: "Register Now", fr: "S'inscrire" },
+      },
+      faqCopy: {
+        enabled: true,
+        title: { en: "Got Questions?", fr: "Des questions?" },
+        subtitle: {
+          en: "We are here to help. Reach out or browse our FAQ.",
+          fr: "Nous sommes là pour vous aider. Contactez-nous ou consultez notre FAQ.",
+        },
+      },
       location: {
         en: "130 Gerstmar Rd, Kelowna, BC V1X 4A7",
         fr: "130 Gerstmar Rd, Kelowna, BC V1X 4A7",
@@ -301,11 +369,20 @@ lives in Michigan with his wife and daughter where he works as a pastor.
         },
       },
       dates: { start: "2025-08-20", end: "2025-08-24" },
-      // No pricing for 2025 — omit `registration` (decodes to `Option.none()`).
-      // Cancelled year: omit every optional detail field (registrationUrl /
-      // scheduleUrl / mapEmbedUrl decode to `Option.none()`) and carry no hotels,
-      // so Branch 4's section-skip renders 2025 as hero + FAQ only.
-      hotels: [],
+      learnMoreEnabled: false,
+      travel: { ...disabledTravelSection },
+      parking: { ...disabledParkingSection },
+      accommodations: { ...disabledAccommodationsSection },
+      meals: { ...disabledMealsSection },
+      registrationCopy: { ...disabledRegistrationCopySection },
+      faqCopy: {
+        enabled: true,
+        title: { en: "Got Questions?", fr: "Des questions?" },
+        subtitle: {
+          en: "We are here to help. Reach out or browse our FAQ.",
+          fr: "Nous sommes là pour vous aider. Contactez-nous ou consultez notre FAQ.",
+        },
+      },
       location: { en: "Montreal, QC", fr: "Montréal, QC" },
       tagline: {
         en: '"And after the earthquake a fire, but the Lord was not in the fire; and after the fire a still small voice."',
@@ -361,7 +438,28 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       // TBD, so those optional fields are omitted and `hotels` is empty. This sets
       // up Branch 4's skip proof: /2026 renders hero + Register button + FAQ only.
       registrationUrl: "https://gyccanada.regfox.com/gyc-canada-2026-speak",
-      hotels: [],
+      learnMoreEnabled: false,
+      travel: { ...disabledTravelSection },
+      parking: { ...disabledParkingSection },
+      accommodations: { ...disabledAccommodationsSection },
+      meals: { ...disabledMealsSection },
+      registrationCopy: {
+        enabled: true,
+        title: { en: "Register Now!", fr: "Inscrivez-vous!" },
+        subtitle: {
+          en: "Registration is now open. Secure your spot today!",
+          fr: "Les inscriptions sont ouvertes. Réservez votre place dès aujourd’hui!",
+        },
+        buttonLabel: { en: "Register Now", fr: "S'inscrire" },
+      },
+      faqCopy: {
+        enabled: true,
+        title: { en: "Got Questions?", fr: "Des questions?" },
+        subtitle: {
+          en: "We are here to help. Reach out or browse our FAQ.",
+          fr: "Nous sommes là pour vous aider. Contactez-nous ou consultez notre FAQ.",
+        },
+      },
       location: {
         en: "Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB",
         fr: "Ramada Plaza by Wyndham Calgary Downtown, Calgary, AB",

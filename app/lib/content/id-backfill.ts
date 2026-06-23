@@ -11,42 +11,17 @@
  * The fix is a one-shot repair at the read boundary: before the document is
  * Schema-decoded, `backfillListItemIds` walks the parsed (untrusted) JSON and
  * assigns a fresh `nanoid` to any list item that lacks an `id`. It is a pure
- * structural normalization — NOT a parallel schema and NOT validation:
- *   - `derive-dont-sync`: there is one decode boundary; this only fills the gap
- *     a pre-ids document leaves, so the decoded value is always id-complete.
- *   - `make-operations-idempotent`: an item that already has an `id` key is left
- *     untouched (even a *bad* id is left for the decoder to reject — backfill is
- *     for absence, not repair), so re-running on an already-migrated document is
- *     a no-op. The first admin publish persists the backfilled ids; from then on
- *     the normalization changes nothing.
- *   - `boundary-discipline`: it runs only over already-parsed JSON inside the
- *     read path, never mutates its input, and hands a fresh value to the decoder
- *     which remains the sole gate that brands the ids. The input is `unknown`
- *     (raw parsed JSON), so the walk narrows defensively and never trusts shape.
- *
- * The list-item locations are the id-bearing structs the schema names today
- * (`Speaker`, `Seminar`, `Hotel`, `TeamMember`); Branch 3+ widens them as the
- * Conference / Page schemas grow id-bearing lists, and this walk grows with
- * them. The walk descends only into the arrays/objects that are actually present
- * and the expected shape, so a malformed document still reaches the decoder
- * (which rejects it) rather than throwing here.
- *
- * Branch 3.1 grows the Conference with a *required* `hotels: IdListArray(Hotel)`.
- * That is the same read-safety hazard as the required `id` itself: a
- * `content/site.json` published BEFORE 3.1 has no `hotels` key, so a required
- * field would FAIL decode on the next read and silently discard the live
- * CMS-authored content. A truly-*absent* `hotels` key normalizes to `[]`
- * (idempotent: a conference already carrying `hotels` keeps it, ids and all),
- * which is the one structural gap a pre-3.1 document leaves. A *present* but
- * malformed `hotels` (e.g. `null`, a string) is left in place so the decoder —
- * not this normalizer — rejects it, exactly like every other list above; the
- * `[]` default is reserved for an absent key and never overwrites authored
- * content. (The sibling URL
- * fields — `registrationUrl` / `scheduleUrl` / `mapEmbedUrl` — are
- * `OptionFromOptionalKey`, so their absence already decodes to `Option.none()`
- * and needs no backfill.)
+ * structural normalization — NOT a parallel schema and NOT validation.
  */
 
+import {
+  disabledAccommodationsSection,
+  disabledFaqCopySection,
+  disabledMealsSection,
+  disabledParkingSection,
+  disabledRegistrationCopySection,
+  disabledTravelSection,
+} from './conference-section-defaults';
 import { newListItemId } from './schema';
 import type { Json } from './admin-form';
 
@@ -65,6 +40,20 @@ const backfillItems = (value: unknown): readonly Json[] | undefined =>
   Array.isArray(value) ? value.map(withId) : undefined;
 
 /**
+ * Backfill ids on nested hotel room-rate lists inside accommodations.
+ */
+const backfillAccommodationHotels = (value: unknown): readonly Json[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  return value.map((item) => {
+    if (!isObject(item)) return item;
+    const hotel: Record<string, Json> = { ...item };
+    const roomRates = backfillItems(item['roomRates']);
+    if (roomRates !== undefined) hotel['roomRates'] = roomRates;
+    return withId(hotel);
+  });
+};
+
+/**
  * Migrate a legacy `board: string[]` to id-keyed `{ id, name }` objects. Items
  * that already carry an `id` pass through unchanged (idempotent).
  */
@@ -78,14 +67,53 @@ const backfillBoard = (value: unknown): readonly Json[] | undefined => {
   });
 };
 
+const backfillConferenceSections = (conference: Record<string, Json>): void => {
+  if (!('travel' in conference)) {
+    conference['travel'] = { ...disabledTravelSection };
+  } else if (isObject(conference['travel'])) {
+    const travel = { ...conference['travel'] };
+    conference['travel'] = travel;
+  }
+
+  if (!('parking' in conference)) {
+    conference['parking'] = { ...disabledParkingSection };
+  } else if (isObject(conference['parking'])) {
+    const parking = { ...conference['parking'] };
+    const options = backfillItems(parking['options']);
+    if (options !== undefined) parking['options'] = options;
+    conference['parking'] = parking;
+  }
+
+  if (!('accommodations' in conference)) {
+    conference['accommodations'] = { ...disabledAccommodationsSection };
+  } else if (isObject(conference['accommodations'])) {
+    const accommodations = { ...conference['accommodations'] };
+    const hotels = backfillAccommodationHotels(accommodations['hotels']);
+    if (hotels !== undefined) accommodations['hotels'] = hotels;
+    conference['accommodations'] = accommodations;
+  }
+
+  if (!('meals' in conference)) {
+    conference['meals'] = { ...disabledMealsSection };
+  } else if (isObject(conference['meals'])) {
+    const meals = { ...conference['meals'] };
+    const items = backfillItems(meals['items']);
+    if (items !== undefined) meals['items'] = items;
+    conference['meals'] = meals;
+  }
+
+  if (!('registrationCopy' in conference)) {
+    conference['registrationCopy'] = { ...disabledRegistrationCopySection };
+  }
+
+  if (!('faqCopy' in conference)) {
+    conference['faqCopy'] = { ...disabledFaqCopySection };
+  }
+};
+
 /**
  * Return a copy of the parsed `SiteContent` JSON with a fresh id assigned to any
- * id-less list item (`conferences[].speakers[]`, `conferences[].seminars[]`,
- * `conferences[].hotels[]`, `team[]`, `board[]`) and an empty `hotels: []` supplied to any
- * conference that predates 3.1 and lacks the (required) key. Items already
- * carrying an `id` — and a `hotels` array that is already present — are
- * untouched (idempotent). A value that is not the expected shape is returned
- * as-is so the decoder — not this normalizer — is the one to reject it.
+ * id-less list item and disabled defaults for any absent conference section keys.
  */
 export const backfillListItemIds = (document: unknown): unknown => {
   if (!isObject(document)) return document;
@@ -101,21 +129,7 @@ export const backfillListItemIds = (document: unknown): unknown => {
       if (speakers !== undefined) conf['speakers'] = speakers;
       const seminars = backfillItems(conference['seminars']);
       if (seminars !== undefined) conf['seminars'] = seminars;
-      // `hotels` is a *required* (Branch 3.1) id-keyed list. A pre-3.1 document
-      // has no key at all: supply `[]` so the absent required field decodes. A
-      // *present* `hotels` is backfilled like any other id list (and left as-is
-      // when already id-complete). Crucially, only a truly-ABSENT key is
-      // defaulted: a present-but-malformed value (`null`, `"x"`, `{}`) is left
-      // in place for the decoder to reject — exactly like speakers/seminars/team
-      // above. Defaulting it to `[]` would silently discard authored content
-      // BEFORE strict decode, which is precisely the masking this normalizer is
-      // documented (above) NOT to do.
-      if (!('hotels' in conference)) {
-        conf['hotels'] = [];
-      } else {
-        const hotels = backfillItems(conference['hotels']);
-        if (hotels !== undefined) conf['hotels'] = hotels;
-      }
+      backfillConferenceSections(conf);
       return conf;
     });
   }
