@@ -202,11 +202,13 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
     // and a `StorageError` on registrant K aborts after 0..K-1 are already durable. A
     // user retry would otherwise re-mint fresh ids and DUPLICATE the records that did
     // land. Scoping each registrant's id to `<request fingerprint>:<index>` makes the
-    // retry overwrite the same K objects instead: the fingerprint is a stable hash of
-    // THIS submission's payload (identical on a verbatim retry, different for a new
-    // submission even with identical data), and the index pins each registrant to its
-    // position. So retrying a group of 4 that failed at #3 re-writes #1/#2 in place and
-    // completes #3/#4 — no duplicates — while a genuinely new submission gets new ids.
+    // retry overwrite the same K objects instead: each registrant id is content-addressed
+    // by `<request fingerprint>:<index>`, where the fingerprint is a stable hash of THIS
+    // submission's payload and the index pins each registrant to its position. Identical
+    // payloads intentionally reuse the same ids (a verbatim retry overwrites in place); a
+    // payload that differs in any field produces a different fingerprint and fresh ids. So
+    // retrying a group of 4 that failed at #3 re-writes #1/#2 in place and completes #3/#4
+    // — no duplicates — while a changed submission gets new ids.
     const requestFingerprint = createHash('sha256')
       .update(JSON.stringify(submission.payload))
       .digest('hex');
