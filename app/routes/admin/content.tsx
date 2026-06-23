@@ -7,7 +7,7 @@ import {
   useNavigation,
 } from 'react-router';
 
-import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
+import { adminMeta, adminRedirectWithStatus, adminFlashStatus, adminSecurityHeaders } from '~/lib/admin-headers';
 import {
   AddItemButton,
   Bilingual,
@@ -111,8 +111,9 @@ export const loader = routeHandler(function* () {
   // source of truth (a bucket-less editor still renders so the admin can preview,
   // but saving/publishing would fail, which we warn about up front).
   const bucketConfigured = Option.isSome(env.bucket);
+  const status = adminFlashStatus(request);
 
-  return { document: encoded as EncodedDocument, source, bucketConfigured };
+  return { document: encoded as EncodedDocument, source, bucketConfigured, status };
 });
 
 export const action = routeAction(function* () {
@@ -185,9 +186,7 @@ export const action = routeAction(function* () {
       .applyImageUpload(siteScope, uploadTarget, key)
       .pipe(Effect.result);
     if (applied._tag === 'Failure') return issueResponse(applied.failure);
-    return redirect(
-      `/admin/content?status=${encodeURIComponent(`Image uploaded: ${key}`)}`,
-    );
+    return adminRedirectWithStatus('/admin/content', `Image uploaded: ${key}`);
   }
 
   // ---- list op (add / remove / reorder) ------------------------------------
@@ -207,7 +206,7 @@ export const action = routeAction(function* () {
     }
     const applied = yield* editor.applyListOps(siteScope, ops).pipe(Effect.result);
     if (applied._tag === 'Failure') return issueResponse(applied.failure);
-    return redirect('/admin/content?status=List%20updated.');
+    return adminRedirectWithStatus('/admin/content', 'List updated.');
   }
 
   if (intent !== 'save-draft' && intent !== 'publish') {
@@ -233,15 +232,16 @@ export const action = routeAction(function* () {
   if (edited._tag === 'Failure') return issueResponse(edited.failure);
 
   if (intent === 'save-draft') {
-    return redirect('/admin/content?status=Draft%20saved.');
+    return adminRedirectWithStatus('/admin/content', 'Draft saved.');
   }
 
   // publish: promote the just-saved draft to the live document, drop the draft,
   // and bust the read cache so the change is live on the next public read.
   const published = yield* editor.publish(siteScope).pipe(Effect.result);
   if (published._tag === 'Failure') return issueResponse(published.failure);
-  return redirect(
-    '/admin/content?status=Published.%20Live%20on%20the%20next%20page%20load.',
+  return adminRedirectWithStatus(
+    '/admin/content',
+    'Published. Live on the next page load.',
   );
 });
 
@@ -285,15 +285,10 @@ function PositionSelect({
 }
 
 export default function AdminContentEditor() {
-  const { document, source, bucketConfigured } = useLoaderData<typeof loader>();
+  const { document, source, bucketConfigured, status } = useLoaderData<typeof loader>();
   const actionData = useActionData<ActionResult>();
   const navigation = useNavigation();
   const submitting = navigation.state === 'submitting';
-
-  const status =
-    typeof window === 'undefined'
-      ? null
-      : new URLSearchParams(window.location.search).get('status');
 
   // Items carry an `id` (ADR 0006), and a freshly-added item is draft-valid with
   // only its `id` — its bilingual content fields are absent until edited. The

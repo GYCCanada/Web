@@ -10,6 +10,8 @@
  *   - `X-Frame-Options: DENY` / `Referrer-Policy: same-origin` are standard
  *     hardening for an authenticated surface.
  */
+import { redirect } from 'react-router';
+
 export const adminSecurityHeaders = (): Record<string, string> => ({
   'Cache-Control': 'private, no-store, max-age=0',
   'X-Frame-Options': 'DENY',
@@ -20,3 +22,11 @@ export const adminSecurityHeaders = (): Record<string, string> => ({
 export const adminMeta = () => [
   { name: 'robots', content: 'noindex, nofollow' },
 ];
+
+/** Read the one-shot flash `?status=` query param from an admin request URL. */
+export const adminFlashStatus = (request: Request): string | null =>
+  new URL(request.url).searchParams.get('status');
+
+/** Redirect to an admin path with a flash status message in the query string. */
+export const adminRedirectWithStatus = (pathname: string, message: string) =>
+  redirect(`${pathname}?status=${encodeURIComponent(message)}`);
