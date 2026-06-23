@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'effect-bun-test';
-import { Effect, Layer, Result, Schema } from 'effect';
+import { Clock, Effect, Layer, Result, Schema } from 'effect';
 
 import { Content } from '../content.server';
 import {
@@ -180,6 +180,125 @@ describe('Submissions.persist — durable write (Branch 7.2)', () => {
       expect(firstHead._tag).toBe('Some');
       expect(secondHead._tag).toBe('Some');
     }).pipe(provideSubmissions()),
+  );
+});
+
+/**
+ * A `Clock` whose "now" the test advances by hand, so a SECOND keyed persist runs
+ * on a DIFFERENT calendar DAY than the first. Only `currentTimeMillis*` is
+ * exercised here (that is what `persist` reads to stamp `submittedAt`); `sleep` /
+ * the nanos accessor are derived from the same backing millis. Provided as a
+ * `Context.Reference` override (`Clock.Clock`) so the whole `persist` runs under
+ * frozen-then-advanced time.
+ */
+const controllableClock = (initialMillis: number) => {
+  let nowMillis = initialMillis;
+  const clock: Clock.Clock = {
+    currentTimeMillisUnsafe: () => nowMillis,
+    currentTimeMillis: Effect.sync(() => nowMillis),
+    currentTimeNanosUnsafe: () => BigInt(nowMillis) * 1_000_000n,
+    currentTimeNanos: Effect.sync(() => BigInt(nowMillis) * 1_000_000n),
+    sleep: () => Effect.void,
+  };
+  return {
+    clock,
+    advanceTo: (millis: number) => {
+      nowMillis = millis;
+    },
+  };
+};
+
+/**
+ * round-4 --deep MAJOR — a keyed (`idempotencyKey`) resubmit must be
+ * BYTE-IDENTICAL across days, not just `payment`-preserving.
+ *
+ * The H1 fix preserved an existing record's `payment` on a keyed overwrite, but
+ * `persist` still recomputed `submittedAt` from the clock on EVERY call. So a
+ * registrant who re-submits the SAME logical record TOMORROW (a user retrying a
+ * partially-failed group, the order/webhook flow re-persisting, …) would rewrite
+ * the registrant envelope with a DIFFERENT `submittedAt` — churn even though
+ * nothing logical changed. The fix: a keyed persist that finds a prior record at
+ * the deterministic key PRESERVES that record's original `submittedAt` (when the
+ * registration was actually made), mirroring exactly how `payment` is preserved.
+ *
+ * These pin the RAW stored record (not just `payment`) across two same-key submits
+ * separated by a real day boundary, asserting the on-bucket JSON is byte-identical.
+ */
+describe('Submissions.persist — keyed resubmit is byte-identical across days (round-4 MAJOR)', () => {
+  /** 2026-06-19T10:00:00Z and the NEXT calendar day, as UTC millis. */
+  const DAY_ONE_MILLIS = Date.UTC(2026, 5, 19, 10, 0, 0);
+  const DAY_TWO_MILLIS = Date.UTC(2026, 5, 20, 11, 30, 0);
+
+  it.effect(
+    'a verbatim keyed resubmit the NEXT day preserves the original submittedAt — raw record byte-identical',
+    () => {
+      const time = controllableClock(DAY_ONE_MILLIS);
+      return Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        const decoded = decodeRegistration();
+        const key = 'fingerprint-abc:0';
+
+        // Day one: first keyed persist mints the record + stamps today.
+        const first = yield* submissions.persist('registration', decoded, key);
+        expect(String(first.submittedAt)).toBe('2026-06-19');
+        const firstJson = yield* readStoredText(
+          submissionKey('registration', first.id),
+        );
+
+        // The clock rolls over to the NEXT calendar day, then the SAME logical
+        // record is re-submitted verbatim (same form + key → same deterministic id
+        // → same bucket object overwritten).
+        time.advanceTo(DAY_TWO_MILLIS);
+        const second = yield* submissions.persist('registration', decoded, key);
+
+        // Same key ⇒ same object, NOT a duplicate.
+        expect(second.id).toBe(first.id);
+        // The preserved date is day ONE (when the registration was made), NOT the
+        // day-two clock the naive recompute would have stamped.
+        expect(String(second.submittedAt)).toBe('2026-06-19');
+        expect(String(second.submittedAt)).not.toBe('2026-06-20');
+
+        // The whole on-bucket record is byte-identical across the cross-day resubmit
+        // (the regression the round-3 `payment`-only assertion could not catch).
+        const secondJson = yield* readStoredText(
+          submissionKey('registration', second.id),
+        );
+        expect(secondJson).toBe(firstJson);
+      }).pipe(
+        provideSubmissions(),
+        Effect.provideService(Clock.Clock, time.clock),
+      );
+    },
+  );
+
+  it.effect(
+    'a keyless (single-record) resubmit the next day mints a FRESH record stamped today — no preservation',
+    () => {
+      const time = controllableClock(DAY_ONE_MILLIS);
+      return Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        const decoded = decodeContact({
+          name: 'Single Record',
+          method: 'email',
+          email: 'single@example.com',
+          message: 'No idempotency key.',
+        });
+
+        // No key ⇒ each submit is a genuinely NEW record (random id, fresh stamp).
+        const first = yield* submissions.persist('contact', decoded);
+        expect(String(first.submittedAt)).toBe('2026-06-19');
+
+        time.advanceTo(DAY_TWO_MILLIS);
+        const second = yield* submissions.persist('contact', decoded);
+
+        // Distinct records, each carrying its OWN day's stamp — nothing preserved.
+        expect(second.id).not.toBe(first.id);
+        expect(String(second.submittedAt)).toBe('2026-06-20');
+      }).pipe(
+        provideSubmissions(),
+        Effect.provideService(Clock.Clock, time.clock),
+      );
+    },
   );
 });
 

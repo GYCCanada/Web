@@ -1206,7 +1206,9 @@ describe('registrationAction — durable Order arm send (order-workflow G7.1)', 
  * first wrote):
  *   (a) resubmit after PAID  ⇒ existing receipt, NO new session, order stays
  *       paid, registrants NOT restamped;
- *   (b) resubmit while PENDING ⇒ replays the same session, NO restamp;
+ *   (b) resubmit while PENDING ⇒ replays the same session; the ORDER is not
+ *       overwritten, but the registrants ARE re-stamped `pending`
+ *       byte-identically (the round-3 self-heal restamp);
  *   (c) resubmit after a non-paid TERMINAL ⇒ a FRESH pending order (new
  *       generation) is allowed — the user legitimately re-registers;
  *   (d) a live PENDING whose frozen fields CONFLICT ⇒ explicit failure.
@@ -1317,7 +1319,7 @@ describe('registrationAction — guarded order create/reuse on resubmit (H1)', (
     expect(registrantsAfter[0]?.record.payment?._tag).toBe('paid');
   });
 
-  it('(b) resubmit while PENDING reuses the same checkout — order not overwritten, registrants not restamped', async () => {
+  it('(b) resubmit while PENDING reuses the same checkout — order not overwritten, registrants re-stamped pending byte-identically (self-heal)', async () => {
     const calls: Array<CreateCheckoutSessionCall> = [];
     const storage = sharedStorageLayer(pricedRegistrationObject());
     const runtime = makeRequestRuntimeFromLayer(
@@ -1485,12 +1487,14 @@ describe('registrationAction — guarded order create/reuse on resubmit (H1)', (
     expect((first as Response).status).toBe(303);
     expect(calls.length).toBe(1);
 
-    // Capture the registrant's stamp BEFORE the racing resubmit (it is `pending`
-    // from the first submit; the webhook that would flip it `paid` alongside the
-    // order has not run in this race scenario). The racing resubmit must NOT write
-    // it at all — so the stamp must be byte-identical after.
-    const stampBefore = (await listRegistrations(runtime, args))[0]?.record
-      .payment;
+    // Capture the registrant's stamp AND the whole raw record BEFORE the racing
+    // resubmit (the record is `pending` from the first submit; the webhook that
+    // would flip it `paid` alongside the order has not run in this race scenario).
+    // The racing resubmit must NOT rewrite it at all — so BOTH the payment stamp
+    // and the FULL record (incl. `submittedAt`) must be byte-identical after
+    // (round-4 --deep MAJOR: a same-key resubmit must not re-stamp `submittedAt`).
+    const recordBefore = (await listRegistrations(runtime, args))[0]?.record;
+    const stampBefore = recordBefore?.payment;
     expect(stampBefore?._tag).toBe('pending');
 
     // Second submit WITH the race armed: resolve sees pending → session mints (and
@@ -1513,11 +1517,14 @@ describe('registrationAction — guarded order create/reuse on resubmit (H1)', (
     const ordersAfter = await listOrders(runtime, args);
     expect(ordersAfter.length).toBe(1);
     expect(ordersAfter[0]!.order.status).toBe('paid');
-    // The registrant stamp is UNTOUCHED by the racing resubmit — byte-identical to
+    // The registrant record is UNTOUCHED by the racing resubmit — byte-identical to
     // the pre-resubmit value (the `alreadyPaid` branch skips the stamp loop
-    // entirely, so nothing re-wrote the registrant record).
+    // entirely, so nothing re-wrote the registrant record). Compare the WHOLE raw
+    // record, not just `payment`: a same-key persist must preserve `submittedAt`
+    // too, so even a resubmit on a later day yields an identical record.
     const registrantsAfter = await listRegistrations(runtime, args);
     expect(registrantsAfter[0]?.record.payment).toEqual(stampBefore);
+    expect(registrantsAfter[0]?.record).toEqual(recordBefore);
   });
 
   it('(ii) perRegistrant resubmit after EVERY registrant PAID lands on ?checkout=success — no link mail, no duplicate notify', async () => {

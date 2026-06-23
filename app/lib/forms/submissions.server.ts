@@ -75,11 +75,21 @@ import {
 /**
  * The outcome of committing a registration resubmit through
  * `createOrReuseOrder` (order-workflow round-2 --deep H1). A closed union so the
- * action branches exhaustively: a `created` order is the only one the action
- * stamps registrants `pending` + `arm`s; `reused` reuses the live pending order's
- * replayed session WITHOUT restamping; `alreadyPaid` returns the existing
- * success/receipt WITHOUT minting a session or restamping. `OrderConflict` (case
- * d) is a failure, not an outcome.
+ * action branches exhaustively:
+ *
+ *   - `created`: a fresh pending order. The action `arm`s it AND stamps each
+ *     registrant `pending` for the first time.
+ *   - `reused`: the live pending order is reused (its replayed session). The
+ *     ORDER itself is NOT overwritten, but the action DOES re-stamp the
+ *     registrants `pending` — a byte-identical idempotent re-stamp that
+ *     self-heals a prior submit that wrote the order but failed mid-stamp-loop
+ *     (round-3 --deep BLOCKER 2; restamp paths registration-action.ts:420-438,
+ *     :538-555). It is NOT re-`arm`ed (the first submit already armed it).
+ *   - `alreadyPaid`: returns the existing success/receipt WITHOUT minting a
+ *     session, WITHOUT overwriting the paid order, and WITHOUT touching the
+ *     registrant stamps (the action skips the stamp loop entirely).
+ *
+ * `OrderConflict` (case d) is a failure, not an outcome.
  */
 export type OrderCreateOutcome =
   | { readonly _tag: 'created'; readonly order: RegistrationOrder }
@@ -98,20 +108,26 @@ export class Service extends Context.Service<
   {
     /**
      * Persist one decoded form as a durable `Submission` object and return the
-     * stored record. Stamps `submittedAt` with the current calendar date, encodes
-     * the envelope + the definition-derived payload to JSON, and `Storage.put`s it
-     * at `submissions/<form>/<id>.json`. Persistence ONLY — the notification is a
-     * separate step (Branch 7.3); `persist` returning the record before any
-     * notification runs is what makes the record durable across a notify failure.
+     * stored record. Stamps `submittedAt` with the current calendar date for a
+     * genuinely NEW record, encodes the envelope + the definition-derived payload
+     * to JSON, and `Storage.put`s it at `submissions/<form>/<id>.json`. Persistence
+     * ONLY — the notification is a separate step (Branch 7.3); `persist` returning
+     * the record before any notification runs is what makes the record durable
+     * across a notify failure.
      *
      * `idempotencyKey` (optional) makes the write retry-safe: when supplied, the
      * record's `id` is **derived deterministically** from it (`deterministicListItemId`)
      * instead of a fresh random nanoid, so persisting the same logical record twice
      * (e.g. a user retrying a partially-failed multi-registrant registration) writes
      * to the SAME bucket key and overwrites rather than minting a duplicate object.
-     * Omit it for single-record submissions (contact/volunteer) where each submit is
-     * a genuinely new record. The caller owns what makes a record "the same"
-     * (registration scopes by per-request fingerprint + registrant index).
+     * A keyed overwrite that finds a prior record at that key is **byte-identical**:
+     * it preserves BOTH the existing record's `payment` lifecycle AND its original
+     * `submittedAt` (a verbatim resubmit TOMORROW must not re-stamp a fresh clock
+     * date — round-4 --deep MAJOR), so only a genuinely new record takes a fresh
+     * `submittedAt`. Omit the key for single-record submissions (contact/volunteer)
+     * where each submit is a genuinely new record. The caller owns what makes a
+     * record "the same" (registration scopes by per-request fingerprint +
+     * registrant index).
      */
     readonly persist: (
       form: FormId,
@@ -181,14 +197,17 @@ export class Service extends Context.Service<
      *
      *   - absent ⇒ write `proposed` as a fresh `pending` order; outcome
      *     `{ _tag: 'created' }`. The caller stamps registrants `pending` + arms.
-     *   - existing `paid` ⇒ do NOT overwrite, do NOT restamp; outcome
+     *   - existing `paid` ⇒ do NOT overwrite the order; outcome
      *     `{ _tag: 'alreadyPaid', order }` carrying the EXISTING paid order. The
-     *     caller returns the existing success/receipt (case (a)).
+     *     caller returns the existing success/receipt (case (a)) and skips the
+     *     registrant stamp loop entirely.
      *   - existing `pending` whose frozen fields MATCH `proposed`
      *     (amount/currency/receiptEmail/mode/registrantIds) ⇒ idempotent retry;
-     *     do NOT overwrite, do NOT restamp; outcome `{ _tag: 'reused', order }`
+     *     do NOT overwrite the order; outcome `{ _tag: 'reused', order }`
      *     carrying the EXISTING order (case (b)). The caller reuses the replayed
-     *     session.
+     *     session AND re-stamps the registrants `pending` (a byte-identical
+     *     idempotent re-stamp that self-heals a prior submit which wrote the
+     *     order but failed mid-stamp-loop — round-3 --deep BLOCKER 2).
      *   - existing `pending` whose frozen fields CONFLICT ⇒ fail with
      *     {@link OrderConflict} (case (d)).
      *   - existing non-paid TERMINAL ⇒ this is unreachable on the happy path
@@ -197,10 +216,14 @@ export class Service extends Context.Service<
      *     hard guard violation and FAILS `OrderConflict` rather than overwriting —
      *     NEVER restamp a terminal order back to `pending`.
      *
-     * The write is a single `persistOrder`; a `paid`/`reused` outcome performs NO
-     * write at all (byte-identical idempotent resubmit). This is the CREATE-path
-     * analog of the `markOrder*` `canTransition` guards (F1) — the resubmit can
-     * never resurrect a terminal nor restamp a settled order.
+     * The ORDER write is a single `persistOrder` on the `created` path only; a
+     * `paid`/`reused` outcome performs NO order write at all (the order is reused
+     * in place, byte-identical idempotent resubmit). The registrant `pending`
+     * re-stamp on the `reused` path is a SEPARATE caller step
+     * (registration-action.ts:420-438, :538-555), not part of this method. This is
+     * the CREATE-path analog of the `markOrder*` `canTransition` guards (F1) — the
+     * resubmit can never resurrect a terminal order nor restamp a settled ORDER's
+     * status back to `pending`.
      */
     readonly createOrReuseOrder: (
       form: FormId,
@@ -368,30 +391,48 @@ export const layer = Layer.effect(
         idempotencyKey === undefined
           ? newListItemId()
           : deterministicListItemId(`${form}:${idempotencyKey}`);
-      // `submittedAt` round-trips through the branded `IsoDate`: a clock-derived
-      // `YYYY-MM-DD` is always a real calendar date, so a decode failure here is a
-      // bug, not a user error — it dies rather than masquerading as a failure.
-      const submittedAt = yield* decodeIsoDate(isoDateString(now)).pipe(
+      // A clock-derived `submittedAt` for a genuinely NEW record. Round-trips
+      // through the branded `IsoDate`: a clock-derived `YYYY-MM-DD` is always a
+      // real calendar date, so a decode failure here is a bug, not a user error —
+      // it dies rather than masquerading as a failure. NOT necessarily the value
+      // that lands: a keyed resubmit that finds a prior record PRESERVES that
+      // record's `submittedAt` (see below), so this fresh stamp is only used when
+      // there is no existing record at this deterministic key.
+      const freshSubmittedAt = yield* decodeIsoDate(isoDateString(now)).pipe(
         Effect.orDie,
       );
 
-      // PRESERVE an already-stamped payment lifecycle on an idempotent overwrite
-      // (order-workflow round-2 --deep H1). With an `idempotencyKey` a verbatim
-      // resubmit re-derives the SAME id and OVERWRITES the existing record — but
-      // the order/webhook flow may have already stamped that registrant
-      // `pending`/`paid`/… (`setRegistrantPayment`). A naive overwrite would write
-      // a fresh record with NO `payment`, silently WIPING the paid stamp (the
-      // restamp hazard H1 closes on the order side, mirrored here on the registrant
-      // side). So a keyed persist carries the existing record's `payment` forward;
-      // a keyless persist (single-record forms) has no prior record to preserve.
-      const existingPayment: PaymentState | undefined =
+      // PRESERVE an already-stamped record's `payment` lifecycle AND its original
+      // `submittedAt` on an idempotent overwrite (order-workflow round-2 --deep H1
+      // / round-4 --deep MAJOR). With an `idempotencyKey` a verbatim resubmit
+      // re-derives the SAME id and OVERWRITES the existing record. Two fields must
+      // survive that overwrite for a resubmit to be byte-identical:
+      //
+      //   - `payment`: the order/webhook flow may have already stamped that
+      //     registrant `pending`/`paid`/… (`setRegistrantPayment`). A naive
+      //     overwrite would write a fresh record with NO `payment`, silently
+      //     WIPING the paid stamp.
+      //   - `submittedAt`: it is a CLOCK read, so recomputing it on every persist
+      //     would make a verbatim resubmit TOMORROW produce a DIFFERENT calendar
+      //     date — the registrant envelope would churn day-to-day even though
+      //     nothing logical changed and `payment`/order were preserved. The
+      //     original record's `submittedAt` is when the registration was actually
+      //     made, so it is the value that must persist across same-key resubmits.
+      //
+      // So a keyed persist re-reads any prior record once and carries BOTH fields
+      // forward; only a genuinely new record (no prior at this key, or a keyless
+      // single-record form) takes the fresh clock-stamped `submittedAt`.
+      const existing: Submission | undefined =
         idempotencyKey === undefined
           ? undefined
           : yield* readSubmissionOption(form, id).pipe(
               Effect.map((record) =>
-                Option.isSome(record) ? record.value.payment : undefined,
+                Option.isSome(record) ? record.value : undefined,
               ),
             );
+
+      const submittedAt = existing?.submittedAt ?? freshSubmittedAt;
+      const existingPayment = existing?.payment;
 
       const submission: Submission =
         existingPayment === undefined
@@ -618,8 +659,10 @@ export const layer = Layer.effect(
         }
         // Live `pending`: idempotent retry iff the frozen fields match (case b);
         // a fingerprint collision with disagreeing fields fails explicitly (case
-        // d). Either way the existing order is NOT overwritten and its registrants
-        // are NOT restamped.
+        // d). Either way the existing ORDER is NOT overwritten here. (On the
+        // matching `reused` path the CALLER still re-stamps the registrants
+        // `pending` — a byte-identical self-heal — but that is its own step, not
+        // this method's; see registration-action.ts:420-438, :538-555.)
         const reason = conflictReason(current, proposed);
         if (reason !== undefined) {
           return yield* new OrderConflict({ orderId: proposed.orderId, reason });
