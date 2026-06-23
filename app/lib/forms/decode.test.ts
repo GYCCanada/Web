@@ -131,6 +131,53 @@ describe('email', () => {
   });
 });
 
+// The registration email relaxation (registrar plan 2b.3 / C7a authoring half):
+// the registration `email` instance flips to `optional: true` (optional-at-key,
+// non-empty-WHEN-present). This is the decode-LEVEL contract C7a establishes —
+// an ABSENT key is valid, but a PRESENT blank still rejects. The shell
+// blank-drop that makes the real rendered `email: ''` payload pass in `group`
+// (and the per-registrant re-imposition for `perRegistrant`) live in C7/C7.5;
+// C7a alone makes *absent* valid, NOT *present-blank*.
+const optionalEmailDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'email',
+      name: 'email',
+      label: text('Email', 'Courriel'),
+      optional: true,
+      requiredMessage: 'contact.form.email.required',
+      invalidMessage: 'contact.form.email.error',
+    },
+  ],
+});
+
+describe('email (optional: true) — the C7a registrant relaxation', () => {
+  test('an ABSENT email decodes valid (optional-at-key)', () => {
+    expect(Result.isSuccess(decodeForm(optionalEmailDef, {}))).toBe(true);
+  });
+
+  test('a present blank STILL rejects with the required key (the shell drop is C7)', () => {
+    expect(
+      errorsFor(optionalEmailDef, { email: '' })?.fieldErrors['email'],
+    ).toEqual(['contact.form.email.required']);
+  });
+
+  test('a present malformed value rejects with the invalid key', () => {
+    expect(
+      errorsFor(optionalEmailDef, { email: 'not-an-email' })?.fieldErrors[
+        'email'
+      ],
+    ).toEqual(['contact.form.email.error']);
+  });
+
+  test('a present well-formed value decodes', () => {
+    expect(
+      Result.isSuccess(decodeForm(optionalEmailDef, { email: 'a@b.co' })),
+    ).toBe(true);
+  });
+});
+
 const urlDef = asDefinition({
   title: text('F', 'F'),
   fields: [
@@ -681,5 +728,318 @@ describe('requiredWhenEquals cross-field rule', () => {
         decodeForm(ruleDef, { method: 'both', email: 'a@b.co', phone: '5' }),
       ),
     ).toBe(true);
+  });
+});
+
+// C4a — the four ACTIVATION decode rows (registrar plan Decision 5). An
+// `activeWhenEquals` target is optional-at-key so an INACTIVE-absent value
+// decodes; the presence filter re-imposes the rest: active+absent ⇒ required,
+// present+inactive ⇒ rejected (out-of-form payload), active+present ⇒ runs the
+// kind codec. One gated target per predicate kind.
+const activationDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'literal',
+      name: 'addBanquet',
+      label: text('Banquet?', 'Banquet?'),
+      requiredMessage: 'registration.form.gender.required',
+      options: [
+        { value: 'yes', label: text('Yes', 'Oui') },
+        { value: 'no', label: text('No', 'Non') },
+      ],
+    },
+    {
+      _tag: 'requiredText',
+      name: 'seats',
+      label: text('Seats', 'Places'),
+      requiredMessage: 'registration.form.church.required',
+    },
+  ],
+  rules: [
+    {
+      _tag: 'activeWhenEquals',
+      predicate: { _tag: 'literalEquals', when: 'addBanquet', equals: ['yes'] },
+      target: 'seats',
+    },
+  ],
+});
+
+describe('activeWhenEquals decode rows — literalEquals', () => {
+  test('absent + inactive ⇒ valid (optional-at-key, no requirement)', () => {
+    expect(
+      Result.isSuccess(decodeForm(activationDef, { addBanquet: 'no' })),
+    ).toBe(true);
+  });
+
+  test('absent + active ⇒ REJECT, emits the target required key', () => {
+    const errors = errorsFor(activationDef, { addBanquet: 'yes' });
+    expect(errors?.fieldErrors['seats']).toEqual([
+      'registration.form.church.required',
+    ]);
+  });
+
+  test('present + inactive ⇒ REJECT (out-of-form payload) at the target', () => {
+    const errors = errorsFor(activationDef, { addBanquet: 'no', seats: '4' });
+    expect(errors?.fieldErrors['seats']).toEqual([
+      'registration.form.church.required',
+    ]);
+  });
+
+  test('present + active ⇒ valid (the kind codec runs)', () => {
+    const result = decodeForm(activationDef, { addBanquet: 'yes', seats: '4' });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) expect(result.success['seats']).toBe('4');
+  });
+});
+
+const arrayGatedDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'arrayOfLiteral',
+      name: 'workshops',
+      label: text('Workshops', 'Ateliers'),
+      requiredMessage: 'registration.form.merch.required',
+      options: [
+        { value: 'music', label: text('Music', 'Musique') },
+        { value: 'photo', label: text('Photo', 'Photo') },
+      ],
+    },
+    {
+      _tag: 'requiredText',
+      name: 'instrument',
+      label: text('Instrument', 'Instrument'),
+      requiredMessage: 'registration.form.instrument.required',
+    },
+  ],
+  rules: [
+    {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'arrayIncludesAny',
+        when: 'workshops',
+        values: ['music'],
+      },
+      target: 'instrument',
+    },
+  ],
+});
+
+describe('activeWhenEquals decode rows — arrayIncludesAny', () => {
+  test('inactive (array excludes trigger) ⇒ absent target valid, present rejected', () => {
+    expect(
+      Result.isSuccess(decodeForm(arrayGatedDef, { workshops: ['photo'] })),
+    ).toBe(true);
+    const errors = errorsFor(arrayGatedDef, {
+      workshops: ['photo'],
+      instrument: 'piano',
+    });
+    expect(errors?.fieldErrors['instrument']).toEqual([
+      'registration.form.instrument.required',
+    ]);
+  });
+
+  test('active (array includes trigger) ⇒ absent target required, present valid', () => {
+    const errors = errorsFor(arrayGatedDef, { workshops: ['music'] });
+    expect(errors?.fieldErrors['instrument']).toEqual([
+      'registration.form.instrument.required',
+    ]);
+    expect(
+      Result.isSuccess(
+        decodeForm(arrayGatedDef, {
+          workshops: ['music'],
+          instrument: 'piano',
+        }),
+      ),
+    ).toBe(true);
+  });
+});
+
+const checkboxGatedDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'checkboxBoolean',
+      name: 'bringingGuest',
+      label: text('Guest?', 'Invité?'),
+      requiredMessage: 'registration.form.tos.required',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'guestName',
+      label: text('Guest name', "Nom de l'invité"),
+      requiredMessage: 'registration.form.name.required',
+    },
+  ],
+  rules: [
+    {
+      _tag: 'activeWhenEquals',
+      predicate: { _tag: 'checkboxChecked', when: 'bringingGuest' },
+      target: 'guestName',
+    },
+  ],
+});
+
+describe('activeWhenEquals decode rows — checkboxChecked', () => {
+  test('unchecked ⇒ absent target valid, present rejected', () => {
+    expect(
+      Result.isSuccess(decodeForm(checkboxGatedDef, { bringingGuest: 'false' })),
+    ).toBe(true);
+    const errors = errorsFor(checkboxGatedDef, {
+      bringingGuest: 'false',
+      guestName: 'Ada',
+    });
+    expect(errors?.fieldErrors['guestName']).toEqual([
+      'registration.form.name.required',
+    ]);
+  });
+
+  test('checked ⇒ absent target required, present valid', () => {
+    const errors = errorsFor(checkboxGatedDef, { bringingGuest: 'on' });
+    expect(errors?.fieldErrors['guestName']).toEqual([
+      'registration.form.name.required',
+    ]);
+    expect(
+      Result.isSuccess(
+        decodeForm(checkboxGatedDef, {
+          bringingGuest: 'on',
+          guestName: 'Ada',
+        }),
+      ),
+    ).toBe(true);
+  });
+});
+
+// An `optionalText` (intrinsically-optional, empty-allowed) activation target —
+// the blessed `active ∧ optional ∧ priced` authoring shape (registrar-plan.md:
+// 481-482). The two activation rows are INDEPENDENT for it: active+absent is
+// VALID (an optional field has no presence requirement) but present+inactive is
+// an UNCONDITIONAL out-of-form reject (registrar-plan.md:548) — the smuggled
+// value never reaches price(), enforced at the decode boundary, not only by the
+// C4c price guard.
+const optionalTargetDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'literal',
+      name: 'addBanquet',
+      label: text('Banquet?', 'Banquet?'),
+      requiredMessage: 'registration.form.gender.required',
+      options: [
+        { value: 'yes', label: text('Yes', 'Oui') },
+        { value: 'no', label: text('No', 'Non') },
+      ],
+    },
+    {
+      _tag: 'optionalText',
+      name: 'note',
+      label: text('Note', 'Note'),
+      invalidMessage: 'registration.form.other.required',
+    },
+  ],
+  rules: [
+    {
+      _tag: 'activeWhenEquals',
+      predicate: { _tag: 'literalEquals', when: 'addBanquet', equals: ['yes'] },
+      target: 'note',
+    },
+  ],
+});
+
+describe('activeWhenEquals decode rows — optionalText target (optional ∧ priced)', () => {
+  test('active + absent ⇒ VALID (an optional active target has no presence requirement)', () => {
+    expect(
+      Result.isSuccess(decodeForm(optionalTargetDef, { addBanquet: 'yes' })),
+    ).toBe(true);
+  });
+
+  test('active + present ⇒ valid (the kind codec runs)', () => {
+    const result = decodeForm(optionalTargetDef, {
+      addBanquet: 'yes',
+      note: 'a note',
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) expect(result.success['note']).toBe('a note');
+  });
+
+  test('present + inactive ⇒ REJECT (smuggled out-of-form value) at the target', () => {
+    const errors = errorsFor(optionalTargetDef, {
+      addBanquet: 'no',
+      note: 'smuggled',
+    });
+    expect(errors?.fieldErrors['note']).toEqual([
+      'registration.form.other.required',
+    ]);
+  });
+
+  test('absent + inactive ⇒ valid (optional-at-key, no requirement)', () => {
+    expect(
+      Result.isSuccess(decodeForm(optionalTargetDef, { addBanquet: 'no' })),
+    ).toBe(true);
+  });
+});
+
+describe('number kind (C9)', () => {
+  const numberDef = asDefinition({
+    title: text('R', 'R'),
+    fields: [
+      {
+        _tag: 'number',
+        name: 'tickets',
+        label: text('Tickets', 'Billets'),
+        min: 1,
+        max: 10,
+        requiredMessage: 'registration.form.gender.required',
+        invalidMessage: 'registration.form.merch.required',
+      },
+    ],
+  });
+
+  test('a valid in-range string decodes to a real integer', () => {
+    const result = decodeForm(numberDef, { tickets: '3' });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) expect(result.success['tickets']).toBe(3);
+  });
+
+  test('empty / absent emit the required key (a count was required)', () => {
+    for (const payload of [{ tickets: '' }, {}]) {
+      const errors = errorsFor(numberDef, payload);
+      expect(errors?.fieldErrors['tickets']).toEqual([
+        'registration.form.gender.required',
+      ]);
+    }
+  });
+
+  test('non-integer / out-of-range emit the invalid key', () => {
+    // 'abc' (NaN), '1.5' (non-integer), '0' (below min), '99' (above max).
+    for (const value of ['abc', '1.5', '0', '99']) {
+      const errors = errorsFor(numberDef, { tickets: value });
+      expect(errors?.fieldErrors['tickets']).toEqual([
+        'registration.form.merch.required',
+      ]);
+    }
+  });
+
+  test('optional:true number — an absent key decodes (absence valid)', () => {
+    const optionalNumberDef = asDefinition({
+      title: text('R', 'R'),
+      fields: [
+        {
+          _tag: 'number',
+          name: 'extras',
+          label: text('Extras', 'Extras'),
+          optional: true,
+          requiredMessage: 'registration.form.gender.required',
+          invalidMessage: 'registration.form.merch.required',
+        },
+      ],
+    });
+    expect(Result.isSuccess(decodeForm(optionalNumberDef, {}))).toBe(true);
+    // A PRESENT value still runs its codec (a non-integer rejects).
+    const errors = errorsFor(optionalNumberDef, { extras: '1.5' });
+    expect(errors?.fieldErrors['extras']).toEqual([
+      'registration.form.merch.required',
+    ]);
   });
 });

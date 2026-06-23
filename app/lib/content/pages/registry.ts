@@ -128,6 +128,20 @@ export const formDraftKey = (form: FormId): string =>
 export const submissionKey = (form: FormId, id: ListItemId): string =>
   `submissions/${form}/${id}.json`;
 
+/**
+ * The bucket key one frozen `RegistrationOrder` lives at
+ * (`submissions/<form>/orders/<orderId>.json`, registrar plan Decision 2). An
+ * order is the durable, amount-frozen record one checkout mints: in `group` ONE
+ * order keyed by the request fingerprint, in `perRegistrant` one per registrant
+ * keyed `<fingerprint>:<index>` (C7.5). The `orders/` segment nests UNDER the
+ * form's submission prefix so a registrant `Submission` and its order share one
+ * listing root while never colliding (`orderId` is a sha256 hex / `:index`, not a
+ * `ListItemId`, so an order key can never equal a submission key). Form-scoped for
+ * the same `make-impossible-states-unrepresentable` reason `submissionKey` is.
+ */
+export const orderKey = (form: FormId, orderId: string): string =>
+  `submissions/${form}/orders/${orderId}.json`;
+
 // ---------------------------------------------------------------------------
 // Object specs (schema + default per id)
 // ---------------------------------------------------------------------------

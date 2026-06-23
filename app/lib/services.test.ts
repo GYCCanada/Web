@@ -9,6 +9,7 @@ import {
 } from 'effect';
 
 import { Env } from './env.server';
+import { CurrencyCode } from './forms/pricing';
 import { Sendgrid, SendgridDisabled } from './sendgrid.server';
 import { Mailer } from './mailer.server';
 
@@ -72,6 +73,69 @@ describe('Env config', () => {
     Effect.gen(function* () {
       const exit = yield* Env.Service.asEffect().pipe(
         provideEnv({ NODE_ENV: 'production', MAIL_HOST: 'only-host' }),
+        Effect.exit,
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+    }));
+
+  it.effect('leaves stripe absent everywhere when its vars are unset', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.stripe)).toBe(true);
+    }).pipe(provideEnv({ NODE_ENV: 'development' })));
+
+  it.effect('resolves stripe when both secrets are non-blank, redacting them', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isSome(env.stripe)).toBe(true);
+      if (Option.isSome(env.stripe)) {
+        expect(Redacted.value(env.stripe.value.apiKey)).toBe('sk_test_123');
+        expect(Redacted.value(env.stripe.value.webhookSecret)).toBe('whsec_456');
+        // Defaults to the GYC settlement currency when STRIPE_CURRENCY is unset.
+        expect(env.stripe.value.currency).toBe(CurrencyCode.make('cad'));
+      }
+    }).pipe(
+      provideEnv({
+        ...PROD_ENV,
+        STRIPE_API_KEY: 'sk_test_123',
+        STRIPE_WEBHOOK_SECRET: 'whsec_456',
+      }),
+    ));
+
+  it.effect('treats a partially-blank stripe group as absent', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      // API key set but webhook secret blank — not a usable gate, so None.
+      expect(Option.isNone(env.stripe)).toBe(true);
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        STRIPE_API_KEY: 'sk_test_123',
+        STRIPE_WEBHOOK_SECRET: '',
+      }),
+    ));
+
+  it.effect('treats whitespace-only stripe secrets as absent', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.stripe)).toBe(true);
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        STRIPE_API_KEY: '   ',
+        STRIPE_WEBHOOK_SECRET: '\t',
+      }),
+    ));
+
+  it.effect('fails fast when a configured stripe carries an unsupported currency', () =>
+    Effect.gen(function* () {
+      const exit = yield* Env.Service.asEffect().pipe(
+        provideEnv({
+          NODE_ENV: 'development',
+          STRIPE_API_KEY: 'sk_test_123',
+          STRIPE_WEBHOOK_SECRET: 'whsec_456',
+          STRIPE_CURRENCY: 'usd',
+        }),
         Effect.exit,
       );
       expect(Exit.isFailure(exit)).toBe(true);

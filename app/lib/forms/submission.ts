@@ -5,6 +5,8 @@ import { FormId } from '../content/pages/registry';
 
 import { definitionToSchema } from './decode';
 import type { FormDefinition } from './definition';
+import { BillingMode } from './party';
+import { Cents, CurrencyCode } from './pricing';
 
 /**
  * The persisted `Submission` schema (CONTEXT §Submission, settled #8;
@@ -54,16 +56,83 @@ import type { FormDefinition } from './definition';
  */
 
 /**
+ * The PAYMENT lifecycle a registrant `Submission` carries (registrar plan
+ * :695 — "PaymentState on the submission envelope (optionalKey)"). It is the
+ * registrant-side mirror of the frozen `RegistrationOrder`: the order is the
+ * payment's source of truth, and this records WHERE that registrant sits in its
+ * order's lifecycle so the future first-party registrar can read a registrant's
+ * paid/unpaid status off the registrant record itself — not by joining back to
+ * the order. The webhook (C8) flips this in lock-step with the order it names
+ * (`order.registrantIds`), so order and registrant never disagree.
+ *
+ * Modelling principles (`~/.brain/principles`):
+ *   - `make-impossible-states-unrepresentable`: a closed tagged union — a
+ *     `pending`/`expired` state carries the frozen `amount`/`currency`, a `paid`
+ *     state ALSO carries the `paidAt` calendar date (an unpaid record can never
+ *     name a paid-on date), a `failed` state carries the `reason` (and no
+ *     amount/paidAt — there is nothing settled). `unpriced` is the contact/
+ *     volunteer record that never enters checkout. `orderId`/`mode` link every
+ *     priced arm back to its order; `amount`/`currency` are the closed
+ *     `Cents`/`CurrencyCode` brands, never free numbers/strings.
+ *   - this union mirrors the `RegistrationOrder.status` literal exactly so the
+ *     two-sided flip cannot diverge (`derive-dont-sync` — the `mode`/`amount`/
+ *     `currency`/`orderId` are copied FROM the order at flip time, never
+ *     re-derived from form data).
+ */
+export const PaymentState = Schema.TaggedUnion({
+  // contact/volunteer (and any unpriced registration submit) — never charged.
+  unpriced: {},
+  // an order was minted; the charge is in flight (the order is `pending`).
+  pending: {
+    orderId: Schema.String,
+    mode: BillingMode,
+    amount: Cents,
+    currency: CurrencyCode,
+  },
+  // the order's charge succeeded — `paidAt` is the calendar date it settled.
+  paid: {
+    orderId: Schema.String,
+    mode: BillingMode,
+    amount: Cents,
+    currency: CurrencyCode,
+    paidAt: IsoDate,
+  },
+  // the order's charge failed — `reason` is a short Stripe/route-supplied note.
+  failed: {
+    orderId: Schema.String,
+    mode: BillingMode,
+    reason: Schema.String,
+  },
+  // swept past the registration deadline (Q4) — retained, never deleted.
+  expired: {
+    orderId: Schema.String,
+    mode: BillingMode,
+    amount: Cents,
+    currency: CurrencyCode,
+  },
+});
+export type PaymentState = typeof PaymentState.Type;
+
+/**
  * The form-independent envelope every `Submission` carries, regardless of which
  * form produced it: a fresh `ListItemId` (the `<id>` segment of its bucket key),
- * the closed `FormId` it belongs to, and the `IsoDate` it was submitted on. The
- * per-form `payload` is layered on by {@link submissionSchema}; this struct is the
- * metadata a listing / the future registrar's index reads without the field graph.
+ * the closed `FormId` it belongs to, and the `IsoDate` it was submitted on, plus
+ * an OPTIONAL `payment` lifecycle ({@link PaymentState}). The per-form `payload`
+ * is layered on by {@link submissionSchema}; this struct is the metadata a
+ * listing / the future registrar's index reads without the field graph.
+ *
+ * `payment` is `Schema.optionalKey` (backfill-safe — the CMS published-doc
+ * backfill hazard): every legacy `submissions/<form>/<id>.json` written before
+ * this field existed decodes with `payment` undefined, and every read tolerates
+ * its absence (an unpriced/legacy record simply has no payment lifecycle). It is
+ * stamped `pending` at order-creation time and flipped `paid`/`failed` by the
+ * webhook, never authored.
  */
 export const submissionEnvelope = {
   id: ListItemId,
   form: FormId,
   submittedAt: IsoDate,
+  payment: Schema.optionalKey(PaymentState),
 } as const;
 
 /** The decoded envelope — a `Submission`'s metadata without its form payload. */

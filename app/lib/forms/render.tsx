@@ -11,7 +11,10 @@ import { Label } from '~/ui/label';
 import { Radio, RadioGroup, Radios } from '~/ui/radio';
 import { TextField } from '~/ui/text-field';
 
+import { activationIndex, isActiveByName } from './activation';
+import type { ActivationScope } from './activation';
 import type {
+  ActiveWhen,
   CrossFieldRule,
   FieldKind,
   FormDefinition,
@@ -93,6 +96,20 @@ function LeafField({
           <FieldErrors />
         </TextField>
       );
+    case 'number':
+      return (
+        <TextField name={name}>
+          <Label>{label}</Label>
+          <TextField.Input
+            type="number"
+            inputMode="numeric"
+            min={field.min ?? 0}
+            max={field.max}
+            placeholder={placeholder}
+          />
+          <FieldErrors />
+        </TextField>
+      );
     case 'literal':
       return (
         <RadioGroup name={name}>
@@ -133,45 +150,114 @@ function LeafField({
   }
 }
 
+/** The `activeWhenEquals` rule narrowed from the closed `CrossFieldRule` union. */
+type ActivationRule = Extract<CrossFieldRule, { _tag: 'activeWhenEquals' }>;
+
 /**
- * The cross-field-conditional gate on a field's VISIBILITY (registration-launch
- * Branch 6, BLOCKER 1). A `requiredWhenEquals` rule whose `target` is a top-level
- * `optional: true` field models the contact/volunteer `method`-gated `email` /
- * `phone`: the field exists in the payload only WHEN its `when` field's live value
- * is one of `equals`, and the decoder accepts the key's ABSENCE (`optional: true`)
- * the rest of the time. The hand-tuned forms rendered exactly this — `method ===
- * 'email' || method === 'both' ? <email> : null` (`contact.tsx:240/253`) — so an
- * inactive field was absent from the POST and its `optional: true` codec accepted
- * the absence. The generic renderer must reproduce that conditional VISIBILITY, or
- * the always-rendered field POSTs a present blank (`phone=''`) that its codec then
- * rejects as `requiredMessage` — the regression this gate fixes.
+ * Build the single-entry {@link ActivationScope} the shared {@link isActiveByName}
+ * reads, projecting one predicate's live `when` value out of the form's `FormData`
+ * into the SAME shape the server-side DECODED scope carries (so client visibility
+ * and server activation agree — `derive-dont-sync`):
+ *   - `literalEquals`    — a `literal` radio decodes to one option STRING, so read
+ *     `formData.get(when)`;
+ *   - `arrayIncludesAny` — an `arrayOfLiteral` decodes to an array of strings, so
+ *     read `formData.getAll(when)`;
+ *   - `checkboxChecked`  — a `checkboxBoolean` decodes to a real `boolean`; the
+ *     control posts `value="true"` only WHEN checked (absent otherwise), so map a
+ *     present `'true'` to `true`.
+ */
+const scopeFromFormData = (
+  predicate: ActiveWhen,
+  formData: FormData | URLSearchParams,
+): ActivationScope => {
+  switch (predicate._tag) {
+    case 'literalEquals': {
+      const value = formData.get(predicate.when);
+      return { [predicate.when]: typeof value === 'string' ? value : undefined };
+    }
+    case 'arrayIncludesAny':
+      return {
+        [predicate.when]: formData
+          .getAll(predicate.when)
+          .filter((entry): entry is string => typeof entry === 'string'),
+      };
+    case 'checkboxChecked':
+      return { [predicate.when]: formData.get(predicate.when) === 'true' };
+  }
+};
+
+/**
+ * The SSR / initial-render fallback scope, shaped per predicate kind from the
+ * `when` field's conform default so the server renders the SAME branch the client
+ * will once `useFormData` connects. The default's raw shape mirrors the rendered
+ * control: a `literal` defaults to a single `defaultValue` string, an
+ * `arrayOfLiteral` to its `defaultOptions` collection (the array form, the same
+ * `<Checkboxes>` reads — `defaultValue` alone holds only the first member), and a
+ * `checkboxBoolean` to its `value="true"` string (or a boolean) when pre-checked —
+ * each normalized into the decoded scope shape {@link scopeFromFormData} produces.
+ */
+const fallbackScope = (
+  predicate: ActiveWhen,
+  meta: { readonly defaultValue?: unknown; readonly defaultOptions: string[] },
+): ActivationScope => {
+  switch (predicate._tag) {
+    case 'literalEquals':
+      return {
+        [predicate.when]:
+          typeof meta.defaultValue === 'string' ? meta.defaultValue : undefined,
+      };
+    case 'arrayIncludesAny':
+      return { [predicate.when]: meta.defaultOptions };
+    case 'checkboxChecked':
+      return {
+        [predicate.when]:
+          meta.defaultValue === true || meta.defaultValue === 'true',
+      };
+  }
+};
+
+/**
+ * The cross-field-conditional gate on a field's VISIBILITY (registrar plan
+ * Decision 5). An `activeWhenEquals` rule whose `target` is an `optional: true`
+ * field models the contact/volunteer `method`-gated `email` / `phone`: the field
+ * is ACTIVE — rendered, presence-required, price-eligible — only WHEN its
+ * `predicate` holds over a sibling's live value, and the decoder accepts the key's
+ * ABSENCE (`optional: true`) the rest of the time. The hand-tuned forms rendered
+ * exactly this — `method === 'email' || method === 'both' ? <email> : null`
+ * (`contact.tsx:240/253`) — so an inactive field was absent from the POST and its
+ * `optional: true` codec accepted the absence. The generic renderer reproduces that
+ * conditional VISIBILITY, or the always-rendered field POSTs a present blank
+ * (`phone=''`) that its codec then rejects as `requiredMessage`.
  *
- * `derive-dont-sync`: the gate is DERIVED from the definition's `requiredWhenEquals`
- * rules (the same rules that re-impose PRESENCE server-side), never a hand-wired
- * `method` switch — editing the rule's `equals` set changes both the visibility and
- * the validation in lockstep. The live `when` value is read via `useFormData`
- * (matching the `useFormData(... ?? default)` idiom the hand-tuned forms used),
- * falling back to the field's own default so the server renders the same branch the
- * client will.
+ * `derive-dont-sync`: visibility is DERIVED from the field's `activeWhenEquals`
+ * rule through the ONE shared {@link isActiveByName} evaluator — the SAME law the
+ * decoder's presence filter and `price()` read — never a hand-wired `method` switch
+ * or a re-implemented predicate. After registrar Decision 5, `requiredWhenEquals` is
+ * presence-only and no longer gates visibility; `activeWhenEquals` owns it. The live
+ * `when` value is read via `useFormData` (matching the `useFormData(... ?? default)`
+ * idiom the hand-tuned forms used), seeded by the field's own default so the server
+ * renders the same branch the client will.
  */
 function RuleGatedField({
   rule,
   formId,
   children,
 }: {
-  rule: CrossFieldRule;
+  rule: ActivationRule;
   formId: string;
   children: React.ReactNode;
 }) {
-  const meta = useField<string>(rule.when);
-  const fallback =
-    typeof meta.defaultValue === 'string' ? meta.defaultValue : undefined;
-  const live = useFormData(formId, (formData) => formData.get(rule.when), {
-    fallback,
-  });
-  const value = typeof live === 'string' ? live : fallback;
-  const active =
-    typeof value === 'string' && rule.equals.includes(value as never);
+  const meta = useField<string | string[]>(rule.predicate.when);
+  const scope = useFormData(
+    formId,
+    (formData) => scopeFromFormData(rule.predicate, formData),
+    { fallback: fallbackScope(rule.predicate, meta) },
+  );
+  const active = isActiveByName(
+    rule.target,
+    new Map([[rule.target, rule]]),
+    scope,
+  );
   return active ? <>{children}</> : null;
 }
 
@@ -181,25 +267,26 @@ function RuleGatedField({
  * into `{ group: { field: … } }`, the shape the decoder's nested `Schema.Struct`
  * expects).
  *
- * `gateRules` is the index of `requiredWhenEquals` rules keyed by `target` name
+ * `activationGates` is the index of `activeWhenEquals` rules keyed by `target` name
  * (built once in {@link FormFields}); a top-level field that is a rule's target is
- * wrapped in a {@link RuleGatedField} so its visibility tracks the `when` field —
- * the contact/volunteer `method`-gated `email`/`phone`. Fields inside a
- * `nestedGroup` carry no top-level gate (the registration groups gate structurally
- * via the variant), so the recursion does not propagate `gateRules` inward.
+ * wrapped in a {@link RuleGatedField} so its visibility tracks the predicate's
+ * `when` field — the contact/volunteer `method`-gated `email`/`phone`. Fields
+ * inside a `nestedGroup` carry no top-level gate (the registration groups gate
+ * structurally via the variant), so the recursion does not propagate
+ * `activationGates` inward.
  */
 function FieldControl({
   field,
   prefix,
   locale,
   formId,
-  gateRules,
+  activationGates,
 }: {
   field: FieldKind;
   prefix: string;
   locale: Locale;
   formId: string;
-  gateRules?: ReadonlyMap<string, CrossFieldRule>;
+  activationGates?: ReadonlyMap<string, ActivationRule>;
 }) {
   if (field._tag === 'nestedGroup') {
     return (
@@ -220,7 +307,7 @@ function FieldControl({
   const control = (
     <LeafField field={field} name={`${prefix}${field.name}`} locale={locale} />
   );
-  const rule = gateRules?.get(field.name);
+  const rule = activationGates?.get(field.name);
   return rule ? (
     <RuleGatedField rule={rule} formId={formId}>
       {control}
@@ -301,18 +388,17 @@ export function FormFields({
 }) {
   const locale = useLocale();
 
-  // Index the `requiredWhenEquals` rules by their `target` so a gated top-level
-  // field (the `method`-gated `email`/`phone`) renders only when its `when` value
-  // is one of `equals` — reproducing the hand-tuned forms' conditional visibility
-  // so an inactive field is ABSENT from the POST, not a present blank its codec
-  // would reject (`derive-dont-sync`: the gate IS the rule).
-  const gateRules = React.useMemo(() => {
-    const map = new Map<string, CrossFieldRule>();
-    for (const rule of definition.rules ?? []) {
-      if (rule._tag === 'requiredWhenEquals') map.set(rule.target, rule);
-    }
-    return map;
-  }, [definition.rules]);
+  // Index the `activeWhenEquals` rules by their `target` (via the ONE shared
+  // `activationIndex`, the same index the decoder + `price()` build — `derive-
+  // dont-sync`) so a gated top-level field (the `method`-gated `email`/`phone`)
+  // renders only when its predicate holds — reproducing the hand-tuned forms'
+  // conditional visibility so an inactive field is ABSENT from the POST, not a
+  // present blank its codec would reject. After registrar Decision 5,
+  // `requiredWhenEquals` is presence-only and no longer drives visibility.
+  const activationGates = React.useMemo(
+    () => activationIndex(definition),
+    [definition],
+  );
 
   return (
     <>
@@ -323,7 +409,7 @@ export function FormFields({
           prefix=""
           locale={locale}
           formId={formId}
-          gateRules={gateRules}
+          activationGates={activationGates}
         />
       ))}
       {definition.variant ? (

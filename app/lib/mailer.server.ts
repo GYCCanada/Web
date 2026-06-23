@@ -22,9 +22,18 @@ export class MailError extends Schema.TaggedErrorClass<MailError>()(
 export class Service extends Context.Service<
   Service,
   {
+    /**
+     * Send one mail. `to` is OPTIONAL: omit it and the mail routes to the
+     * configured org inbox (`MAIL_TO`) — the historical contact / volunteer /
+     * registration-summary behaviour, byte-identical. Supply it to route the mail
+     * to an arbitrary recipient (the registrar's `perRegistrant` per-registrant
+     * Checkout-link mail, which must reach each registrant — NOT the org inbox).
+     * This is the ONE shared mail boundary; nothing mints a second transport.
+     */
     readonly send: (input: {
       readonly subject: string;
       readonly content: string;
+      readonly to?: string;
     }) => Effect.Effect<void, MailError>;
   }
 >()('gycc/lib/mailer.server/Service') {}
@@ -55,12 +64,19 @@ export const layer = Layer.effect(
     });
 
     const send = Effect.fn('Mailer.send')(
-      (input: { readonly subject: string; readonly content: string }) =>
+      (input: {
+        readonly subject: string;
+        readonly content: string;
+        readonly to?: string;
+      }) =>
         Effect.tryPromise({
           try: () =>
             transporter.sendMail({
               from: `GYCC Contact <${mail.from}>`,
-              to: mail.to,
+              // Default to the org inbox (`MAIL_TO`); a caller-supplied `to`
+              // routes the mail to that recipient instead (the per-registrant
+              // payment-link mail).
+              to: input.to ?? mail.to,
               subject: input.subject,
               text: input.content,
             }),

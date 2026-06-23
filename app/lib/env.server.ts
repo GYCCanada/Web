@@ -1,6 +1,8 @@
 export * as Env from './env.server';
 
-import { Config, Context, Effect, Layer, Option, Redacted } from 'effect';
+import { Config, Context, Effect, Layer, Option, Redacted, Schema } from 'effect';
+
+import { CurrencyCode } from './forms/pricing';
 
 /**
  * Environment configuration, ported from the former Zod-over-`process.env`
@@ -31,6 +33,12 @@ export interface MailConfig {
 export interface SendgridConfig {
   readonly apiKey: Redacted.Redacted<string>;
   readonly listId: string;
+}
+
+export interface StripeConfig {
+  readonly apiKey: Redacted.Redacted<string>;
+  readonly webhookSecret: Redacted.Redacted<string>;
+  readonly currency: CurrencyCode;
 }
 
 export interface BucketConfig {
@@ -72,6 +80,44 @@ const sendgridConfig: Config.Config<Option.Option<SendgridConfig>> = Config.all(
       ? Option.some<SendgridConfig>({
           apiKey: group.apiKey,
           listId: group.listId,
+        })
+      : Option.none(),
+  ),
+);
+
+/**
+ * Stripe payment config. Both `STRIPE_API_KEY` and `STRIPE_WEBHOOK_SECRET` must
+ * be non-blank for payments to be considered configured (same blank-collapse
+ * pattern as sendgrid/bucket). The registrar lands behind this `None`-gate:
+ * absent ⇒ the `Payment` service fails `PaymentDisabled`, the on-site path is
+ * inert. `currency` is the form-level settlement currency; GYC is CAD-only, so
+ * it defaults to `cad` and is decoded through the closed `CurrencyCode` brand —
+ * a present-but-unsupported token fails the layer at boot rather than silently
+ * mis-settling.
+ */
+const stripeConfig: Config.Config<Option.Option<StripeConfig>> = Config.all({
+  apiKey: Config.redacted('STRIPE_API_KEY').pipe(
+    Config.withDefault(Redacted.make('')),
+  ),
+  webhookSecret: Config.redacted('STRIPE_WEBHOOK_SECRET').pipe(
+    Config.withDefault(Redacted.make('')),
+  ),
+  currency: Config.string('STRIPE_CURRENCY').pipe(
+    Config.map((value) => value.trim().toLowerCase()),
+    Config.withDefault('cad'),
+    Config.mapOrFail((value) =>
+      Schema.decodeUnknownEffect(CurrencyCode)(value).pipe(
+        Effect.mapError((error) => new Config.ConfigError(error)),
+      ),
+    ),
+  ),
+}).pipe(
+  Config.map((group) =>
+    !isBlankRedacted(group.apiKey) && !isBlankRedacted(group.webhookSecret)
+      ? Option.some<StripeConfig>({
+          apiKey: group.apiKey,
+          webhookSecret: group.webhookSecret,
+          currency: group.currency,
         })
       : Option.none(),
   ),
@@ -134,6 +180,7 @@ export class Service extends Context.Service<
     readonly isProduction: boolean;
     readonly mail: Option.Option<MailConfig>;
     readonly sendgrid: Option.Option<SendgridConfig>;
+    readonly stripe: Option.Option<StripeConfig>;
     readonly bucket: Option.Option<BucketConfig>;
   }
 >()('gycc/lib/env.server/Service') {}
@@ -155,6 +202,7 @@ export const layer = Layer.effect(
 
     const bucket = yield* bucketConfig;
     const sendgrid = yield* sendgridConfig;
+    const stripe = yield* stripeConfig;
 
     if (isProduction) {
       const mail = yield* mailConfigRequired;
@@ -162,12 +210,13 @@ export const layer = Layer.effect(
         isProduction,
         mail: Option.some(mail),
         sendgrid,
+        stripe,
         bucket,
       });
     }
 
     const mail = yield* Config.option(mailConfigRequired);
-    return Service.of({ isProduction, mail, sendgrid, bucket });
+    return Service.of({ isProduction, mail, sendgrid, stripe, bucket });
   }),
 );
 

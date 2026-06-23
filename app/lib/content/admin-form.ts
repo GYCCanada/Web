@@ -212,12 +212,29 @@ export const assembleOverrides = (
     // checkbox, Feature C) is a real boolean — a bare `"true"`/`"false"` string
     // would NOT decode as `Schema.Boolean` (Codex #5/#12). The hidden-companion +
     // checkbox always post an `enabled` value, so this coercion is deterministic.
-    const coerced: Json =
-      (leaf === 'chapter' || leaf === 'verse') && value.trim() !== ''
-        ? Number(value)
-        : leaf === 'enabled'
-          ? value === 'true'
-          : value;
+    // The pricing/quantity leaves (`base`/`amount`/`unit`/`delta`/`min`/`max`, C9)
+    // are minor-unit `Cents`/`CentsDelta`/integer bounds — coerced to numbers so a
+    // form-authored pricing rule decodes at the `PricingRules` / `number`-kind
+    // boundary (an empty input is left absent, so an `optionalKey` bound stays
+    // omitted rather than decoding as `0`).
+    const isNumericLeaf =
+      leaf === 'chapter' ||
+      leaf === 'verse' ||
+      leaf === 'base' ||
+      leaf === 'amount' ||
+      leaf === 'unit' ||
+      leaf === 'delta' ||
+      leaf === 'min' ||
+      leaf === 'max';
+    // An EMPTY numeric leaf is skipped entirely (not set to `""`): a blank `max`
+    // input must leave the `optionalKey` bound ABSENT, so the override never
+    // carries a non-numeric string the `Cents`/integer boundary would reject.
+    if (isNumericLeaf && value.trim() === '') continue;
+    const coerced: Json = isNumericLeaf
+      ? Number(value)
+      : leaf === 'enabled'
+        ? value === 'true'
+        : value;
     setPath(root, path, coerced);
   }
   return root;

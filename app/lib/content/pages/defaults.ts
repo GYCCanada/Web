@@ -465,10 +465,15 @@ export const defaultTeamPage: TeamPage = Schema.decodeUnknownSync(TeamPage)({
  * The contact form's field graph (Branch 6.3) — the data-driven equivalent of the
  * hand-tuned `contact.tsx` schema, proven byte-equivalent by
  * `forms/equivalence.contact.test.ts`. `email`/`phone` are `optional: true`
- * (optional-at-key, non-empty-when-present) and the `method`-gated requirement is
- * the pair of `requiredWhenEquals` rules, exactly mirroring the oracle's
- * `Schema.optional(...)` + struct-level filter (`derive-dont-sync`: this object IS
- * the contact validation now, no hand-written schema beside it).
+ * (optional-at-key, non-empty-when-present). The `method`-gated behaviour is two
+ * orthogonal rule pairs (registrar plan Decision 5): an `activeWhenEquals` rule
+ * drives VISIBILITY (the field renders, and POSTs, only when `method` matches —
+ * absent otherwise, so its `optional: true` codec accepts the absence) and a
+ * `requiredWhenEquals` rule re-imposes PRESENCE server-side when shown. Before
+ * Decision 5 the `requiredWhenEquals` rule doubled as the visibility gate; that
+ * conflation is retired — the rules are now separate axes, behaviour-preserving
+ * (`derive-dont-sync`: this object IS the contact validation now, no hand-written
+ * schema beside it).
  */
 export const defaultContactForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
@@ -539,11 +544,29 @@ export const defaultContactForm: FormDefinition = Schema.decodeUnknownSync(
   ],
   rules: [
     {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'method',
+        equals: ['email', 'both'],
+      },
+      target: 'email',
+    },
+    {
       _tag: 'requiredWhenEquals',
       when: 'method',
       equals: ['email', 'both'],
       target: 'email',
       message: 'contact.form.email.required',
+    },
+    {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'method',
+        equals: ['phone', 'both'],
+      },
+      target: 'phone',
     },
     {
       _tag: 'requiredWhenEquals',
@@ -559,8 +582,10 @@ export const defaultContactForm: FormDefinition = Schema.decodeUnknownSync(
  * The volunteer form's field graph (Branch 6.4) — the data-driven equivalent of
  * the hand-tuned `volunteer.tsx` schema, proven byte-equivalent by
  * `forms/equivalence.volunteer.test.ts`. Like contact it carries the `method`
- * discriminator as a `literal` + the pair of `requiredWhenEquals` rules gating
- * `email`/`phone`; volunteer adds the always-required `age`/`location`/
+ * discriminator as a `literal` + the two orthogonal rule pairs gating
+ * `email`/`phone` (an `activeWhenEquals` rule for VISIBILITY, a
+ * `requiredWhenEquals` rule for server-side PRESENCE — registrar plan Decision 5);
+ * volunteer adds the always-required `age`/`location`/
  * `background`/`why` free-text fields (the latter two `multiline`). The fields
  * are listed in their rendered order (`volunteer.tsx` view order: name, method,
  * email/phone, age, location, background, why) so the migrated `<FormFields>`
@@ -688,11 +713,29 @@ export const defaultVolunteerForm: FormDefinition = Schema.decodeUnknownSync(
   ],
   rules: [
     {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'method',
+        equals: ['email', 'both'],
+      },
+      target: 'email',
+    },
+    {
       _tag: 'requiredWhenEquals',
       when: 'method',
       equals: ['email', 'both'],
       target: 'email',
       message: 'volunteer.form.email.required',
+    },
+    {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'method',
+        equals: ['phone', 'both'],
+      },
+      target: 'phone',
     },
     {
       _tag: 'requiredWhenEquals',
@@ -752,6 +795,13 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
       name: 'email',
       label: { en: 'Email', fr: 'Courriel' },
       placeholder: { en: 'example@mail.com', fr: 'example@mail.com' },
+      // optional-at-key (registrar plan 2b.3): an ABSENT registrant email
+      // decodes valid; a PRESENT blank still rejects. In `group` the shell
+      // drops blank non-leader emails before the per-registrant codec (C7);
+      // in `perRegistrant` the shell re-imposes presence on every registrant
+      // (C7.5). The relaxation is dormant until the published
+      // `forms/registration.json` is re-authored.
+      optional: true,
       requiredMessage: 'registration.form.email.required',
       invalidMessage: 'registration.form.email.error',
     },
@@ -1011,5 +1061,47 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
         ],
       },
     ],
+  },
+  // The CMS-authored party scope (registrar plan Decision 2b / C7a + C7.5). C7a
+  // authored GROUP-ONLY options; C7.5 adds the `perRegistrant` option NOW that the
+  // server branch which fans out per-registrant intents exists (the C7-standalone
+  // hazard the plan calls out: never offer a mode the server cannot yet handle).
+  // With BOTH modes offered the shell builds a real two-arm union — the selector
+  // renders (≥2 authored modes) and the live mode drives email-required + payment
+  // cardinality (the orthogonality table rows (i)/(ii)). The biconditional on
+  // FormDefinition requires a `payer` block here because `group` ∈ options keys.
+  // Every label is CMS-editable `Text`; the message keys are the tokens that
+  // shipped in `translations.ts` in C7a.
+  party: {
+    intro: {
+      en: 'Tell us how your party is paying.',
+      fr: 'Dites-nous comment votre groupe paie.',
+    },
+    billingMode: {
+      label: { en: 'How are you paying?', fr: 'Comment payez-vous?' },
+      requiredMessage: 'registration.party.billingMode.required',
+      options: {
+        group: {
+          en: 'One person pays for everyone',
+          fr: 'Une personne paie pour tout le monde',
+        },
+        perRegistrant: {
+          en: 'Each person pays for themselves',
+          fr: 'Chaque personne paie pour soi',
+        },
+      },
+    },
+    payer: {
+      label: { en: 'Who is paying?', fr: 'Qui paie?' },
+      nameField: {
+        label: { en: "Payer's name", fr: 'Nom du payeur' },
+        requiredMessage: 'registration.party.payer.name.required',
+      },
+      emailField: {
+        label: { en: "Payer's email", fr: 'Courriel du payeur' },
+        requiredMessage: 'registration.party.payer.email.required',
+        invalidMessage: 'registration.party.payer.email.error',
+      },
+    },
   },
 });

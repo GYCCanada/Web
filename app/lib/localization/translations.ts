@@ -127,6 +127,23 @@ const en = {
   'registration.form.success.title': 'Thank you for registering!',
   'registration.form.success.description':
     'Your registration has been received. We will be in touch with more details soon.',
+  'registration.checkout.success.title': 'Payment received',
+  'registration.checkout.success.description':
+    "Thanks for your payment. We're confirming it now — watch your email for your receipt and registration details. You don't need to submit the form again.",
+  'registration.checkout.cancelled.title': 'Payment not completed',
+  'registration.checkout.cancelled.description':
+    'Your registration was saved but payment was not completed. Submit the form again when you are ready to finish paying.',
+  // perRegistrant pays one-link-per-person: each registrant gets their OWN
+  // Checkout URL by email (we do NOT redirect — a single browser can only start
+  // one of N checkouts). The success toast is honest that nothing is paid yet.
+  'registration.checkout.perRegistrant.success.title': 'Payment links sent',
+  'registration.checkout.perRegistrant.success.description':
+    "We've emailed each person their own payment link. Each registrant pays separately — check your email to finish. Nothing is paid until each link is completed.",
+  'registration.checkout.perRegistrant.email.subject':
+    'Your GYC Canada registration payment link',
+  // {{name}} = the registrant's name; {{url}} = their hosted Checkout URL.
+  'registration.checkout.perRegistrant.email.body':
+    'Hi {{name}},\n\nYour GYC Canada registration is saved. To complete your payment, open your personal Checkout link below:\n\n{{url}}\n\nThis link is yours alone — each registrant pays separately. Your registration is not confirmed until payment is completed.\n\nSee you soon,\nGYC Canada',
   'registration.form.attendee': 'Attendee',
   'registration.form.exhibitor': 'Exhibitor',
   'registration.form.type.required':
@@ -260,6 +277,18 @@ const en = {
   'registration.form.website.label': 'Website',
   'registration.form.website.placeholder': 'Enter your website here',
   'registration.form.website.required': 'Please enter your website',
+
+  // Party-scope chrome (registrar plan Decision 2b / C7a). These MessageKey
+  // *tokens* ship here (a one-time deploy); their en/fr strings — and ALL the
+  // party `Text` labels authored in `forms/registration.json` — are thereafter
+  // CMS-editable with no deploy. Validated at the brand boundary by `MessageKey`.
+  'registration.party.billingMode.required': 'Please choose a payment option',
+  'registration.party.payer.name.required':
+    "Please enter the payer's name",
+  'registration.party.payer.email.required':
+    "Please enter the payer's email",
+  'registration.party.payer.email.error':
+    "Please enter a valid email for the payer",
 
   'registration.form.submit': 'Submit',
 } as const;
@@ -395,6 +424,19 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.success.title': 'Merci de votre inscription!',
   'registration.form.success.description':
     'Votre inscription a bien été reçue. Nous vous contacterons bientôt avec plus de détails.',
+  'registration.checkout.success.title': 'Paiement reçu',
+  'registration.checkout.success.description':
+    "Merci pour votre paiement. Nous le confirmons en ce moment — surveillez votre courriel pour votre reçu et les détails de votre inscription. Vous n'avez pas besoin de soumettre le formulaire à nouveau.",
+  'registration.checkout.cancelled.title': "Paiement non complété",
+  'registration.checkout.cancelled.description':
+    "Votre inscription a été enregistrée mais le paiement n'a pas été complété. Soumettez le formulaire à nouveau lorsque vous serez prêt à finaliser le paiement.",
+  'registration.checkout.perRegistrant.success.title': 'Liens de paiement envoyés',
+  'registration.checkout.perRegistrant.success.description':
+    "Nous avons envoyé à chaque personne son propre lien de paiement. Chaque inscrit paie séparément — consultez votre courriel pour finaliser. Rien n'est payé tant que chaque lien n'est pas complété.",
+  'registration.checkout.perRegistrant.email.subject':
+    'Votre lien de paiement pour l\'inscription à GYC Canada',
+  'registration.checkout.perRegistrant.email.body':
+    "Bonjour {{name}},\n\nVotre inscription à GYC Canada est enregistrée. Pour compléter votre paiement, ouvrez votre lien de paiement personnel ci-dessous :\n\n{{url}}\n\nCe lien vous est réservé — chaque inscrit paie séparément. Votre inscription n'est pas confirmée tant que le paiement n'est pas complété.\n\nÀ bientôt,\nGYC Canada",
   'registration.form.attendee': 'Participant',
   'registration.form.exhibitor': 'Exposant',
   'registration.form.type.required':
@@ -548,6 +590,14 @@ const fr: Record<TranslationKey, string> = {
   'registration.form.website.label': 'Site Web',
   'registration.form.website.placeholder': 'Entrez votre site Web ici',
   'registration.form.website.required': 'Veuillez entrer votre site Web',
+  'registration.party.billingMode.required':
+    'Veuillez choisir une option de paiement',
+  'registration.party.payer.name.required':
+    'Veuillez entrer le nom du payeur',
+  'registration.party.payer.email.required':
+    'Veuillez entrer le courriel du payeur',
+  'registration.party.payer.email.error':
+    'Veuillez entrer un courriel valide pour le payeur',
   'registration.form.submit': 'Soumettre',
 };
 

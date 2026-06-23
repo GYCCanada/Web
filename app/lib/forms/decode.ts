@@ -1,6 +1,7 @@
 import { Result, Schema, SchemaGetter } from 'effect';
 import type { Issue } from 'effect/SchemaIssue';
 
+import { activationIndex, isActiveByName } from './activation';
 import type {
   CrossFieldRule,
   FieldKind,
@@ -68,8 +69,16 @@ type Encoded = Record<string, unknown>;
 // Leaf codecs — one per FieldKind, mirroring the hand-tuned annotation idiom
 // ---------------------------------------------------------------------------
 
-/** Required free-text: empty, absent, and non-string all emit `message`. */
-const requiredString = (message: MessageKey) =>
+/**
+ * Required free-text: empty, absent, and non-string all emit `message`.
+ *
+ * EXPORTED (registrar plan C7): the route-owned party shell
+ * (`registration-shell.ts`) is a new caller — it builds the `group`-arm payer's
+ * `name` codec from the authored `requiredMessage` with the same idiom the engine
+ * uses for a `requiredText` leaf, rather than re-declaring a parallel non-empty
+ * string codec (`derive-dont-sync`).
+ */
+export const requiredString = (message: MessageKey) =>
   Schema.String.annotate({ message })
     .check(Schema.isMinLength(1, { message }))
     .annotateKey({ messageMissingKey: message });
@@ -110,8 +119,15 @@ const optionalText = (message: MessageKey) =>
 const presentEmptyAllowedText = (message: MessageKey) =>
   Schema.String.annotate({ message }).annotateKey({ messageMissingKey: message });
 
-/** Required email: empty/absent emit `requiredMessage`, malformed emits `invalidMessage`. */
-const email = (requiredMessage: MessageKey, invalidMessage: MessageKey) =>
+/**
+ * Required email: empty/absent emit `requiredMessage`, malformed emits `invalidMessage`.
+ *
+ * EXPORTED (registrar plan C7): the route-owned party shell
+ * (`registration-shell.ts`) decodes the `group`-arm payer's required `email`
+ * through this very codec, so the nominated payer's address is validated by the
+ * SAME permissive-email shape every form `email` field uses (`derive-dont-sync`).
+ */
+export const email = (requiredMessage: MessageKey, invalidMessage: MessageKey) =>
   Schema.String.annotate({ message: invalidMessage })
     .check(
       Schema.isMinLength(1, { message: requiredMessage }),
@@ -156,6 +172,39 @@ const stringToBoolean = (message: MessageKey) =>
     )
     .annotate({ message });
 
+/**
+ * The non-negative-integer count codec (C9): the browser submits the count as a
+ * STRING, so this parses it to a real integer and runs the field's inclusive
+ * `min`/`max` bounds. An empty / absent value emits `requiredMessage` (a count was
+ * required but not entered); a non-numeric, non-integer, or out-of-range value
+ * emits `invalidMessage`. The decoded value is a real `number`, exactly what
+ * `price.ts`'s `quantity` rule multiplies — no raw-string handling downstream
+ * (`boundary-discipline`). Mirrors `stringToBoolean`'s string→typed transform.
+ */
+const numberFromString = (
+  requiredMessage: MessageKey,
+  invalidMessage: MessageKey,
+  min: number | undefined,
+  max: number | undefined,
+) => {
+  const bounds = [
+    Schema.isInt({ message: invalidMessage }),
+    Schema.isGreaterThanOrEqualTo(min ?? 0, { message: invalidMessage }),
+    ...(max !== undefined
+      ? [Schema.isLessThanOrEqualTo(max, { message: invalidMessage })]
+      : []),
+  ] as const;
+  return Schema.String.annotate({ message: invalidMessage })
+    .check(Schema.isMinLength(1, { message: requiredMessage }))
+    .pipe(
+      Schema.decodeTo(Schema.Number.check(...bounds), {
+        decode: SchemaGetter.transform((value) => Number(value)),
+        encode: SchemaGetter.transform((value) => String(value)),
+      }),
+    )
+    .annotateKey({ messageMissingKey: requiredMessage });
+};
+
 /** Required multi-select over a closed option set: an off-list element emits `message`. */
 const arrayOfLiteral = (
   options: ReadonlyArray<{ readonly value: string }>,
@@ -178,6 +227,7 @@ const arrayOfLiteral = (
  */
 const fieldToRequiredSchema = (
   field: FieldKind,
+  activationTargets: ReadonlySet<string>,
 ): Schema.Top => {
   switch (field._tag) {
     case 'requiredText':
@@ -198,8 +248,15 @@ const fieldToRequiredSchema = (
       });
     case 'arrayOfLiteral':
       return arrayOfLiteral(field.options, field.requiredMessage);
+    case 'number':
+      return numberFromString(
+        field.requiredMessage,
+        field.invalidMessage,
+        field.min,
+        field.max,
+      );
     case 'nestedGroup':
-      return Schema.Struct(buildStructFields(field.fields));
+      return Schema.Struct(buildStructFields(field.fields, activationTargets));
   }
 };
 
@@ -211,6 +268,7 @@ const fieldToRequiredSchema = (
  */
 const fieldToStructEntry = (
   field: FieldKind,
+  activationTargets: ReadonlySet<string>,
 ): readonly [string, Schema.Top] => {
   if (field._tag === 'optionalText') {
     return [
@@ -239,7 +297,8 @@ const fieldToStructEntry = (
   if (
     (field._tag === 'requiredText' ||
       field._tag === 'email' ||
-      field._tag === 'url') &&
+      field._tag === 'url' ||
+      field._tag === 'number') &&
     field.optional === true
   ) {
     const invalidTypeMessage =
@@ -247,21 +306,45 @@ const fieldToStructEntry = (
     return [
       field.name,
       Schema.optional(
-        fieldToRequiredSchema(field) as Schema.Codec<unknown, unknown>,
+        fieldToRequiredSchema(field, activationTargets) as Schema.Codec<
+          unknown,
+          unknown
+        >,
       ).annotate({ message: invalidTypeMessage }),
     ];
   }
-  return [field.name, fieldToRequiredSchema(field)];
+  return [field.name, fieldToRequiredSchema(field, activationTargets)];
 };
+
+/**
+ * An `activeWhenEquals` target is optional-AT-KEY at the struct level so an
+ * INACTIVE (legitimately absent) value decodes; the activation guard in
+ * {@link makePresenceFilter} then re-imposes presence WHEN active and rejects a
+ * PRESENT-but-inactive value as an out-of-form payload (registrar plan Decision
+ * 5's four decode rows). A target that is ALREADY optional-at-key (an
+ * `optionalText`, an `optional: true` leaf) is unchanged — wrapping is only the
+ * absent-decodes guarantee, which it already has. `Schema.optional` (not
+ * `optionalKey`) mirrors the variant/cross-field-gated wrapping idiom (accepts an
+ * explicit `undefined` too); a present value still runs the kind's full codec.
+ */
+const asActivatable = (
+  schema: Schema.Top,
+  name: string,
+  activationTargets: ReadonlySet<string>,
+): Schema.Top =>
+  activationTargets.has(name)
+    ? Schema.optional(schema as Schema.Codec<unknown, unknown>)
+    : schema;
 
 /** Build the `Schema.Struct` field map for a list of fields. */
 const buildStructFields = (
   fields: ReadonlyArray<FieldKind>,
+  activationTargets: ReadonlySet<string>,
 ): Record<string, Schema.Top> => {
   const entries: Record<string, Schema.Top> = {};
   for (const field of fields) {
-    const [name, schema] = fieldToStructEntry(field);
-    entries[name] = schema;
+    const [name, schema] = fieldToStructEntry(field, activationTargets);
+    entries[name] = asActivatable(schema, name, activationTargets);
   }
   return entries;
 };
@@ -278,6 +361,7 @@ const buildStructFields = (
  */
 const buildVariantOptionalFields = (
   variant: FormVariantSet,
+  activationTargets: ReadonlySet<string>,
 ): Record<string, Schema.Top> => {
   const entries: Record<string, Schema.Top> = {};
   // The discriminator itself is always required (its absent/off-list value
@@ -289,7 +373,7 @@ const buildVariantOptionalFields = (
     .annotateKey({ messageMissingKey: variant.requiredMessage });
   for (const branch of variant.variants) {
     for (const field of branch.fields) {
-      const [name, schema] = fieldToStructEntry(field);
+      const [name, schema] = fieldToStructEntry(field, activationTargets);
       // Already optional (optionalText / optional checkbox) → keep as-is; an
       // inherently-required leaf is wrapped so the off-variant doesn't demand it.
       entries[name] = Schema.optional(schema as Schema.Codec<unknown, unknown>);
@@ -437,7 +521,7 @@ const variantPresenceIssues = (
  * an empty-permitting `optionalText` target.
  */
 const rulePresenceIssue = (
-  rule: CrossFieldRule,
+  rule: Extract<CrossFieldRule, { _tag: 'requiredWhenEquals' }>,
   value: Record<string, unknown>,
 ): PresenceIssue | undefined => {
   const trigger = value[rule.when];
@@ -451,31 +535,155 @@ const rulePresenceIssue = (
 };
 
 /**
- * The SINGLE struct-level presence filter for a definition: the variant's
- * selected-branch requirements plus every cross-field rule, accumulated into one
- * issue list. Composing one accumulating filter (rather than chaining a
- * `.check` per concern) matches the oracle's single struct-level
- * `Schema.makeFilter` and is REQUIRED for fidelity — chained `.check`s ABORT
- * after the first failing filter (Effect's default), so two unsatisfied rules
- * (the contact/volunteer `email`+`phone` pair) would surface only one. One
- * filter collecting all issues reproduces the oracle's "report multiple failures
- * at once" behaviour without depending on a non-default `errors: 'all'` decode.
+ * The two `MessageKey`s an `activeWhenEquals` target carries for its activation
+ * rows (registrar plan Decision 5), keyed by the field name:
+ *   - `requiredMessage` — the active-but-absent key (the target is now required).
+ *     PRESENT only for a presence-requirable leaf; `undefined` for an
+ *     intrinsically-optional target (an `optionalText`, an `optional: true`
+ *     leaf), which has no presence requirement when active (absence is valid).
+ *   - `rejectMessage` — the present-but-inactive (out-of-form payload) key,
+ *     emitted UNCONDITIONALLY for ANY indexed target regardless of optionality
+ *     (registrar-plan.md:548 — row 2 is an unconditional reject). The kind's own
+ *     `invalidMessage` when it carries one (the smuggled value is malformed by
+ *     definition — it should not be in the payload at all), else its
+ *     `requiredMessage`. This mirrors `extra.other`'s out-of-form reject and
+ *     enforces the decode-boundary "a smuggled value NEVER reaches price()"
+ *     defense for the blessed `active ∧ optional ∧ priced` shape
+ *     (registrar-plan.md:481-482).
+ * A `nestedGroup` carries neither single key (its presence is anchored, not a
+ * single leaf) and is absent from the index.
  */
-const makePresenceFilter = (definition: FormDefinition) =>
-  Schema.makeFilter(
+type ActivationTargetKeys = {
+  readonly requiredMessage?: MessageKey;
+  readonly rejectMessage: MessageKey;
+};
+
+/**
+ * The out-of-form (present-but-inactive) reject `MessageKey` of any activatable
+ * leaf: its `invalidMessage` when the kind carries one, else its
+ * `requiredMessage`. A `nestedGroup` (no single leaf key) is excluded.
+ */
+const activationRejectMessageOf = (
+  field: Exclude<FieldKind, { _tag: 'nestedGroup' }>,
+): MessageKey =>
+  ('invalidMessage' in field
+    ? field.invalidMessage
+    : field.requiredMessage) as MessageKey;
+
+const activationTargetKeys = (
+  definition: FormDefinition,
+): ReadonlyMap<string, ActivationTargetKeys> => {
+  const keys = new Map<string, ActivationTargetKeys>();
+  const collect = (fields: ReadonlyArray<FieldKind>): void => {
+    for (const field of fields) {
+      if (field._tag === 'nestedGroup') continue;
+      keys.set(field.name, {
+        requiredMessage: isPresenceRequirableLeaf(field)
+          ? (field.requiredMessage as MessageKey)
+          : undefined,
+        rejectMessage: activationRejectMessageOf(field),
+      });
+    }
+  };
+  collect(definition.fields);
+  for (const branch of definition.variant?.variants ?? []) {
+    collect(branch.fields);
+  }
+  return keys;
+};
+
+/**
+ * The activation issues an `activeWhenEquals` rule imposes on the decoded value
+ * (registrar plan Decision 5's four decode rows). `target` is modelled
+ * optional-at-key ({@link asActivatable}) so an INACTIVE-absent value decodes;
+ * this filter re-imposes the rest:
+ *   - active + absent  ⇒ REJECT (now required) — emit the target's
+ *     `requiredMessage`, BUT only when the target carries one: an
+ *     intrinsically-optional active target (an `optionalText`, an `optional: true`
+ *     leaf) has no presence requirement, so its absence is valid;
+ *   - present + inactive ⇒ REJECT (out-of-form payload) — emit the target's
+ *     `rejectMessage` UNCONDITIONALLY for ANY indexed target, regardless of
+ *     optionality (registrar-plan.md:548), so a smuggled value on an optional
+ *     priced activation target (the blessed `active ∧ optional ∧ priced` shape,
+ *     registrar-plan.md:481-482) is rejected at the decode boundary and NEVER
+ *     reaches price() — mirroring `extra.other`'s out-of-form reject;
+ *   - active + present / inactive + absent ⇒ valid (the struct codec already ran
+ *     the kind codec for a present value).
+ * The two rows are independent: the active-absent row is GATED on a presence
+ * requirement (skip when `requiredMessage` is undefined), the present-inactive
+ * row is not.
+ */
+const activationPresenceIssues = (
+  definition: FormDefinition,
+  index: ReadonlyMap<string, Extract<CrossFieldRule, { _tag: 'activeWhenEquals' }>>,
+  targetKeys: ReadonlyMap<string, ActivationTargetKeys>,
+  value: Record<string, unknown>,
+): ReadonlyArray<PresenceIssue> => {
+  const issues: Array<PresenceIssue> = [];
+  for (const [target] of index) {
+    const keys = targetKeys.get(target);
+    if (keys === undefined) continue;
+    const active = isActiveByName(target, index, value);
+    const present = value[target] !== undefined;
+    if (active && !present) {
+      // Active-but-absent is only a violation when the target is itself
+      // presence-requirable; an intrinsically-optional active target may be absent.
+      if (keys.requiredMessage !== undefined) {
+        issues.push({ path: [target], issue: keys.requiredMessage });
+      }
+    } else if (!active && present) {
+      // Present-but-inactive is ALWAYS an out-of-form payload — reject regardless
+      // of whether the target carries a presence requirement.
+      issues.push({ path: [target], issue: keys.rejectMessage });
+    }
+  }
+  return issues;
+};
+
+/**
+ * The SINGLE struct-level presence filter for a definition: the variant's
+ * selected-branch requirements, every cross-field rule, AND the activation rows
+ * (registrar plan Decision 5), accumulated into one issue list. Composing one
+ * accumulating filter (rather than chaining a `.check` per concern) matches the
+ * oracle's single struct-level `Schema.makeFilter` and is REQUIRED for fidelity —
+ * chained `.check`s ABORT after the first failing filter (Effect's default), so
+ * two unsatisfied rules (the contact/volunteer `email`+`phone` pair) would
+ * surface only one. One filter collecting all issues reproduces the oracle's
+ * "report multiple failures at once" behaviour without depending on a non-default
+ * `errors: 'all'` decode.
+ *
+ * An `activeWhenEquals` target's presence is GATED by activation, so its row is
+ * skipped from the plain variant/rule presence checks (it is optional-at-key) and
+ * handled by {@link activationPresenceIssues} instead — the one place the four
+ * decode rows live (`derive-dont-sync`: the same `isActiveByName` price/render
+ * read).
+ */
+const makePresenceFilter = (definition: FormDefinition) => {
+  const index = activationIndex(definition);
+  const targetKeys = activationTargetKeys(definition);
+  return Schema.makeFilter(
     (value: Record<string, unknown>) => {
       const issues: Array<PresenceIssue> = [];
       if (definition.variant) {
-        issues.push(...variantPresenceIssues(definition.variant, value));
+        for (const issue of variantPresenceIssues(definition.variant, value)) {
+          // An activation target's presence is the activation filter's job — the
+          // variant must not ALSO demand a (possibly-inactive) field.
+          if (!index.has(String(issue.path[0]))) issues.push(issue);
+        }
       }
       for (const rule of definition.rules ?? []) {
+        if (rule._tag !== 'requiredWhenEquals') continue;
         const issue = rulePresenceIssue(rule, value);
         if (issue) issues.push(issue);
       }
+      issues.push(
+        ...activationPresenceIssues(definition, index, targetKeys, value),
+      );
       return issues.length === 0 ? undefined : issues;
     },
     { title: 'FormDefinition.presence' },
   );
+};
 
 // ---------------------------------------------------------------------------
 // definitionToSchema — compile a FormDefinition into a validating codec
@@ -495,11 +703,18 @@ const makePresenceFilter = (definition: FormDefinition) =>
 export const definitionToSchema = (
   definition: FormDefinition,
 ): Schema.Codec<DecodedForm, Encoded> => {
+  // An `activeWhenEquals` target is optional-at-key so an inactive value decodes;
+  // the presence filter re-imposes activation's four decode rows.
+  const activationTargets = new Set(activationIndex(definition).keys());
   const fields: Record<string, Schema.Top> = buildStructFields(
     definition.fields,
+    activationTargets,
   );
   if (definition.variant) {
-    Object.assign(fields, buildVariantOptionalFields(definition.variant));
+    Object.assign(
+      fields,
+      buildVariantOptionalFields(definition.variant, activationTargets),
+    );
   }
 
   const struct = Schema.Struct(fields).check(

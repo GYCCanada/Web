@@ -1,7 +1,9 @@
 import { Schema } from 'effect';
 
 import { Text } from '../content/schema';
-import { root } from '../localization/translations';
+import { PartySection } from './party';
+import { PricingRules } from './pricing';
+import { FieldName, MessageKey, OptionValue } from './tokens';
 
 /**
  * The structural `FormDefinition` schema (ADR 0007, CONTEXT §Form definition;
@@ -48,54 +50,14 @@ import { root } from '../localization/translations';
 // Leaf brands — message keys, field names, literal option tokens
 // ---------------------------------------------------------------------------
 
-/** The closed set of valid translation keys, consulted at decode time. */
-const TRANSLATION_KEYS: ReadonlySet<string> = new Set(Object.keys(root.en));
-
-const messageKeyFilter = Schema.makeFilter<string>(
-  (key) =>
-    TRANSLATION_KEYS.has(key)
-      ? undefined
-      : `MessageKey must be a known TranslationKey; "${key}" is not in translations`,
-  { title: 'MessageKey' },
-);
-
-/**
- * A form-validation error message: a real `TranslationKey`, validated at the
- * boundary against the live `translations` object (`derive-dont-sync`). The
- * generic decoder (Branch 6.2) emits these keys verbatim on each failure path, so
- * an off-list key would render blank in `FieldErrors` — it is rejected here
- * instead (`make-impossible-states-unrepresentable`). The brand keeps the
- * guarantee load-bearing past the decoder; the generic decoder (Branch 6.2)
- * hands a decoded `MessageKey` to `translate()` knowing the boundary already
- * proved it is a real `TranslationKey`.
- */
-export const MessageKey = Schema.NonEmptyString.check(messageKeyFilter).pipe(
-  Schema.brand('MessageKey'),
-);
-export type MessageKey = typeof MessageKey.Type;
-
-/**
- * A field's submit-name — the key the browser POSTs and the path segment the
- * decoder addresses. Constrained to a JS-identifier-like token (`a-z`, `A-Z`,
- * `0-9`, `_`) so a hand-edited definition cannot smuggle a dotted path, a `[`, or
- * whitespace into a name the decoder interpolates into a form-data path
- * (`boundary-discipline`).
- */
-export const FieldName = Schema.NonEmptyString.check(
-  Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]*$/, { title: 'FieldName' }),
-).pipe(Schema.brand('FieldName'));
-export type FieldName = typeof FieldName.Type;
-
-/**
- * A `literal` / `arrayOfLiteral` option value — the token submitted when an
- * option is chosen (e.g. `"attendee"`, `"t-shirt"`, `"male"`). A constrained
- * token (no whitespace, the URL-safe-ish set) so it is safe in a radio `value`
- * and an off-list value is a hard decode error in the generated codec.
- */
-export const OptionValue = Schema.NonEmptyString.check(
-  Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: 'OptionValue' }),
-).pipe(Schema.brand('OptionValue'));
-export type OptionValue = typeof OptionValue.Type;
+// `FieldName` / `OptionValue` / `MessageKey` are defined in the leaf `tokens.ts`
+// (shared with `pricing.ts` AND `party.ts` without an import cycle — `party`
+// keys its chrome off `MessageKey`, so a `definition ↔ party` mutual import
+// would otherwise hit a module-init temporal-dead-zone on the brand) and
+// re-exported here so every existing importer (`decode`, `render`, the admin
+// routes, the party-scope spike) keeps importing them from `definition`. They
+// are also imported above for use in this module's schemas.
+export { FieldName, MessageKey, OptionValue } from './tokens';
 
 /**
  * One selectable option of a `literal` / `arrayOfLiteral` field: its submitted
@@ -118,6 +80,15 @@ const nonEmptyOptions = Schema.makeFilter<ReadonlyArray<unknown>>(
 
 const OptionList = Schema.Array(FieldOption).check(nonEmptyOptions);
 
+/**
+ * A non-negative integer bound for a `number` field (`min` / `max`): a count is
+ * never fractional and never below zero (`Schema.Int.check(isGreaterThanOrEqual
+ * To(0))`, the same brand idiom `pricing.ts`'s `Cents` uses). Quantity pricing
+ * multiplies a clamped count by a per-unit `Cents`, so a fractional or negative
+ * bound is meaningless (`make-impossible-states-unrepresentable`).
+ */
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
 // ---------------------------------------------------------------------------
 // FieldKind — the CLOSED set of field kinds
 // ---------------------------------------------------------------------------
@@ -133,7 +104,7 @@ type FieldChrome<Name, Txt> = {
   readonly label: Txt;
   readonly placeholder?: Txt;
 };
-type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
+type FieldKindShape<Name, Txt, Msg, Opt, Bool, Num> =
   | ({
       readonly _tag: 'requiredText';
       readonly optional?: Bool;
@@ -169,6 +140,14 @@ type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
       readonly requiredMessage: Msg;
     } & FieldChrome<Name, Txt>)
   | ({
+      readonly _tag: 'number';
+      readonly optional?: Bool;
+      readonly min?: Num;
+      readonly max?: Num;
+      readonly requiredMessage: Msg;
+      readonly invalidMessage: Msg;
+    } & FieldChrome<Name, Txt>)
+  | ({
       readonly _tag: 'arrayOfLiteral';
       readonly options: ReadonlyArray<{ readonly value: Opt; readonly label: Txt }>;
       readonly requiredMessage: Msg;
@@ -179,7 +158,9 @@ type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
       readonly label: Txt;
       readonly optional?: Bool;
       readonly presenceAnchor?: Name;
-      readonly fields: ReadonlyArray<FieldKindShape<Name, Txt, Msg, Opt, Bool>>;
+      readonly fields: ReadonlyArray<
+        FieldKindShape<Name, Txt, Msg, Opt, Bool, Num>
+      >;
     };
 
 /** The decoded `FieldKind` (brands load-bearing). */
@@ -188,7 +169,8 @@ export type FieldKind = FieldKindShape<
   Text,
   MessageKey,
   OptionValue,
-  boolean
+  boolean,
+  number
 >;
 /** The encoded `FieldKind` — the JSON shape (brands erased to plain strings). */
 type FieldKindEncoded = FieldKindShape<
@@ -196,7 +178,8 @@ type FieldKindEncoded = FieldKindShape<
   { readonly en: string; readonly fr: string },
   string,
   string,
-  boolean
+  boolean,
+  number
 >;
 
 /**
@@ -278,6 +261,13 @@ const fieldChrome = {
  *   - `checkboxBoolean` — a `true` / `false` / `on` checkbox-boolean; an off-token
  *     or absent value emits `requiredMessage`. `optional: true` makes an unchecked
  *     (absent) box valid (the volunteer single-checkboxes).
+ *   - `number`          — a non-negative integer count (a quantity field): an
+ *     absent/empty value emits `requiredMessage`, a non-integer / out-of-range
+ *     value emits `invalidMessage`. `optional: true` makes an absent key valid (a
+ *     count not entered); `min`/`max` are inclusive integer bounds. The
+ *     `quantity` pricing rule multiplies a `clamp(qty, 0, max)` by a per-unit
+ *     `Cents` (`price.ts`); the kind is what `pricingReferencesResolve` requires a
+ *     `quantity` rule's `field` to be.
  *   - `arrayOfLiteral`  — a multi-select over a closed `OptionList`; an off-list
  *     element or absent array emits `requiredMessage`.
  *   - `nestedGroup`     — a sub-struct of further `FieldKind`s (the `parent`,
@@ -339,6 +329,19 @@ export const FieldKind = Schema.TaggedUnion({
     ...fieldChrome,
     optional: Schema.optionalKey(Schema.Boolean),
     requiredMessage: MessageKey,
+  },
+  number: {
+    ...fieldChrome,
+    optional: Schema.optionalKey(Schema.Boolean),
+    // Inclusive integer bounds the quantity is clamped/validated against. Both
+    // are non-negative integers (a count is never below zero, never fractional);
+    // `optionalKey` so a bound is omitted when unconstrained on that side. The
+    // `from <= to` ordering is not asserted here (a single-sided bound is the
+    // common case); `price()`'s `clamp(qty, 0, max)` is total regardless.
+    min: Schema.optionalKey(NonNegativeInt),
+    max: Schema.optionalKey(NonNegativeInt),
+    requiredMessage: MessageKey,
+    invalidMessage: MessageKey,
   },
   arrayOfLiteral: {
     ...fieldChrome,
@@ -475,17 +478,67 @@ const nonEmptyEquals = Schema.makeFilter<ReadonlyArray<unknown>>(
   { title: 'requiredWhenEquals.equals' },
 );
 
+/** An `activeWhen` literal/array predicate must name at least one trigger value. */
+const nonEmptyActivationValues = Schema.makeFilter<ReadonlyArray<unknown>>(
+  (values) =>
+    values.length > 0
+      ? undefined
+      : 'activeWhen must name at least one trigger value',
+  { title: 'ActiveWhen.values' },
+);
+
+/**
+ * The CLOSED activation predicate of an `activeWhenEquals` rule (registrar plan
+ * Decision 5). Activation — does a field render / get required / get priced —
+ * is keyed off a SIBLING's chosen value, but the trigger is not always a single
+ * literal equality: it must also cover a multi-select gate and a checkbox gate.
+ * A tagged union over exactly the three predicate shapes the engine evaluates
+ * (`make-impossible-states-unrepresentable` — a definition cannot invent a
+ * fourth):
+ *
+ *   - `literalEquals`    — the `when` `literal` equals one of `equals`;
+ *   - `arrayIncludesAny` — the `when` `arrayOfLiteral` includes one of `values`;
+ *   - `checkboxChecked`  — the `when` `checkboxBoolean` is checked (`true`).
+ *
+ * The decode-time integrity filter (`rulesReferToExistingFields`) proves each
+ * arm's `when` names an existing field of the matching kind, in the SAME scope
+ * as the rule's `target`, and that every `equals`/`values` token is one of that
+ * field's options — so the runtime evaluator (`activation.ts`) reads the decoded
+ * value with no further guarding.
+ */
+export const ActiveWhen = Schema.TaggedUnion({
+  literalEquals: {
+    when: FieldName,
+    equals: Schema.Array(OptionValue).check(nonEmptyActivationValues),
+  },
+  arrayIncludesAny: {
+    when: FieldName,
+    values: Schema.Array(OptionValue).check(nonEmptyActivationValues),
+  },
+  checkboxChecked: {
+    when: FieldName,
+  },
+});
+export type ActiveWhen = typeof ActiveWhen.Type;
+
 /**
  * A CLOSED set of cross-field requirement rules — the validity no single-field
- * check can express (CONTEXT §Form definition). One kind today:
+ * check can express (CONTEXT §Form definition). Two kinds:
  *
  *   - `requiredWhenEquals` — the `target` field is required when the `when` field
  *     equals one of `equals` (e.g. contact's email is required when `method` is
  *     `email` or `both`); the failure emits `message` at the `target` path.
+ *   - `activeWhenEquals` — the `target` field is ACTIVE (rendered, presence-
+ *     required, price-eligible) only when its `predicate` holds over a sibling;
+ *     absent ⇒ always active (registrar plan Decision 5). Activation has no
+ *     failure message of its OWN — it GATES other checks (render hides an
+ *     inactive field, the decoder skips its presence requirement, `price()`
+ *     contributes 0), so it carries no `message`. A PRESENT value for an inactive
+ *     target is an out-of-form payload the decoder rejects at the target's path
+ *     (`decode.ts`).
  *
- * Modelled as a tagged union so a later rule kind (e.g. `requiredWhenPresent`) is
- * a new variant, never a free-form predicate string
- * (`make-impossible-states-unrepresentable`).
+ * Modelled as a tagged union so a later rule kind is a new variant, never a
+ * free-form predicate string (`make-impossible-states-unrepresentable`).
  */
 export const CrossFieldRule = Schema.TaggedUnion({
   requiredWhenEquals: {
@@ -493,6 +546,10 @@ export const CrossFieldRule = Schema.TaggedUnion({
     equals: Schema.Array(OptionValue).check(nonEmptyEquals),
     target: FieldName,
     message: MessageKey,
+  },
+  activeWhenEquals: {
+    predicate: ActiveWhen,
+    target: FieldName,
   },
 });
 export type CrossFieldRule = typeof CrossFieldRule.Type;
@@ -502,12 +559,391 @@ export type CrossFieldRule = typeof CrossFieldRule.Type;
 // ---------------------------------------------------------------------------
 
 /**
+ * The encoded shape a pricing-reference walk needs from each field: its `_tag`,
+ * its `name`, the `options` of a `literal` / `arrayOfLiteral`, and the nested
+ * `fields` of a `nestedGroup`. A loose structural mirror (the filter runs on the
+ * ENCODED `FormDefinition`, pre-brand, exactly like `variantsMatchOptions`).
+ */
+type EncodedFieldNode = {
+  readonly _tag: string;
+  readonly name: string;
+  readonly options?: ReadonlyArray<{ readonly value: string }>;
+  readonly fields?: ReadonlyArray<EncodedFieldNode>;
+};
+
+/**
+ * A pricing rule keyed to a field/option that does not exist — or to a field of
+ * the wrong kind — is a `derive-dont-sync` drift the SEPARATE-pricing-structure
+ * design (Decision 1) closes at the decode boundary, exactly as
+ * `variantsMatchOptions` closes the discriminator bijection. The filter walks the
+ * full field graph (top-level `fields`, recursively through `nestedGroup`, and
+ * every `variant` branch), builds `name → _tag` and `literal/array name →
+ * Set<optionValue>` indexes, then checks each rule:
+ *   - `choice` ⇒ its `field` is a `literal`, and every priced `option` is one of
+ *     that field's options;
+ *   - `multiChoice` ⇒ its `field` is an `arrayOfLiteral`, every priced `option`
+ *     in its options;
+ *   - `toggle` ⇒ its `field` is a `checkboxBoolean`;
+ *   - `quantity` ⇒ its `field` is a `number` (C9 — the per-unit count rule).
+ * A rule naming a missing field, a kind mismatch, or an off-list option is a hard
+ * decode error — pricing drift becomes a decode-time impossibility.
+ */
+const pricingReferencesResolve = Schema.makeFilter<{
+  readonly fields: ReadonlyArray<EncodedFieldNode>;
+  readonly variant?: { readonly variants: ReadonlyArray<{ readonly fields: ReadonlyArray<EncodedFieldNode> }> };
+  readonly pricing?: {
+    readonly rules: ReadonlyArray<
+      | { readonly _tag: 'choice'; readonly field: string; readonly prices: ReadonlyArray<{ readonly option: string }> }
+      | { readonly _tag: 'multiChoice'; readonly field: string; readonly prices: ReadonlyArray<{ readonly option: string }> }
+      | { readonly _tag: 'toggle'; readonly field: string }
+      | { readonly _tag: 'quantity'; readonly field: string }
+    >;
+  };
+}>(
+  (def) => {
+    if (def.pricing === undefined) {
+      return undefined;
+    }
+
+    const kindByName = new Map<string, string>();
+    const optionsByName = new Map<string, ReadonlySet<string>>();
+
+    const walk = (nodes: ReadonlyArray<EncodedFieldNode>): void => {
+      for (const node of nodes) {
+        kindByName.set(node.name, node._tag);
+        if (
+          (node._tag === 'literal' || node._tag === 'arrayOfLiteral') &&
+          node.options !== undefined
+        ) {
+          optionsByName.set(
+            node.name,
+            new Set(node.options.map((option) => option.value)),
+          );
+        }
+        if (node._tag === 'nestedGroup' && node.fields !== undefined) {
+          walk(node.fields);
+        }
+      }
+    };
+
+    walk(def.fields);
+    for (const branch of def.variant?.variants ?? []) {
+      walk(branch.fields);
+    }
+
+    for (const rule of def.pricing.rules) {
+      const kind = kindByName.get(rule.field);
+      if (kind === undefined) {
+        return `pricing rule references unknown field "${rule.field}"`;
+      }
+      if (rule._tag === 'toggle') {
+        if (kind !== 'checkboxBoolean') {
+          return `toggle pricing rule "${rule.field}" must target a checkboxBoolean field, not "${kind}"`;
+        }
+        continue;
+      }
+      if (rule._tag === 'quantity') {
+        if (kind !== 'number') {
+          return `quantity pricing rule "${rule.field}" must target a number field, not "${kind}"`;
+        }
+        continue;
+      }
+      // `choice` ⇒ literal, `multiChoice` ⇒ arrayOfLiteral.
+      const expectedKind = rule._tag === 'choice' ? 'literal' : 'arrayOfLiteral';
+      if (kind !== expectedKind) {
+        return `${rule._tag} pricing rule "${rule.field}" must target a ${expectedKind} field, not "${kind}"`;
+      }
+      const options = optionsByName.get(rule.field) ?? new Set<string>();
+      for (const price of rule.prices) {
+        if (!options.has(price.option)) {
+          return `pricing rule "${rule.field}" prices unknown option "${price.option}"`;
+        }
+      }
+    }
+
+    return undefined;
+  },
+  { title: 'FormDefinition.pricingReferencesResolve' },
+);
+
+/**
+ * The encoded shape a cross-field-rule reference walk needs from each rule — a
+ * loose structural mirror of the two `CrossFieldRule` arms on the ENCODED
+ * (pre-brand) `FormDefinition`, exactly like `EncodedFieldNode` mirrors a field.
+ */
+type EncodedCrossFieldRule =
+  | {
+      readonly _tag: 'requiredWhenEquals';
+      readonly when: string;
+      readonly equals: ReadonlyArray<string>;
+      readonly target: string;
+    }
+  | {
+      readonly _tag: 'activeWhenEquals';
+      readonly predicate:
+        | { readonly _tag: 'literalEquals'; readonly when: string; readonly equals: ReadonlyArray<string> }
+        | { readonly _tag: 'arrayIncludesAny'; readonly when: string; readonly values: ReadonlyArray<string> }
+        | { readonly _tag: 'checkboxChecked'; readonly when: string };
+      readonly target: string;
+    };
+
+/**
+ * One flat decoded namespace ("scope") cross-field rules resolve against: a
+ * `name → _tag` index plus a `literal`/`arrayOfLiteral` `name → Set<option>`
+ * index over the fields that decode into the SAME struct. The top-level scope is
+ * the top-level `fields` PLUS the discriminator PLUS every variant branch's
+ * fields (the decoder flattens all of them into one struct, `decode.ts`); each
+ * `nestedGroup`'s inner fields form their own scope.
+ */
+type RuleScope = {
+  readonly kindByName: ReadonlyMap<string, string>;
+  readonly optionsByName: ReadonlyMap<string, ReadonlySet<string>>;
+};
+
+/**
+ * Cross-field rules (`requiredWhenEquals` AND `activeWhenEquals`) that name a
+ * field which does not exist, a `when` of the wrong kind, an off-list trigger
+ * value, a `target`/`when` in DIFFERENT scopes, a self-reference, or a cycle are
+ * a `derive-dont-sync` drift this filter closes at the decode boundary — exactly
+ * as `variantsMatchOptions`/`pricingReferencesResolve` close their bijections.
+ * It also closes the PRE-EXISTING `requiredWhenEquals` integrity gap (until now
+ * a rule could name a dangling field and decode happily).
+ *
+ * Scope is SAME-SCOPE-SIBLING-ONLY (v1, registrar plan Decision 5): a rule's
+ * `when` and `target` must live in the same flat decoded namespace. The
+ * top-level scope unifies the top-level fields, the discriminator, and every
+ * variant branch's fields (the decoder flattens them into one struct, so a rule
+ * `when: <discriminator>` / `target: <branch field>` IS same-scope — the
+ * existing registration `type`→`dateOfBirth` rule relies on this); each
+ * `nestedGroup`'s inner fields form a separate scope. Enclosing-scope and
+ * cross-branch references are deferred — rejected here.
+ */
+const rulesReferToExistingFields = Schema.makeFilter<{
+  readonly fields: ReadonlyArray<EncodedFieldNode>;
+  readonly variant?: {
+    readonly discriminator: string;
+    readonly options: ReadonlyArray<{ readonly value: string }>;
+    readonly variants: ReadonlyArray<{
+      readonly fields: ReadonlyArray<EncodedFieldNode>;
+    }>;
+  };
+  readonly rules?: ReadonlyArray<EncodedCrossFieldRule>;
+}>(
+  (def) => {
+    if (def.rules === undefined || def.rules.length === 0) {
+      return undefined;
+    }
+
+    // Build the set of independent scopes a rule may resolve within. The
+    // top-level scope unifies the top-level fields, the discriminator, and every
+    // variant branch's fields; each nestedGroup contributes a further scope.
+    const scopes: Array<{ kindByName: Map<string, string>; optionsByName: Map<string, Set<string>> }> = [];
+
+    const collect = (
+      nodes: ReadonlyArray<EncodedFieldNode>,
+      scope: { kindByName: Map<string, string>; optionsByName: Map<string, Set<string>> },
+    ): void => {
+      for (const node of nodes) {
+        scope.kindByName.set(node.name, node._tag);
+        if (
+          (node._tag === 'literal' || node._tag === 'arrayOfLiteral') &&
+          node.options !== undefined
+        ) {
+          scope.optionsByName.set(
+            node.name,
+            new Set(node.options.map((option) => option.value)),
+          );
+        }
+        if (node._tag === 'nestedGroup' && node.fields !== undefined) {
+          const groupScope = { kindByName: new Map<string, string>(), optionsByName: new Map<string, Set<string>>() };
+          scopes.push(groupScope);
+          collect(node.fields, groupScope);
+        }
+      }
+    };
+
+    const topScope = { kindByName: new Map<string, string>(), optionsByName: new Map<string, Set<string>>() };
+    scopes.push(topScope);
+    collect(def.fields, topScope);
+    if (def.variant !== undefined) {
+      // The discriminator decodes as a `literal` over its `options` — model it as
+      // such so a rule may key off it (the registration `type`→`dateOfBirth` rule).
+      topScope.kindByName.set(def.variant.discriminator, 'literal');
+      topScope.optionsByName.set(
+        def.variant.discriminator,
+        new Set(def.variant.options.map((option) => option.value)),
+      );
+      for (const branch of def.variant.variants) {
+        collect(branch.fields, topScope);
+      }
+    }
+
+    /** The scope a field name belongs to, or `undefined` if it exists nowhere. */
+    const scopeOf = (name: string): RuleScope | undefined =>
+      scopes.find((scope) => scope.kindByName.has(name));
+
+    for (const rule of def.rules) {
+      if (rule._tag === 'requiredWhenEquals') {
+        const scope = scopeOf(rule.target);
+        if (scope === undefined) {
+          return `cross-field rule references unknown target field "${rule.target}"`;
+        }
+        const whenKind = scope.kindByName.get(rule.when);
+        if (whenKind === undefined) {
+          return `requiredWhenEquals "when" field "${rule.when}" does not exist in the same scope as target "${rule.target}"`;
+        }
+        if (rule.when === rule.target) {
+          return `cross-field rule "when" and "target" must differ ("${rule.when}")`;
+        }
+        // A literal/arrayOfLiteral `when` constrains `equals` to its options; a
+        // checkbox/text `when` carries no option set (the trigger is its value).
+        const options = scope.optionsByName.get(rule.when);
+        if (options !== undefined) {
+          for (const value of rule.equals) {
+            if (!options.has(value)) {
+              return `requiredWhenEquals "when" field "${rule.when}" has no option "${value}"`;
+            }
+          }
+        }
+        continue;
+      }
+
+      // activeWhenEquals — `target` is gated by `predicate` over a sibling `when`.
+      const scope = scopeOf(rule.target);
+      if (scope === undefined) {
+        return `activeWhenEquals references unknown target field "${rule.target}"`;
+      }
+      const predicate = rule.predicate;
+      const whenKind = scope.kindByName.get(predicate.when);
+      if (whenKind === undefined) {
+        return `activeWhenEquals "when" field "${predicate.when}" does not exist in the same scope as target "${rule.target}"`;
+      }
+      if (predicate.when === rule.target) {
+        return `activeWhenEquals "when" and "target" must differ ("${predicate.when}")`;
+      }
+      switch (predicate._tag) {
+        case 'literalEquals': {
+          if (whenKind !== 'literal') {
+            return `activeWhenEquals literalEquals "when" field "${predicate.when}" must be a literal, not "${whenKind}"`;
+          }
+          const options = scope.optionsByName.get(predicate.when) ?? new Set<string>();
+          for (const value of predicate.equals) {
+            if (!options.has(value)) {
+              return `activeWhenEquals "when" field "${predicate.when}" has no option "${value}"`;
+            }
+          }
+          break;
+        }
+        case 'arrayIncludesAny': {
+          if (whenKind !== 'arrayOfLiteral') {
+            return `activeWhenEquals arrayIncludesAny "when" field "${predicate.when}" must be an arrayOfLiteral, not "${whenKind}"`;
+          }
+          const options = scope.optionsByName.get(predicate.when) ?? new Set<string>();
+          for (const value of predicate.values) {
+            if (!options.has(value)) {
+              return `activeWhenEquals "when" field "${predicate.when}" has no option "${value}"`;
+            }
+          }
+          break;
+        }
+        case 'checkboxChecked': {
+          if (whenKind !== 'checkboxBoolean') {
+            return `activeWhenEquals checkboxChecked "when" field "${predicate.when}" must be a checkboxBoolean, not "${whenKind}"`;
+          }
+          break;
+        }
+      }
+    }
+
+    // Cycle check (v1, same-scope): an activation chain A→B→…→A is rejected. The
+    // edge is target → predicate.when (the target depends ON its trigger); a
+    // back-edge closing a loop is a cycle. requiredWhenEquals is presence-only —
+    // it does not gate activation, so it is excluded from the activation graph.
+    const activationEdges = new Map<string, string>();
+    for (const rule of def.rules) {
+      if (rule._tag === 'activeWhenEquals') {
+        activationEdges.set(rule.target, rule.predicate.when);
+      }
+    }
+    for (const start of activationEdges.keys()) {
+      const seen = new Set<string>();
+      let node: string | undefined = start;
+      while (node !== undefined) {
+        if (seen.has(node)) {
+          return `activeWhenEquals rules form a cycle through "${node}"`;
+        }
+        seen.add(node);
+        node = activationEdges.get(node);
+      }
+    }
+
+    return undefined;
+  },
+  { title: 'FormDefinition.rulesReferToExistingFields' },
+);
+
+/**
+ * The party-scope integrity biconditional (registrar plan Decision 2b.2): a
+ * `group`-offering form MUST author a payer block, and a `perRegistrant`-only
+ * form MUST NOT — otherwise the authored payer is either missing (a `group` form
+ * with no receipt-recipient chrome) or dead (a `perRegistrant`-only form with
+ * meaningless payer copy). Folded into the combined `FormDefinition.check`
+ * (composed, not chained — Risk 6) so it accumulates alongside the pricing/rule
+ * integrity walks. Runs on the ENCODED `party` (pre-brand), exactly like the
+ * other `FormDefinition` filters; a definition with no `party` is inert (the
+ * shared schema — contact/volunteer/registration — must all keep decoding).
+ *
+ * The biconditional is `'group' ∈ Object.keys(party.billingMode.options) ⟺
+ * party.payer !== undefined`. Enforcement that `party` itself is registration-only
+ * is a CONSUMER concern (only the registration route reads it), NOT a per-form
+ * schema guard — all three forms share this one schema with no `FormId` context,
+ * mirroring the `variant` precedent (Decision 2b, OQ2).
+ */
+const partyPayerBiconditional = Schema.makeFilter<{
+  readonly party?: {
+    readonly billingMode: { readonly options: Record<string, unknown> };
+    readonly payer?: unknown;
+  };
+}>(
+  (def) => {
+    if (def.party === undefined) {
+      return undefined;
+    }
+    const offersGroup = 'group' in def.party.billingMode.options;
+    const hasPayer = def.party.payer !== undefined;
+    if (offersGroup && !hasPayer) {
+      return 'a party offering the "group" billing mode must author a payer block';
+    }
+    if (!offersGroup && hasPayer) {
+      return 'a party that does not offer the "group" billing mode must not author a payer block';
+    }
+    return undefined;
+  },
+  { title: 'FormDefinition.partyPayerBiconditional' },
+);
+
+/**
  * The full structural definition of one site form (ADR 0007). `title` / `intro`
  * are the CMS-editable page copy carried over from the Branch 5.1 placeholder;
  * `fields` is the common field graph; `variant` is the optional discriminated
- * section; `rules` are the cross-field requirements. A form whose fields are not
- * yet authored (the post-migration default before its graph lands) carries an
- * empty `fields` and no `variant` / `rules`.
+ * section; `rules` are the cross-field requirements; `pricing` is the optional
+ * pricing dimension (Decision 1/3 — `optionalKey`, absence ⇒ unpriced); `party`
+ * is the optional CMS-authored party section (Decision 2b — the billing-mode
+ * allow-list + payer chrome; `optionalKey`, absence ⇒ single-submission). A form
+ * whose fields are not yet authored (the post-migration default before its graph
+ * lands) carries an empty `fields` and no `variant` / `rules` / `pricing` /
+ * `party`.
+ *
+ * `pricing` is `optionalKey` so every already-published `forms/*.json` (contact,
+ * volunteer, registration — all decode through this one schema) keeps decoding
+ * unchanged; the `pricingReferencesResolve` `.check` guards the keyed-structure
+ * design against drift at the boundary (a rule naming a missing field/option, or
+ * a kind mismatch, is a hard decode error). The composed `rulesReferToExisting
+ * Fields` `.check` does the same for BOTH cross-field-rule kinds — a dangling
+ * `when`/`target`, a wrong `when` kind, an off-list trigger value, an out-of-
+ * scope reference, a self-reference, or an activation cycle is a hard decode
+ * error (registrar plan Decision 5; also closes the pre-existing
+ * `requiredWhenEquals` integrity gap).
  */
 export const FormDefinition = Schema.Struct({
   title: Text,
@@ -515,5 +951,11 @@ export const FormDefinition = Schema.Struct({
   fields: FieldList,
   variant: Schema.optionalKey(FormVariantSet),
   rules: Schema.optionalKey(Schema.Array(CrossFieldRule)),
-});
+  pricing: Schema.optionalKey(PricingRules),
+  party: Schema.optionalKey(PartySection),
+}).check(
+  pricingReferencesResolve,
+  rulesReferToExistingFields,
+  partyPayerBiconditional,
+);
 export type FormDefinition = typeof FormDefinition.Type;

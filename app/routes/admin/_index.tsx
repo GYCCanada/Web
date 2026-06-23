@@ -1,7 +1,12 @@
 import { Link } from 'react-router';
 
 import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
-import { PAGE_IDS, type PageId } from '~/lib/content/pages/registry';
+import {
+  FORM_IDS,
+  PAGE_IDS,
+  type FormId,
+  type PageId,
+} from '~/lib/content/pages/registry';
 
 export const meta = adminMeta;
 
@@ -21,6 +26,17 @@ const PAGE_LABELS: { readonly [P in PageId]: string } = {
   archive: 'Archive',
   home: 'Home (evergreen)',
   team: 'Team',
+};
+
+/**
+ * Human label per `FormId` for the per-Form editor links (registrar plan C9).
+ * Exhaustive over `FormId` so adding a form to the registry without a label fails
+ * to compile (`make-impossible-states-unrepresentable`).
+ */
+const FORM_LABELS: { readonly [F in FormId]: string } = {
+  contact: 'Contact',
+  volunteer: 'Volunteer',
+  registration: 'Registration',
 };
 
 /**
@@ -62,6 +78,27 @@ export default function AdminIndex() {
                 className="flex min-h-11 items-center justify-between rounded-md border border-neutral-300 px-4 text-sm font-medium transition-colors hover:bg-neutral-100"
               >
                 <span>{PAGE_LABELS[page]}</span>
+                <span aria-hidden className="text-neutral-400">
+                  →
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
+          Forms
+        </h2>
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {FORM_IDS.map((form) => (
+            <li key={form}>
+              <Link
+                to={`/admin/forms/${form}`}
+                className="flex min-h-11 items-center justify-between rounded-md border border-neutral-300 px-4 text-sm font-medium transition-colors hover:bg-neutral-100"
+              >
+                <span>{FORM_LABELS[form]}</span>
                 <span aria-hidden className="text-neutral-400">
                   →
                 </span>

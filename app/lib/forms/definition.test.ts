@@ -1,7 +1,9 @@
 import { describe, expect, it, test } from 'effect-bun-test';
-import { Effect, Schema } from 'effect';
+import { Effect, Result, Schema } from 'effect';
 
-import { FieldKind, FormDefinition } from './definition';
+import { deepMerge } from '../content/admin-form';
+import { FieldKind, FormDefinition, MessageKey } from './definition';
+import { PartySection } from './party';
 
 /**
  * Branch 6.1 — the structural `FormDefinition` schema + closed kind-set.
@@ -502,6 +504,789 @@ describe('structural invariants', () => {
           },
         ],
       }),
+    ).toBe(true);
+  });
+});
+
+/**
+ * C4a — `ActiveWhen` + the `activeWhenEquals` `CrossFieldRule` member + the
+ * `rulesReferToExistingFields` integrity filter (registrar plan Decision 5). The
+ * filter closes BOTH rule kinds' reference drift at the decode boundary — a
+ * dangling `when`/`target`, a wrong `when` kind, an off-list trigger value, a
+ * cross-scope reference, a self-reference, and an activation cycle are all hard
+ * decode errors — and now also closes the PRE-EXISTING `requiredWhenEquals` gap.
+ */
+describe('cross-field rule integrity filter (Decision 5)', () => {
+  /** A small form with one literal, one array, one checkbox, and three text targets. */
+  const gatedFields = [
+    {
+      _tag: 'literal',
+      name: 'addBanquet',
+      label: text('Banquet?', 'Banquet?'),
+      requiredMessage: 'registration.form.gender.required',
+      options: [
+        { value: 'yes', label: text('Yes', 'Oui') },
+        { value: 'no', label: text('No', 'Non') },
+      ],
+    },
+    {
+      _tag: 'arrayOfLiteral',
+      name: 'workshops',
+      label: text('Workshops', 'Ateliers'),
+      requiredMessage: 'registration.form.merch.required',
+      options: [
+        { value: 'music', label: text('Music', 'Musique') },
+        { value: 'photo', label: text('Photo', 'Photo') },
+      ],
+    },
+    {
+      _tag: 'checkboxBoolean',
+      name: 'bringingGuest',
+      label: text('Guest?', 'Invité?'),
+      requiredMessage: 'registration.form.tos.required',
+    },
+    {
+      _tag: 'requiredText',
+      name: 'seats',
+      label: text('Seats', 'Places'),
+      requiredMessage: 'registration.form.church.required',
+    },
+  ] as const;
+
+  const withRules = (rules: ReadonlyArray<unknown>) => ({
+    title: text('F', 'F'),
+    fields: gatedFields,
+    rules,
+  });
+
+  test('a well-formed rule of each predicate kind decodes', () => {
+    expect(
+      succeeds(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['yes'],
+            },
+            target: 'seats',
+          },
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'arrayIncludesAny',
+              when: 'workshops',
+              values: ['music'],
+            },
+            target: 'addBanquet',
+          },
+          {
+            _tag: 'activeWhenEquals',
+            predicate: { _tag: 'checkboxChecked', when: 'bringingGuest' },
+            target: 'workshops',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a dangling activeWhenEquals target fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['yes'],
+            },
+            target: 'doesNotExist',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a dangling activeWhenEquals "when" fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'doesNotExist',
+              equals: ['yes'],
+            },
+            target: 'seats',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('an off-option literalEquals trigger value fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['maybe'], // not an addBanquet option
+            },
+            target: 'seats',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a literalEquals predicate over a non-literal "when" fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'bringingGuest', // a checkboxBoolean, not a literal
+              equals: ['yes'],
+            },
+            target: 'seats',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('an arrayIncludesAny predicate over a non-array "when" fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'arrayIncludesAny',
+              when: 'addBanquet', // a literal, not an arrayOfLiteral
+              values: ['yes'],
+            },
+            target: 'seats',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a checkboxChecked predicate over a non-checkbox "when" fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: { _tag: 'checkboxChecked', when: 'addBanquet' }, // a literal
+            target: 'seats',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a self-referential rule (when === target) fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['yes'],
+            },
+            target: 'addBanquet',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('an activation cycle (A gates B gates A) fails decode', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['yes'],
+            },
+            target: 'workshops',
+          },
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'arrayIncludesAny',
+              when: 'workshops',
+              values: ['music'],
+            },
+            target: 'addBanquet',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('the PRE-EXISTING requiredWhenEquals gap is now closed (dangling target rejected)', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'requiredWhenEquals',
+            when: 'addBanquet',
+            equals: ['yes'],
+            target: 'doesNotExist',
+            message: 'registration.form.church.required',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a requiredWhenEquals naming an off-option trigger value is rejected', () => {
+    expect(
+      fails(
+        withRules([
+          {
+            _tag: 'requiredWhenEquals',
+            when: 'addBanquet',
+            equals: ['maybe'], // not an addBanquet option
+            target: 'seats',
+            message: 'registration.form.church.required',
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a requiredWhenEquals over the discriminator → a variant-branch target is same-scope (decodes)', () => {
+    // The decoder flattens the discriminator + every variant branch's fields
+    // into ONE struct, so the registration `type` → `dateOfBirth` rule IS
+    // same-scope. The full fixture exercises exactly this — it must still decode.
+    expect(succeeds(fullDefinitionJson)).toBe(true);
+  });
+
+  test('a rule whose "when" and "target" live in different scopes is rejected', () => {
+    // `when` is a top-level field; `target` is inside a nestedGroup — different
+    // decoded namespaces, so cross-scope activation is deferred (rejected in v1).
+    expect(
+      fails({
+        title: text('F', 'F'),
+        fields: [
+          {
+            _tag: 'literal',
+            name: 'addBanquet',
+            label: text('Banquet?', 'Banquet?'),
+            requiredMessage: 'registration.form.gender.required',
+            options: [
+              { value: 'yes', label: text('Yes', 'Oui') },
+              { value: 'no', label: text('No', 'Non') },
+            ],
+          },
+          {
+            _tag: 'nestedGroup',
+            name: 'extras',
+            label: text('Extras', 'Extras'),
+            fields: [
+              {
+                _tag: 'requiredText',
+                name: 'seats',
+                label: text('Seats', 'Places'),
+                requiredMessage: 'registration.form.church.required',
+              },
+            ],
+          },
+        ],
+        rules: [
+          {
+            _tag: 'activeWhenEquals',
+            predicate: {
+              _tag: 'literalEquals',
+              when: 'addBanquet',
+              equals: ['yes'],
+            },
+            target: 'seats', // lives in `extras`, not the top-level scope
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+});
+
+/**
+ * C2 — the `pricing` sibling on `FormDefinition` + its reference-integrity filter.
+ *
+ * `pricing` is `optionalKey` (Decision 3), so the back-compat guarantee is the
+ * load-bearing one: every already-published `forms/*.json` (none carry pricing)
+ * keeps decoding unchanged. The `pricingReferencesResolve` filter then closes the
+ * SEPARATE-pricing-structure design's only drift surface (Decision 1) at the
+ * boundary — a rule naming a missing field, a kind mismatch, or an off-list option
+ * is a hard decode error, exactly the way `variantsMatchOptions` closes the
+ * discriminator bijection.
+ */
+describe('pricing sibling on FormDefinition (Decision 1/3)', () => {
+  /** A small priced form: a `literal`, an `arrayOfLiteral`, and a `checkboxBoolean`. */
+  const pricedFields = [
+    {
+      _tag: 'literal',
+      name: 'tShirtSize',
+      label: text('Size', 'Taille'),
+      requiredMessage: 'registration.form.gender.required',
+      options: [
+        { value: 'small', label: text('Small', 'Petit') },
+        { value: 'large', label: text('Large', 'Grand') },
+      ],
+    },
+    {
+      _tag: 'arrayOfLiteral',
+      name: 'workshops',
+      label: text('Workshops', 'Ateliers'),
+      requiredMessage: 'registration.form.merch.required',
+      options: [
+        { value: 'photography', label: text('Photo', 'Photo') },
+        { value: 'music', label: text('Music', 'Musique') },
+      ],
+    },
+    {
+      _tag: 'checkboxBoolean',
+      name: 'addBanquet',
+      label: text('Banquet', 'Banquet'),
+      requiredMessage: 'registration.form.tos.required',
+    },
+  ] as const;
+
+  const withPricing = (rules: ReadonlyArray<unknown>) => ({
+    title: text('Registration', 'Inscription'),
+    fields: pricedFields,
+    pricing: { currency: 'cad', base: 5000, rules },
+  });
+
+  test('an existing no-pricing definition still decodes (back-compat)', () => {
+    // The full Branch-6.1 fixture carries no `pricing` — proves optionalKey
+    // leaves every already-published forms/*.json decoding unchanged.
+    expect(succeeds(fullDefinitionJson)).toBe(true);
+    expect(
+      Schema.decodeUnknownSync(FormDefinition)(fullDefinitionJson).pricing,
+    ).toBeUndefined();
+  });
+
+  test('a pricing block whose rules all resolve decodes', () => {
+    expect(
+      succeeds(
+        withPricing([
+          {
+            _tag: 'choice',
+            field: 'tShirtSize',
+            prices: [{ option: 'large', amount: 500 }],
+          },
+          {
+            _tag: 'multiChoice',
+            field: 'workshops',
+            prices: [{ option: 'photography', amount: 1500 }],
+          },
+          { _tag: 'toggle', field: 'addBanquet', amount: 2500 },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a rule naming a field that does not exist fails decode', () => {
+    expect(
+      fails(
+        withPricing([
+          { _tag: 'toggle', field: 'doesNotExist', amount: 2500 },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a choice rule pricing an option the field does not offer fails decode', () => {
+    expect(
+      fails(
+        withPricing([
+          {
+            _tag: 'choice',
+            field: 'tShirtSize',
+            prices: [{ option: 'xxl', amount: 500 }], // not a tShirtSize option
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a choice rule targeting a non-literal field (kind mismatch) fails decode', () => {
+    expect(
+      fails(
+        withPricing([
+          {
+            _tag: 'choice',
+            field: 'addBanquet', // a checkboxBoolean, not a literal
+            prices: [{ option: 'small', amount: 500 }],
+          },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a toggle rule targeting a non-checkbox field (kind mismatch) fails decode', () => {
+    expect(
+      fails(
+        withPricing([
+          { _tag: 'toggle', field: 'tShirtSize', amount: 2500 }, // a literal
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test('a rule may reference a field nested in a group', () => {
+    expect(
+      succeeds({
+        title: text('F', 'F'),
+        fields: [
+          {
+            _tag: 'nestedGroup',
+            name: 'extras',
+            label: text('Extras', 'Extras'),
+            fields: [
+              {
+                _tag: 'checkboxBoolean',
+                name: 'addBanquet',
+                label: text('Banquet', 'Banquet'),
+                requiredMessage: 'registration.form.tos.required',
+              },
+            ],
+          },
+        ],
+        pricing: {
+          currency: 'cad',
+          base: 0,
+          rules: [{ _tag: 'toggle', field: 'addBanquet', amount: 2500 }],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test('a rule may reference a field inside a variant branch', () => {
+    expect(
+      succeeds({
+        title: text('F', 'F'),
+        fields: [],
+        variant: {
+          discriminator: 'type',
+          requiredMessage: 'registration.form.type.required',
+          options: [
+            { value: 'attendee', label: text('A', 'A') },
+            { value: 'exhibitor', label: text('E', 'E') },
+          ],
+          variants: [
+            {
+              value: 'attendee',
+              label: text('A', 'A'),
+              fields: [
+                {
+                  _tag: 'checkboxBoolean',
+                  name: 'addBanquet',
+                  label: text('Banquet', 'Banquet'),
+                  requiredMessage: 'registration.form.tos.required',
+                },
+              ],
+            },
+            { value: 'exhibitor', label: text('E', 'E'), fields: [] },
+          ],
+        },
+        pricing: {
+          currency: 'cad',
+          base: 0,
+          rules: [{ _tag: 'toggle', field: 'addBanquet', amount: 2500 }],
+        },
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('number FieldKind + quantity pricing rule (C9)', () => {
+  /** A non-negative-integer count field with inclusive bounds. */
+  const ticketsField = {
+    _tag: 'number',
+    name: 'tickets',
+    label: text('Tickets', 'Billets'),
+    min: 1,
+    max: 10,
+    requiredMessage: 'registration.form.gender.required',
+    invalidMessage: 'registration.form.merch.required',
+  } as const;
+
+  test('a number kind round-trips losslessly through encode → JSON → decode', () => {
+    const value = Schema.decodeUnknownSync(FormDefinition)({
+      title: text('Registration', 'Inscription'),
+      fields: [ticketsField],
+    });
+    return roundTrips(FormDefinition, value).pipe(
+      Effect.map((round) => {
+        expect(round).toEqual(value);
+      }),
+      Effect.runPromise,
+    );
+  });
+
+  test('a number kind with no bounds and optional:true decodes', () => {
+    expect(
+      succeeds({
+        title: text('R', 'R'),
+        fields: [
+          {
+            _tag: 'number',
+            name: 'tickets',
+            label: text('Tickets', 'Billets'),
+            optional: true,
+            requiredMessage: 'registration.form.gender.required',
+            invalidMessage: 'registration.form.merch.required',
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  test('a fractional / negative min bound is rejected (NonNegativeInt)', () => {
+    for (const min of [-1, 1.5]) {
+      expect(
+        fails({
+          title: text('R', 'R'),
+          fields: [{ ...ticketsField, min }],
+        }),
+      ).toBe(true);
+    }
+  });
+
+  test('a quantity rule targeting the number field resolves and decodes', () => {
+    expect(
+      succeeds({
+        title: text('R', 'R'),
+        fields: [ticketsField],
+        pricing: {
+          currency: 'cad',
+          base: 0,
+          rules: [{ _tag: 'quantity', field: 'tickets', unit: 500, max: 5 }],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test('a quantity rule targeting a non-number field is a hard decode error', () => {
+    expect(
+      fails({
+        title: text('R', 'R'),
+        fields: [
+          {
+            _tag: 'requiredText',
+            name: 'name',
+            label: text('Name', 'Nom'),
+            requiredMessage: 'contact.form.name.required',
+          },
+        ],
+        pricing: {
+          currency: 'cad',
+          base: 0,
+          rules: [{ _tag: 'quantity', field: 'name', unit: 500 }],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test('a quantity rule naming a missing field is a hard decode error', () => {
+    expect(
+      fails({
+        title: text('R', 'R'),
+        fields: [ticketsField],
+        pricing: {
+          currency: 'cad',
+          base: 0,
+          rules: [{ _tag: 'quantity', field: 'nope', unit: 500 }],
+        },
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('party section on FormDefinition (Decision 2b)', () => {
+  // These fixtures reuse EXISTING valid TranslationKeys for the payer/selector
+  // message chrome — they exercise the schema MECHANICS, independent of which
+  // tokens the live registration form authors. (The dedicated
+  // `registration.party.*` tokens ship in C7a; SPIKE 2 below asserts they
+  // resolve, and `defaults.ts` authors the live block against them.)
+  const groupOptions = {
+    group: text('Pay for everyone', 'Payer pour tous'),
+  };
+  const bothOptions = {
+    group: text('Pay for everyone', 'Payer pour tous'),
+    perRegistrant: text('Everyone pays their own', 'Chacun paie'),
+  };
+  const perRegistrantOptions = {
+    perRegistrant: text('Everyone pays their own', 'Chacun paie'),
+  };
+  const billingMode = (options: unknown) => ({
+    label: text('How are you paying?', 'Comment payez-vous ?'),
+    requiredMessage: 'registration.form.email.required',
+    options,
+  });
+  const payer = {
+    label: text('Who is paying?', 'Qui paie ?'),
+    nameField: {
+      label: text('Name', 'Nom'),
+      requiredMessage: 'registration.form.name.required',
+    },
+    emailField: {
+      label: text('Email', 'Courriel'),
+      requiredMessage: 'registration.form.email.required',
+      invalidMessage: 'registration.form.email.error',
+    },
+  };
+  const withParty = (party: unknown) => ({
+    title: text('Registration', 'Inscription'),
+    fields: [],
+    party,
+  });
+
+  test('a group-offering party (with payer) round-trips losslessly', () => {
+    const decoded = Schema.decodeUnknownSync(PartySection)({
+      intro: text('Tell us how you are paying', 'Dites-nous comment vous payez'),
+      billingMode: billingMode(groupOptions),
+      payer,
+    });
+    const codec = Schema.fromJsonString(PartySection);
+    const restored = Schema.decodeUnknownSync(codec)(
+      Schema.encodeUnknownSync(codec)(decoded),
+    );
+    expect(restored).toEqual(decoded);
+  });
+
+  test('a party is optional — a definition with no party decodes (backfill-safe)', () => {
+    const minimal = Schema.decodeUnknownSync(FormDefinition)({
+      title: text('Contact', 'Contact'),
+      fields: [],
+    });
+    expect(minimal.party).toBeUndefined();
+  });
+
+  test('a group-only options set (the allow-list case) decodes — no phantom perRegistrant', () => {
+    const decoded = Schema.decodeUnknownSync(FormDefinition)(
+      withParty({ billingMode: billingMode(groupOptions), payer }),
+    );
+    expect(decoded.party?.billingMode.options.group).toBeDefined();
+    expect(decoded.party?.billingMode.options.perRegistrant).toBeUndefined();
+  });
+
+  test('nonEmptyOptions: a billing mode offering zero modes is rejected', () => {
+    expect(fails(withParty({ billingMode: billingMode({}), payer }))).toBe(true);
+    expect(fails(withParty({ billingMode: billingMode({}) }))).toBe(true);
+  });
+
+  test('biconditional: group ∈ options without a payer is rejected', () => {
+    expect(fails(withParty({ billingMode: billingMode(groupOptions) }))).toBe(
+      true,
+    );
+    expect(fails(withParty({ billingMode: billingMode(bothOptions) }))).toBe(
+      true,
+    );
+  });
+
+  test('biconditional: a perRegistrant-only party WITH a payer is rejected (dead authored payer)', () => {
+    expect(
+      fails(withParty({ billingMode: billingMode(perRegistrantOptions), payer })),
+    ).toBe(true);
+  });
+
+  test('biconditional: a perRegistrant-only party with no payer decodes', () => {
+    expect(
+      succeeds(withParty({ billingMode: billingMode(perRegistrantOptions) })),
+    ).toBe(true);
+  });
+
+  test('biconditional: a both-modes party (offers group) WITH a payer decodes', () => {
+    expect(
+      succeeds(withParty({ billingMode: billingMode(bothOptions), payer })),
+    ).toBe(true);
+  });
+
+  // ── Graduated de-risk spikes (registrar plan C6.5 gate-green) ──────────────
+  // These two mechanics are the load-bearing authoring + token constraints the
+  // party-scope re-design (Decision 2b) depends on. They formerly lived in the
+  // standalone party-scope-spike.test.ts against hand-built `Json` literals;
+  // graduated here to drive the REAL `PartySection`/`BillingModeSelector.options`
+  // encoded shape and the REAL `MessageKey`, per the spec's gate-green list.
+
+  test('SPIKE 1 — a label edit on the REAL encoded billingMode.options round-trips through deepMerge, siblings survive (incl. group-only)', () => {
+    // The base is the ACTUAL encoded shape of PartySection.billingMode.options —
+    // not a hand-built literal. Edits land on `options.<mode>.<locale>`, the path
+    // the /admin authoring channel walks, and object-branch recursion must keep
+    // the untouched sibling locale + the other mode intact.
+    const both = Schema.encodeUnknownSync(PartySection)(
+      Schema.decodeUnknownSync(PartySection)({
+        billingMode: billingMode(bothOptions),
+        payer,
+      }),
+    );
+    const baseOptions = both.billingMode.options;
+
+    // edit ONLY group's English label (path billingMode.options.group.en)
+    const merged = deepMerge(baseOptions, { group: { en: 'One person pays' } }) as {
+      group: { en: string; fr: string };
+      perRegistrant: { en: string; fr: string };
+    };
+    expect(merged.group.en).toBe('One person pays'); // the edit landed
+    expect(merged.group.fr).toBe('Payer pour tous'); // French sibling survived
+    expect(merged.perRegistrant.en).toBe('Everyone pays their own'); // other mode intact
+    expect(merged.perRegistrant.fr).toBe('Chacun paie');
+
+    // the group-ONLY allow-list case: editing the lone mode's French label lands,
+    // and no phantom perRegistrant is conjured (the absent key stays absent).
+    const groupOnly = Schema.encodeUnknownSync(PartySection)(
+      Schema.decodeUnknownSync(PartySection)({
+        billingMode: billingMode(groupOptions),
+        payer,
+      }),
+    );
+    const mergedGroupOnly = deepMerge(groupOnly.billingMode.options, {
+      group: { fr: 'Payer pour le groupe' },
+    }) as { group: { en: string; fr: string }; perRegistrant?: unknown };
+    expect(mergedGroupOnly.group.en).toBe('Pay for everyone');
+    expect(mergedGroupOnly.group.fr).toBe('Payer pour le groupe');
+    expect('perRegistrant' in mergedGroupOnly).toBe(false);
+  });
+
+  test('SPIKE 2 — the registration.party.* MessageKey tokens now RESOLVE (shipped in translations.ts in C7a)', () => {
+    // C7a ships the party-scope tokens in `translations.ts` (the one deploy), so
+    // the brand boundary now ACCEPTS them — thereafter their en/fr strings are
+    // CMS-editable. (Before C7a these were rejected; the spike proved the brand
+    // gate, this asserts the deploy landed.)
+    for (const token of [
+      'registration.party.billingMode.required',
+      'registration.party.payer.name.required',
+      'registration.party.payer.email.required',
+      'registration.party.payer.email.error',
+    ]) {
+      expect(
+        Result.isSuccess(Schema.decodeUnknownResult(MessageKey)(token)),
+      ).toBe(true);
+    }
+    // an unregistered token is still rejected — the brand gate stays load-bearing.
+    expect(
+      Result.isFailure(
+        Schema.decodeUnknownResult(MessageKey)('registration.party.not.a.token'),
+      ),
     ).toBe(true);
   });
 });
