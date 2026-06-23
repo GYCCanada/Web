@@ -825,6 +825,8 @@ const DraftFaqCopySection = Schema.Struct({
 /** The draft variant of `Conference`: list items and section copy are draft-lax. */
 const DraftConference = Schema.Struct({
   ...Conference.fields,
+  registrationUrl: Schema.optionalKey(Schema.String),
+  scheduleUrl: Schema.optionalKey(Schema.String),
   speakers: IdListArray(DraftSpeaker),
   seminars: IdListArray(DraftSeminar),
   travel: DraftTravelSection,

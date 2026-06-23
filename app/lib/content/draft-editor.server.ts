@@ -13,6 +13,7 @@ import {
 } from '../content.server';
 import {
   deepMerge,
+  normalizeMergedSiteContent,
   pruneKeylessImageOverrides,
   setAtPath,
   type Json,
@@ -614,7 +615,7 @@ export const layer = Layer.effect(
       // image object never lands — that object is draft-valid but PUBLISH-invalid
       // (`<slot>.key: Missing key`). A no-op for every scope without those slots.
       const pruned = pruneKeylessImageOverrides(base, override);
-      const merged = deepMerge(base, pruned);
+      const merged = normalizeMergedSiteContent(deepMerge(base, pruned));
       const decoded = yield* decodeOrReject(codec, merged);
       return (yield* storeDraft(codec, decoded)) as ScopeEncoded<S>;
     });
@@ -679,6 +680,7 @@ export const layer = Layer.effect(
       // published object get written.
       const draftJson = yield* codec.encodeDraftJson(source).pipe(Effect.orDie);
       const strict = yield* parseJson(draftJson).pipe(
+        Effect.map(normalizeMergedSiteContent),
         Effect.flatMap(codec.decodePublish),
         Effect.mapError(
           (error) =>

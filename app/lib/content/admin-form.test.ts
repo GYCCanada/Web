@@ -8,13 +8,16 @@ import {
   imageUploadTarget,
   isAcceptedImageType,
   normalizeFaqAnswers,
+  normalizeMergedSiteContent,
   pruneKeylessImageOverrides,
   setAtPath,
+  stripEmptyBilingualLeaves,
+  stripEmptyOptionalUrlLeaves,
   uploadedImageKey,
   type Json,
 } from './admin-form';
-import { defaultContent } from './defaults';
-import { SiteContent, newListItemId } from './schema';
+import { defaultContent, defaultDraftContent } from './defaults';
+import { DraftSiteContent, SiteContent, newListItemId } from './schema';
 import {
   DraftFaqPage,
   DraftTeamPage,
@@ -31,6 +34,8 @@ import {
 
 const encode = Schema.encodeUnknownEffect(SiteContent);
 const decode = Schema.decodeUnknownEffect(SiteContent);
+const encodeDraft = Schema.encodeUnknownEffect(DraftSiteContent);
+const decodeDraft = Schema.decodeUnknownEffect(DraftSiteContent);
 
 const entries = (
   record: Record<string, string>,
@@ -84,6 +89,48 @@ describe('assembleOverrides', () => {
       enabled: unknown;
     };
     expect(unchecked.enabled).toBe(false);
+  });
+
+  test('coerces `learnMoreEnabled` to a real boolean', () => {
+    const checked = assembleOverrides([
+      ['conferences./2024.learnMoreEnabled', 'false'],
+      ['conferences./2024.learnMoreEnabled', 'true'],
+    ]) as { conferences: { '/2024': { learnMoreEnabled: unknown } } };
+    expect(checked.conferences['/2024']?.learnMoreEnabled).toBe(true);
+
+    const unchecked = assembleOverrides([
+      ['conferences./2024.learnMoreEnabled', 'false'],
+    ]) as { conferences: { '/2024': { learnMoreEnabled: unknown } } };
+    expect(unchecked.conferences['/2024']?.learnMoreEnabled).toBe(false);
+  });
+});
+
+describe('stripEmptyOptionalUrlLeaves', () => {
+  test('drops empty optional URL leaves but keeps non-empty values', () => {
+    const input = {
+      registrationUrl: '',
+      scheduleUrl: 'https://example.com/schedule',
+      travel: { mapEmbedUrl: '   ', bodyCopy: { en: 'x', fr: 'y' } },
+    } satisfies Json;
+    expect(stripEmptyOptionalUrlLeaves(input)).toEqual({
+      scheduleUrl: 'https://example.com/schedule',
+      travel: { bodyCopy: { en: 'x', fr: 'y' } },
+    });
+  });
+});
+
+describe('stripEmptyBilingualLeaves', () => {
+  test('drops bilingual leaves with both locales empty but keeps half-filled and complete values', () => {
+    const input = {
+      checkIn: { en: '', fr: '' },
+      checkOut: { en: '3 PM', fr: '' },
+      description: { en: 'Note', fr: 'Note' },
+      name: { en: '', fr: '' },
+    } satisfies Json;
+    expect(stripEmptyBilingualLeaves(input)).toEqual({
+      checkOut: { en: '3 PM', fr: '' },
+      description: { en: 'Note', fr: 'Note' },
+    });
   });
 });
 
@@ -461,6 +508,47 @@ describe('merge-onto-current-document round-trip', () => {
       );
       const exit = yield* Effect.exit(decode(merged));
       expect(exit._tag).toBe('Failure');
+    }));
+
+  it.effect('conference checkbox and cleared URL fields decode as draft and publish', () =>
+    Effect.gen(function* () {
+      const base = (yield* encodeDraft(defaultDraftContent)) as Json;
+      const overrides = assembleOverrides(
+        entries({
+          'conferences./2024.learnMoreEnabled': 'false',
+          'conferences./2024.registrationUrl': '',
+          'conferences./2024.travel.mapEmbedUrl': '',
+        }),
+      );
+      const merged = normalizeMergedSiteContent(deepMerge(base, overrides));
+      const draftExit = yield* Effect.exit(decodeDraft(merged));
+      expect(draftExit._tag).toBe('Success');
+      if (draftExit._tag === 'Success') {
+        expect(draftExit.value.conferences[0]?.learnMoreEnabled).toBe(false);
+      }
+      const publishExit = yield* Effect.exit(decode(merged));
+      expect(publishExit._tag).toBe('Success');
+    }));
+
+  it.effect('untouched optional hotel bilingual fields do not block publish', () =>
+    Effect.gen(function* () {
+      const base = (yield* encodeDraft(defaultDraftContent)) as Json;
+      const hotelId = defaultDraftContent.conferences[0]?.accommodations.hotels[0]?.id;
+      const overrides = assembleOverrides(
+        entries({
+          [`conferences./2024.accommodations.hotels.${String(hotelId)}.checkIn.en`]:
+            '',
+          [`conferences./2024.accommodations.hotels.${String(hotelId)}.checkIn.fr`]:
+            '',
+          [`conferences./2024.accommodations.hotels.${String(hotelId)}.checkOut.en`]:
+            '',
+          [`conferences./2024.accommodations.hotels.${String(hotelId)}.checkOut.fr`]:
+            '',
+        }),
+      );
+      const merged = normalizeMergedSiteContent(deepMerge(base, overrides));
+      const publishExit = yield* Effect.exit(decode(merged));
+      expect(publishExit._tag).toBe('Success');
     }));
 });
 
