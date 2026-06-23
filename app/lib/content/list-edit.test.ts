@@ -120,6 +120,44 @@ describe('applyListEdit — reorder', () => {
   });
 });
 
+describe('applyListEdit — board', () => {
+  test('adds a fresh id-only board member', () => {
+    const base: Json = {
+      board: list({ id: 'a', name: 'Alice' }),
+    };
+    const next = applyListEdit(base, [addOp('board', id('b'))]) as {
+      board: ReadonlyArray<{ id: string; name?: string }>;
+    };
+    expect(next.board).toHaveLength(2);
+    expect(next.board[1]).toEqual({ id: 'b' });
+  });
+
+  test('removes a board member by id', () => {
+    const base: Json = {
+      board: list({ id: 'a', name: 'Alice' }, { id: 'b', name: 'Bob' }),
+    };
+    const next = applyListEdit(base, [removeOp('board', id('a'))]) as {
+      board: ReadonlyArray<{ id: string; name: string }>;
+    };
+    expect(next.board).toHaveLength(1);
+    expect(next.board[0]?.name).toBe('Bob');
+  });
+
+  test('reorders board members by id', () => {
+    const base: Json = {
+      board: list(
+        { id: 'a', name: 'Alice' },
+        { id: 'b', name: 'Bob' },
+        { id: 'c', name: 'Carol' },
+      ),
+    };
+    const next = applyListEdit(base, [
+      reorderOp('board', [id('c'), id('a'), id('b')]),
+    ]) as { board: ReadonlyArray<{ id: string }> };
+    expect(next.board.map((m) => m.id)).toEqual(['c', 'a', 'b']);
+  });
+});
+
 describe('applyListEdit — id-keyed, not positional', () => {
   test('preserves every unedited deep field of the items it keeps', () => {
     const base: Json = {

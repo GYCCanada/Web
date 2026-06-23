@@ -327,6 +327,11 @@ export default function AdminContentEditor() {
   }>;
 
   const teamIds = team.map((m) => m.id);
+  const board = (document.board ?? []) as ReadonlyArray<{
+    id: string;
+    name?: string;
+  }>;
+  const boardIds = board.map((m) => m.id);
   const emptyText = { en: '', fr: '' } as const;
   const translations = (document.translations ?? { en: {}, fr: {} }) as {
     en: Readonly<Record<string, string>>;
@@ -553,6 +558,31 @@ export default function AdminContentEditor() {
                   label="Photo alt text"
                   name={fieldName('team', memberId, 'photo.alt')}
                   value={member.photo?.alt ?? emptyText}
+                />
+              </div>
+            );
+          })}
+        </Section>
+
+        <Section title="Board of Directors">
+          <div className="flex items-center justify-end">
+            <AddItemButton
+              listPath="board"
+              label="+ Add board member"
+              newId={newListItemId()}
+            />
+          </div>
+          {board.map((member, bi) => {
+            const memberId = ListItemId.make(member.id);
+            return (
+              <div key={member.id} className="space-y-2 rounded-md bg-neutral-50 p-3">
+                <div className="flex items-center justify-end">
+                  <ItemControls listPath="board" ids={boardIds} index={bi} />
+                </div>
+                <Text
+                  label="Name"
+                  name={fieldName('board', memberId, 'name')}
+                  defaultValue={member.name ?? ''}
                 />
               </div>
             );

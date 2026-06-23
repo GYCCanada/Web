@@ -688,7 +688,7 @@ export const layer = Layer.effect(
       const content = yield* getSiteContent();
       return {
         team: content.team.map(toTeamMember),
-        board: [...content.board],
+        board: content.board.map((member) => member.name),
       };
     });
 

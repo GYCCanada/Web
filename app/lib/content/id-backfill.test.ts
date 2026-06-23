@@ -209,3 +209,27 @@ describe('backfillListItemIds — production read-safety (ADR 0006)', () => {
     expect(backfillListItemIds([1, 2, 3])).toEqual([1, 2, 3]);
   });
 });
+
+describe('backfillListItemIds — legacy board string[] migration', () => {
+  test('a legacy board: string[] decodes after backfill to id-keyed objects', () => {
+    const encoded = encodedDefaults();
+    const legacy = clone(encoded);
+    legacy['board'] = ['Alice Board', 'Bob Board'];
+
+    expect(decodes(legacy)).toBe(false);
+
+    const repaired = backfillListItemIds(legacy) as JsonRecord;
+    const board = repaired['board'] as JsonRecord[];
+    expect(board).toHaveLength(2);
+    expect(board[0]?.['name']).toBe('Alice Board');
+    expect(board[1]?.['name']).toBe('Bob Board');
+    expect(typeof board[0]?.['id']).toBe('string');
+    expect(typeof board[1]?.['id']).toBe('string');
+    expect(decodes(repaired)).toBe(true);
+  });
+
+  test('an already-migrated board is idempotent', () => {
+    const encoded = encodedDefaults();
+    expect(backfillListItemIds(encoded)).toEqual(encoded);
+  });
+});

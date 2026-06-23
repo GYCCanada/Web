@@ -37,11 +37,22 @@ import {
 } from './pages/registry';
 import { FormDefinition } from '../forms/definition';
 import { FaqPage } from './pages/schema';
-import { SiteContent } from './schema';
+import { BoardMember, deterministicListItemId, SiteContent } from './schema';
 import type {
   DraftSiteContent as DraftSiteContentType,
   SiteContent as SiteContentType,
 } from './schema';
+
+/** A single board member for draft-reconciliation tests. */
+const boardMember = (name: string) =>
+  BoardMember.make({
+    id: deterministicListItemId(`test-board-${name}`),
+    name,
+  });
+
+const boardNames = (
+  board: ReadonlyArray<{ readonly name: string }>,
+): readonly string[] => board.map((member) => member.name);
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(SiteContent));
 // Decode the encoded OBJECT a DraftEditor write returns (not a JSON string).
@@ -180,7 +191,7 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
     Effect.gen(function* () {
       const draftDoc = SiteContent.make({
         ...defaultContent,
-        board: ['Draft With No Published'],
+        board: [boardMember('Draft With No Published')],
       });
       const draft = yield* encode(draftDoc);
       const editor = yield* DraftEditor.Service;
@@ -188,7 +199,7 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
       yield* storage.put(SITE_CONTENT_DRAFT_KEY, draft, 'application/json');
       const result = yield* editor.load(siteScope);
       expect(result.source).toBe('draft');
-      expect(result.content.board).toEqual(['Draft With No Published']);
+      expect(boardNames(result.content.board)).toEqual(['Draft With No Published']);
     }).pipe(provideEditor(adminStorage({}))),
   );
 
@@ -198,7 +209,7 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
       Effect.gen(function* () {
         const draftDoc = SiteContent.make({
           ...defaultContent,
-          board: ['Only In The Draft'],
+          board: [boardMember('Only In The Draft')],
         });
         const draft = yield* encode(draftDoc);
         const editor = yield* DraftEditor.Service;
@@ -210,7 +221,7 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
         yield* storage.put(SITE_CONTENT_DRAFT_KEY, draft, 'application/json');
         const result = yield* editor.load(siteScope);
         expect(result.source).toBe('draft');
-        expect(result.content.board).toEqual(['Only In The Draft']);
+        expect(boardNames(result.content.board)).toEqual(['Only In The Draft']);
       }).pipe(
         provideEditor(
           seededStorage(defaultContent, (published) =>
@@ -226,11 +237,11 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
       Effect.gen(function* () {
         const staleDraftDoc = SiteContent.make({
           ...defaultContent,
-          board: ['Stale Draft Values'],
+          board: [boardMember('Stale Draft Values')],
         });
         const publishedDoc = SiteContent.make({
           ...defaultContent,
-          board: ['Freshly Published'],
+          board: [boardMember('Freshly Published')],
         });
         const staleDraft = yield* encode(staleDraftDoc);
         const published = yield* encode(publishedDoc);
@@ -244,7 +255,7 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
         yield* storage.put(SITE_CONTENT_KEY, published, 'application/json');
         const result = yield* editor.load(siteScope);
         expect(result.source).toBe('published');
-        expect(result.content.board).toEqual(['Freshly Published']);
+        expect(boardNames(result.content.board)).toEqual(['Freshly Published']);
       }).pipe(provideEditor(adminStorage({}))),
   );
 });

@@ -521,6 +521,13 @@ export const TeamMember = Schema.Struct({
 });
 export type TeamMember = typeof TeamMember.Type;
 
+/** A member of the board of directors (name only). */
+export const BoardMember = Schema.Struct({
+  id: ListItemId,
+  name: Schema.NonEmptyString,
+});
+export type BoardMember = typeof BoardMember.Type;
+
 // ---------------------------------------------------------------------------
 // Translations
 // ---------------------------------------------------------------------------
@@ -596,7 +603,7 @@ export const SiteContent = Schema.Struct({
   meta: Meta,
   conferences: Schema.Array(Conference),
   team: IdListArray(TeamMember),
-  board: Schema.Array(Schema.NonEmptyString),
+  board: IdListArray(BoardMember),
   translations: Translations,
 }).check(requiredConferencesFilter);
 export type SiteContent = typeof SiteContent.Type;
@@ -668,6 +675,11 @@ const DraftTeamMember = Schema.Struct({
   photo: Schema.optionalKey(DraftImageRef),
 });
 
+const DraftBoardMember = Schema.Struct({
+  id: ListItemId,
+  name: Schema.optionalKey(Schema.NonEmptyString),
+});
+
 /**
  * A draft hotel: a freshly-added item carries only its `id` (settled #10), with
  * `name`/`note` filled in incrementally. Both relax to optional `DraftText`
@@ -700,7 +712,7 @@ export const DraftSiteContent = Schema.Struct({
   meta: Meta,
   conferences: Schema.Array(DraftConference),
   team: IdListArray(DraftTeamMember),
-  board: Schema.Array(Schema.NonEmptyString),
+  board: IdListArray(DraftBoardMember),
   translations: Translations,
 }).check(requiredConferencesFilter);
 export type DraftSiteContent = typeof DraftSiteContent.Type;

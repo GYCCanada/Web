@@ -65,9 +65,23 @@ const backfillItems = (value: unknown): readonly Json[] | undefined =>
   Array.isArray(value) ? value.map(withId) : undefined;
 
 /**
+ * Migrate a legacy `board: string[]` to id-keyed `{ id, name }` objects. Items
+ * that already carry an `id` pass through unchanged (idempotent).
+ */
+const backfillBoard = (value: unknown): readonly Json[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  return value.map((item) => {
+    if (typeof item === 'string') {
+      return { id: newListItemId(), name: item };
+    }
+    return withId(item as Json);
+  });
+};
+
+/**
  * Return a copy of the parsed `SiteContent` JSON with a fresh id assigned to any
  * id-less list item (`conferences[].speakers[]`, `conferences[].seminars[]`,
- * `conferences[].hotels[]`, `team[]`) and an empty `hotels: []` supplied to any
+ * `conferences[].hotels[]`, `team[]`, `board[]`) and an empty `hotels: []` supplied to any
  * conference that predates 3.1 and lacks the (required) key. Items already
  * carrying an `id` — and a `hotels` array that is already present — are
  * untouched (idempotent). A value that is not the expected shape is returned
@@ -108,6 +122,9 @@ export const backfillListItemIds = (document: unknown): unknown => {
 
   const team = backfillItems(document['team']);
   if (team !== undefined) next['team'] = team;
+
+  const board = backfillBoard(document['board']);
+  if (board !== undefined) next['board'] = board;
 
   return next;
 };

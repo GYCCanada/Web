@@ -447,6 +447,45 @@ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', ()
     expect(result.publicTeamNames).toContain('New Member');
   });
 
+  it('add → fill name → publish adds a board member to the public read', async () => {
+    const seed = await seedBody();
+    const boardId = newListItemId();
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyListOps(siteScope, [addOp('board', boardId)]);
+
+        yield* TestClock.adjust('1 second');
+        const fillExit = yield* Effect.exit(
+          editor.editDocument(
+            siteScope,
+            assembleOverrides([
+              [fieldName('board', boardId, 'name'), 'New Board Member'],
+            ]) as Json,
+          ),
+        );
+
+        const publishExit = yield* Effect.exit(editor.publish(siteScope));
+        const publicTeam = yield* content.getTeam();
+
+        return {
+          fillTag: fillExit._tag,
+          publishTag: publishExit._tag,
+          publicBoardNames: publicTeam.board,
+        };
+      }),
+      { [SITE_CONTENT_KEY]: { body: seed } },
+    );
+
+    expect(result.fillTag).toBe('Success');
+    expect(result.publishTag).toBe('Success');
+    expect(result.publicBoardNames).toContain('New Board Member');
+  });
+
   it('remove drops the id; reorder permutes — the draft reopens with the change', async () => {
     const seed = await seedBody();
     const seeded = defaultContent.conferences[conf2024]?.speakers ?? [];

@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
 import { root } from "../localization/translations";
-import { SiteContent } from "./schema";
+import { deterministicListItemId, SiteContent } from "./schema";
 
 /**
  * The bundled-default `SiteContent` document (CMS plan §"Defaults / seed",
@@ -412,13 +412,13 @@ lives in Michigan with his wife and daughter where he works as a pastor.
   ],
 
   board: [
-    "Virginia Polihronova",
-    "George Cho",
-    "Dominique Wheeler",
-    "Daniel Cho",
-    "Craig Cleveland",
-    "Rudy Harnisch",
-    "Abubacar Camara",
+    { id: deterministicListItemId('board-virginia-polihronova'), name: 'Virginia Polihronova' },
+    { id: deterministicListItemId('board-george-cho'), name: 'George Cho' },
+    { id: deterministicListItemId('board-dominique-wheeler'), name: 'Dominique Wheeler' },
+    { id: deterministicListItemId('board-daniel-cho'), name: 'Daniel Cho' },
+    { id: deterministicListItemId('board-craig-cleveland'), name: 'Craig Cleveland' },
+    { id: deterministicListItemId('board-rudy-harnisch'), name: 'Rudy Harnisch' },
+    { id: deterministicListItemId('board-abubacar-camara'), name: 'Abubacar Camara' },
   ],
 
   // Spread the live UI translation tables verbatim so the defaults can never
