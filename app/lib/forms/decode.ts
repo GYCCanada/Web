@@ -1,4 +1,4 @@
-import { Result, Schema, SchemaGetter } from 'effect';
+import { Result, Schema, SchemaGetter, SchemaParser } from 'effect';
 import type { Issue } from 'effect/SchemaIssue';
 
 import { activationIndex, isActiveByName } from './activation';
@@ -735,4 +735,4 @@ export const decodeForm = (
   definition: FormDefinition,
   payload: unknown,
 ): Result.Result<DecodedForm, Issue> =>
-  Schema.decodeUnknownResult(definitionToSchema(definition))(payload);
+  SchemaParser.decodeUnknownResult(definitionToSchema(definition))(payload);

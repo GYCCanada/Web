@@ -57,6 +57,22 @@ describe('Payment — Env.stripe None-gate', () => {
     }).pipe(Effect.provide(Layer.provide(Payment.layer, disabledEnv))),
   );
 
+  it.effect('createRefund fails PaymentDisabled when stripe is unconfigured', () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        Effect.gen(function* () {
+          const payment = yield* Payment.Service;
+          yield* payment.createRefund({
+            sessionId: 'cs_test_1',
+            amount: Cents.make(5000),
+            idempotencyKey: 'registration:refund:order-1',
+          });
+        }),
+      );
+      expect(error).toBeInstanceOf(PaymentDisabled);
+    }).pipe(Effect.provide(Layer.provide(Payment.layer, disabledEnv))),
+  );
+
   it.effect('constructEvent fails PaymentDisabled when stripe is unconfigured', () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(
@@ -144,6 +160,49 @@ describe('Payment.testLayer — create-session double (no network)', () => {
       // Same idempotency key ⇒ same fake session (the no-second-checkout contract).
       expect(retry.sessionId).toBe(first.sessionId);
       expect(retry.url).toBe(first.url);
+    }).pipe(Effect.provide(Payment.testLayer())),
+  );
+
+  it.effect('createRefund records the call (session + frozen amount + idempotency key) and returns a fake refund', () => {
+    const refundCalls: Array<Payment.CreateRefundCall> = [];
+    return Effect.gen(function* () {
+      const payment = yield* Payment.Service;
+      const refund = yield* payment.createRefund({
+        sessionId: 'cs_test_order-42',
+        amount: Cents.make(15_000),
+        idempotencyKey: 'registration:refund:order-42',
+      });
+
+      // The fake refund's ids derive from the session + key (no network), and the
+      // resolved PaymentIntent is the session-derived stub (the production op
+      // resolves it from the session via GetCheckoutSessionsSession).
+      expect(refund.refundId).toBe('re_test_registration:refund:order-42');
+      expect(refund.paymentIntentId).toBe('pi_test_cs_test_order-42');
+
+      // The frozen amount + session + key threaded through verbatim.
+      expect(refundCalls).toHaveLength(1);
+      expect(refundCalls[0]?.sessionId).toBe('cs_test_order-42');
+      expect(refundCalls[0]?.amount).toBe(Cents.make(15_000));
+      expect(refundCalls[0]?.idempotencyKey).toBe(
+        'registration:refund:order-42',
+      );
+    }).pipe(Effect.provide(Payment.testLayer({ refundCalls })));
+  });
+
+  it.effect('createRefund replays the same fake refund for a verbatim retry (same idempotency key)', () =>
+    Effect.gen(function* () {
+      const payment = yield* Payment.Service;
+      const params = {
+        sessionId: 'cs_test_order-99',
+        amount: Cents.make(8000),
+        idempotencyKey: 'registration:refund:order-99',
+      };
+      const first = yield* payment.createRefund(params);
+      const retry = yield* payment.createRefund(params);
+      // Same key ⇒ same fake refund (the no-second-refund contract the durable
+      // `refund` op relies on).
+      expect(retry.refundId).toBe(first.refundId);
+      expect(retry.paymentIntentId).toBe(first.paymentIntentId);
     }).pipe(Effect.provide(Payment.testLayer())),
   );
 

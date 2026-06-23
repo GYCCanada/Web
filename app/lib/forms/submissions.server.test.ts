@@ -1,17 +1,19 @@
 import { describe, expect, it } from 'effect-bun-test';
-import { Effect, Layer, Result, Schema } from 'effect';
+import { Clock, Effect, Layer, Result, Schema } from 'effect';
 
 import { Content } from '../content.server';
 import {
   defaultContactForm,
   defaultRegistrationForm,
 } from '../content/pages/defaults';
-import { submissionKey } from '../content/pages/registry';
-import { ListItemId } from '../content/schema';
+import { orderKey, submissionKey } from '../content/pages/registry';
+import { IsoDate, ListItemId, newListItemId } from '../content/schema';
 import { Storage } from '../storage.server';
 import { layerTest } from '../storage.test-helper';
 
 import { decodeForm } from './decode';
+import { RegistrationOrder } from './order';
+import { Cents, CurrencyCode } from './pricing';
 import { submissionSchema } from './submission';
 import { Submissions } from './submissions.server';
 
@@ -181,6 +183,125 @@ describe('Submissions.persist — durable write (Branch 7.2)', () => {
   );
 });
 
+/**
+ * A `Clock` whose "now" the test advances by hand, so a SECOND keyed persist runs
+ * on a DIFFERENT calendar DAY than the first. Only `currentTimeMillis*` is
+ * exercised here (that is what `persist` reads to stamp `submittedAt`); `sleep` /
+ * the nanos accessor are derived from the same backing millis. Provided as a
+ * `Context.Reference` override (`Clock.Clock`) so the whole `persist` runs under
+ * frozen-then-advanced time.
+ */
+const controllableClock = (initialMillis: number) => {
+  let nowMillis = initialMillis;
+  const clock: Clock.Clock = {
+    currentTimeMillisUnsafe: () => nowMillis,
+    currentTimeMillis: Effect.sync(() => nowMillis),
+    currentTimeNanosUnsafe: () => BigInt(nowMillis) * 1_000_000n,
+    currentTimeNanos: Effect.sync(() => BigInt(nowMillis) * 1_000_000n),
+    sleep: () => Effect.void,
+  };
+  return {
+    clock,
+    advanceTo: (millis: number) => {
+      nowMillis = millis;
+    },
+  };
+};
+
+/**
+ * round-4 --deep MAJOR — a keyed (`idempotencyKey`) resubmit must be
+ * BYTE-IDENTICAL across days, not just `payment`-preserving.
+ *
+ * The H1 fix preserved an existing record's `payment` on a keyed overwrite, but
+ * `persist` still recomputed `submittedAt` from the clock on EVERY call. So a
+ * registrant who re-submits the SAME logical record TOMORROW (a user retrying a
+ * partially-failed group, the order/webhook flow re-persisting, …) would rewrite
+ * the registrant envelope with a DIFFERENT `submittedAt` — churn even though
+ * nothing logical changed. The fix: a keyed persist that finds a prior record at
+ * the deterministic key PRESERVES that record's original `submittedAt` (when the
+ * registration was actually made), mirroring exactly how `payment` is preserved.
+ *
+ * These pin the RAW stored record (not just `payment`) across two same-key submits
+ * separated by a real day boundary, asserting the on-bucket JSON is byte-identical.
+ */
+describe('Submissions.persist — keyed resubmit is byte-identical across days (round-4 MAJOR)', () => {
+  /** 2026-06-19T10:00:00Z and the NEXT calendar day, as UTC millis. */
+  const DAY_ONE_MILLIS = Date.UTC(2026, 5, 19, 10, 0, 0);
+  const DAY_TWO_MILLIS = Date.UTC(2026, 5, 20, 11, 30, 0);
+
+  it.effect(
+    'a verbatim keyed resubmit the NEXT day preserves the original submittedAt — raw record byte-identical',
+    () => {
+      const time = controllableClock(DAY_ONE_MILLIS);
+      return Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        const decoded = decodeRegistration();
+        const key = 'fingerprint-abc:0';
+
+        // Day one: first keyed persist mints the record + stamps today.
+        const first = yield* submissions.persist('registration', decoded, key);
+        expect(String(first.submittedAt)).toBe('2026-06-19');
+        const firstJson = yield* readStoredText(
+          submissionKey('registration', first.id),
+        );
+
+        // The clock rolls over to the NEXT calendar day, then the SAME logical
+        // record is re-submitted verbatim (same form + key → same deterministic id
+        // → same bucket object overwritten).
+        time.advanceTo(DAY_TWO_MILLIS);
+        const second = yield* submissions.persist('registration', decoded, key);
+
+        // Same key ⇒ same object, NOT a duplicate.
+        expect(second.id).toBe(first.id);
+        // The preserved date is day ONE (when the registration was made), NOT the
+        // day-two clock the naive recompute would have stamped.
+        expect(String(second.submittedAt)).toBe('2026-06-19');
+        expect(String(second.submittedAt)).not.toBe('2026-06-20');
+
+        // The whole on-bucket record is byte-identical across the cross-day resubmit
+        // (the regression the round-3 `payment`-only assertion could not catch).
+        const secondJson = yield* readStoredText(
+          submissionKey('registration', second.id),
+        );
+        expect(secondJson).toBe(firstJson);
+      }).pipe(
+        provideSubmissions(),
+        Effect.provideService(Clock.Clock, time.clock),
+      );
+    },
+  );
+
+  it.effect(
+    'a keyless (single-record) resubmit the next day mints a FRESH record stamped today — no preservation',
+    () => {
+      const time = controllableClock(DAY_ONE_MILLIS);
+      return Effect.gen(function* () {
+        const submissions = yield* Submissions.Service;
+        const decoded = decodeContact({
+          name: 'Single Record',
+          method: 'email',
+          email: 'single@example.com',
+          message: 'No idempotency key.',
+        });
+
+        // No key ⇒ each submit is a genuinely NEW record (random id, fresh stamp).
+        const first = yield* submissions.persist('contact', decoded);
+        expect(String(first.submittedAt)).toBe('2026-06-19');
+
+        time.advanceTo(DAY_TWO_MILLIS);
+        const second = yield* submissions.persist('contact', decoded);
+
+        // Distinct records, each carrying its OWN day's stamp — nothing preserved.
+        expect(second.id).not.toBe(first.id);
+        expect(String(second.submittedAt)).toBe('2026-06-20');
+      }).pipe(
+        provideSubmissions(),
+        Effect.provideService(Clock.Clock, time.clock),
+      );
+    },
+  );
+});
+
 describe('Submissions.persist — persist is decoupled from notify (settled #8)', () => {
   /**
    * `persist` is persistence ONLY: it has no mailer in its context or call path.
@@ -238,5 +359,196 @@ describe('Submissions.persist — payload derived from the FormDefinition', () =
       )(json);
       expect(back.payload).toEqual(stored.payload);
     }).pipe(provideSubmissions()),
+  );
+});
+
+/**
+ * G5 — the durable Order actor's three NEW bucket transitions
+ * (`markOrderCancelled` / `markOrderExpired` / `markOrderRefunded`), built on the
+ * SAME `flipStatus` never-downgrade-a-terminal discipline as
+ * `markOrderPaid`/`markOrderFailed`. Each pins: the legal source (cancel/expire
+ * only from `pending`; refund only from `paid`), the illegal-source no-op (an
+ * out-of-state order is left UNTOUCHED, its registrants with it), idempotent
+ * re-flip (a second flip to the same terminal returns it unchanged), and the
+ * lock-step registrant stamp (every named registrant carries the mirrored
+ * `PaymentState` arm). `markOrderRefunded` additionally pins the FROZEN
+ * `refundedAt` (the paid → refunded `derive-dont-sync` mirror of `paidAt`).
+ */
+
+/** The two registrant ids every seeded order names — seeded as real submissions. */
+const REGISTRANT_IDS: readonly ListItemId[] = [newListItemId(), newListItemId()];
+
+/** Encode a `RegistrationOrder` to the JSON shape stored on the bucket. */
+const encodeOrder = Schema.encodeSync(Schema.fromJsonString(RegistrationOrder));
+
+/** A group order at `status`, frozen at `amount`, naming {@link REGISTRANT_IDS}. */
+const orderAt = (
+  orderId: string,
+  status: RegistrationOrder['status'],
+  extra: Partial<RegistrationOrder> = {},
+): RegistrationOrder => ({
+  orderId,
+  mode: 'group',
+  sessionId: `cs_${orderId}`,
+  amount: Cents.make(15000),
+  currency: CurrencyCode.make('cad'),
+  receiptEmail: 'leader@example.com',
+  status,
+  registrantIds: [...REGISTRANT_IDS],
+  ...extra,
+});
+
+/** A minimal valid (`payment`-less) exhibitor registrant submission JSON. */
+const registrantSubmissionJson = (id: ListItemId): string =>
+  Schema.encodeSync(
+    Schema.fromJsonString(submissionSchema(defaultRegistrationForm)),
+  )(
+    Schema.decodeUnknownSync(submissionSchema(defaultRegistrationForm))({
+      id,
+      form: 'registration',
+      submittedAt: '2026-06-17',
+      payload: {
+        name: 'Ada Co',
+        phone: '123-456-7890',
+        type: 'exhibitor',
+        synopsis: 'We sell books',
+        website: 'https://example.com',
+        company: 'Ada Books',
+      },
+    }),
+  );
+
+/** Seed one order under its `orderKey` ALONGSIDE the registrant records it names. */
+const seedOrder = (order: RegistrationOrder): Parameters<typeof layerTest>[0] => ({
+  [orderKey('registration', order.orderId)]: {
+    body: encodeOrder(order),
+    contentType: 'application/json',
+  },
+  ...Object.fromEntries(
+    order.registrantIds.map((id) => [
+      submissionKey('registration', id),
+      { body: registrantSubmissionJson(id), contentType: 'application/json' },
+    ]),
+  ),
+});
+
+/** Read one stored registrant submission's `payment._tag` (or `'none'`). */
+const readRegistrantTag = (id: ListItemId) =>
+  Effect.gen(function* () {
+    const storage = yield* Storage.Service;
+    const object = yield* storage.get(submissionKey('registration', id));
+    const text = yield* Effect.promise(() => new Response(object.stream).text());
+    const decoded = yield* Schema.decodeUnknownEffect(
+      Schema.fromJsonString(submissionSchema(defaultRegistrationForm)),
+    )(text);
+    return decoded.payment?._tag ?? 'none';
+  });
+
+describe('Submissions.markOrderCancelled (G5)', () => {
+  it.effect('flips a pending order to cancelled + stamps each registrant', () =>
+    Effect.gen(function* () {
+      const submissions = yield* Submissions.Service;
+      const flipped = yield* submissions.markOrderCancelled(
+        'registration',
+        'ordc',
+      );
+      expect(flipped.status).toBe('cancelled');
+      for (const id of REGISTRANT_IDS) {
+        expect(yield* readRegistrantTag(id)).toBe('cancelled');
+      }
+    }).pipe(provideSubmissions(seedOrder(orderAt('ordc', 'pending')))),
+  );
+
+  it.effect('NEVER downgrades a paid order (illegal source is a no-op)', () =>
+    Effect.gen(function* () {
+      const submissions = yield* Submissions.Service;
+      const order = yield* submissions.markOrderCancelled('registration', 'ordc');
+      // Left untouched: a paid order does not transition, and its registrants
+      // (seeded payment-less) are not stamped cancelled.
+      expect(order.status).toBe('paid');
+      for (const id of REGISTRANT_IDS) {
+        expect(yield* readRegistrantTag(id)).toBe('none');
+      }
+    }).pipe(provideSubmissions(seedOrder(orderAt('ordc', 'paid', {
+      paidAt: IsoDate.make('2026-06-18'),
+    })))),
+  );
+
+  it.effect('is idempotent — a re-flip of an already-cancelled order is a no-op', () =>
+    Effect.gen(function* () {
+      const submissions = yield* Submissions.Service;
+      yield* submissions.markOrderCancelled('registration', 'ordc');
+      const replay = yield* submissions.markOrderCancelled('registration', 'ordc');
+      expect(replay.status).toBe('cancelled');
+    }).pipe(provideSubmissions(seedOrder(orderAt('ordc', 'pending')))),
+  );
+});
+
+describe('Submissions.markOrderExpired (G5)', () => {
+  it.effect('flips a pending order to expired + stamps each registrant', () =>
+    Effect.gen(function* () {
+      const submissions = yield* Submissions.Service;
+      const flipped = yield* submissions.markOrderExpired('registration', 'orde');
+      expect(flipped.status).toBe('expired');
+      for (const id of REGISTRANT_IDS) {
+        expect(yield* readRegistrantTag(id)).toBe('expired');
+      }
+    }).pipe(provideSubmissions(seedOrder(orderAt('orde', 'pending')))),
+  );
+
+  it.effect('NEVER sweeps a paid order (illegal source is a no-op)', () =>
+    Effect.gen(function* () {
+      const submissions = yield* Submissions.Service;
+      const order = yield* submissions.markOrderExpired('registration', 'orde');
+      expect(order.status).toBe('paid');
+    }).pipe(provideSubmissions(seedOrder(orderAt('orde', 'paid', {
+      paidAt: IsoDate.make('2026-06-18'),
+    })))),
+  );
+});
+
+describe('Submissions.markOrderRefunded (G5)', () => {
+  it.effect('flips a PAID order to refunded + freezes refundedAt + stamps registrants', () =>
+    Effect.gen(function* () {
+      const submissions = yield* Submissions.Service;
+      const flipped = yield* submissions.markOrderRefunded(
+        'registration',
+        'ordr',
+      );
+      expect(flipped.status).toBe('refunded');
+      // A real refund date was frozen (the paidAt mirror).
+      expect(flipped.refundedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      for (const id of REGISTRANT_IDS) {
+        expect(yield* readRegistrantTag(id)).toBe('refunded');
+      }
+    }).pipe(provideSubmissions(seedOrder(orderAt('ordr', 'paid', {
+      paidAt: IsoDate.make('2026-06-18'),
+    })))),
+  );
+
+  it.effect('REFUSES a pending order (only paid → refunded is legal)', () =>
+    Effect.gen(function* () {
+      const submissions = yield* Submissions.Service;
+      const order = yield* submissions.markOrderRefunded('registration', 'ordr');
+      // Left untouched: a pending order cannot be refunded.
+      expect(order.status).toBe('pending');
+      expect(order.refundedAt).toBeUndefined();
+      for (const id of REGISTRANT_IDS) {
+        expect(yield* readRegistrantTag(id)).toBe('none');
+      }
+    }).pipe(provideSubmissions(seedOrder(orderAt('ordr', 'pending')))),
+  );
+
+  it.effect('freezes refundedAt once — a re-flip re-reads it (idempotent terminal)', () =>
+    Effect.gen(function* () {
+      const submissions = yield* Submissions.Service;
+      const first = yield* submissions.markOrderRefunded('registration', 'ordr');
+      const replay = yield* submissions.markOrderRefunded('registration', 'ordr');
+      expect(replay.status).toBe('refunded');
+      // The frozen refund date is re-read verbatim, never re-stamped from the clock.
+      expect(replay.refundedAt).toBe(first.refundedAt);
+    }).pipe(provideSubmissions(seedOrder(orderAt('ordr', 'paid', {
+      paidAt: IsoDate.make('2026-06-18'),
+    })))),
   );
 });

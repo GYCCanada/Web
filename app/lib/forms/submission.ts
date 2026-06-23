@@ -110,6 +110,26 @@ export const PaymentState = Schema.TaggedUnion({
     amount: Cents,
     currency: CurrencyCode,
   },
+  // the order was cancelled before it settled (operator/abandon — G5). Carries
+  // the frozen amount/currency it would have charged; nothing was collected, so
+  // there is no `paidAt` (distinct from `failed`, which is a Stripe
+  // `async_payment_failed`).
+  cancelled: {
+    orderId: Schema.String,
+    mode: BillingMode,
+    amount: Cents,
+    currency: CurrencyCode,
+  },
+  // a settled (`paid`) order was refunded (G5) — `refundedAt` is the calendar
+  // date the refund was issued. Carries the frozen amount/currency that was
+  // charged then returned; this is the only arm reachable from `paid`.
+  refunded: {
+    orderId: Schema.String,
+    mode: BillingMode,
+    amount: Cents,
+    currency: CurrencyCode,
+    refundedAt: IsoDate,
+  },
 });
 export type PaymentState = typeof PaymentState.Type;
 
