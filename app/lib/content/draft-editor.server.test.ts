@@ -185,9 +185,10 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
       );
       // The admin view encodes through `DraftSiteContent`; defaults must use the
       // draft-lax field shapes (plain optional strings), not strict `Option`s.
-      expect(
-        Schema.encodeUnknownSync(DraftSiteContent)(result.content),
-      ).toBeDefined();
+      const encoded = yield* Schema.encodeUnknownEffect(DraftSiteContent)(
+        result.content,
+      );
+      expect(encoded).toBeDefined();
     }).pipe(provideEditor(adminStorage({}))),
   );
 

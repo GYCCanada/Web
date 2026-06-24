@@ -682,7 +682,7 @@ export const layer = Layer.effect(
       // published object get written.
       const draftJson = yield* codec.encodeDraftJson(source).pipe(Effect.orDie);
       const strict = yield* parseJson(draftJson).pipe(
-        Effect.map(normalizeMergedSiteContent),
+        Effect.map((parsed) => normalizeMergedSiteContent(parsed as Json)),
         Effect.flatMap(codec.decodePublish),
         Effect.mapError(
           (error) =>

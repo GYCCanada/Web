@@ -258,7 +258,7 @@ describe('applyListEdit — id-keyed, not positional', () => {
     ]) as {
       conferences: ReadonlyArray<{
         parking: { options: ReadonlyArray<{ id: string }> };
-        accommodations: { hotels: ReadonlyArray<{ id: string }> };
+        accommodations: { hotels: ReadonlyArray<{ id: string; roomRates: readonly unknown[] }> };
         meals: { items: ReadonlyArray<{ id: string }> };
       }>;
     };
