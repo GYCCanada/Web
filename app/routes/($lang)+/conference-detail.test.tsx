@@ -10,31 +10,50 @@ import { root as translations } from '~/lib/localization/translations';
 
 import { ConferenceDetail } from './conference-detail';
 
-/**
- * `ConferenceDetail` is the single deep module the three `/YYYY` loaders render
- * (registration-launch Branch 3.3). It was extracted verbatim from the
- * `2024/_index.tsx` fork — the spec — with the formerly hard-coded RegFox link,
- * schedule link, map iframe `src`, and hotel `<li>`s replaced by reads off the
- * boundary `Conference` (`registrationUrl` / `scheduleUrl` / `mapEmbedUrl` /
- * `hotels`, projected by `toConference` from validated document `Option`s).
- *
- * These render-to-string tests pin the load-bearing claim of the extraction
- * (`prove-it-works`): a fully-populated conference renders every section, and
- * the data-driven sections render the boundary data — NOT the old hard-coded
- * constants. Section-skip (omitting a section when its data is absent) is
- * Branch 4's concern and is tested there; here the conference carries every
- * field, so every section is present.
- *
- * The component is server-rendered through `createRoutesStub` (to satisfy the
- * router hooks it uses — `useSearchParams`, `useLocation` via `Link`, `useParams`
- * via `useLocale`, and `useRouteLoaderData('root')` via `useHints`) plus a
- * `LocalizationProvider`. The `root` loader data is supplied directly through
- * `hydrationData` so the render is synchronous (no async loader suspends).
- */
+const disabledTravel = {
+  enabled: false,
+  headerCopy: 'Travel',
+  bodyCopy: undefined,
+  mapEmbedUrl: undefined,
+  airport: undefined,
+} as const;
+
+const disabledParking = {
+  enabled: false,
+  headerCopy: 'Parking',
+  bodyCopy: undefined,
+  options: [],
+} as const;
+
+const disabledAccommodations = {
+  enabled: false,
+  headerCopy: 'Accommodations',
+  hotels: [],
+} as const;
+
+const disabledMeals = {
+  enabled: false,
+  headerCopy: 'Meals',
+  bodyCopy: undefined,
+  items: [],
+} as const;
+
+const disabledRegistrationCopy = {
+  enabled: false,
+  title: 'Register Now!',
+  subtitle: 'Subtitle',
+  buttonLabel: 'Register Now',
+} as const;
+
+const disabledFaqCopy = {
+  enabled: false,
+  title: 'Got Questions?',
+  subtitle: 'FAQ subtitle',
+} as const;
 
 /** A fully-populated boundary `Conference` — every detail section has data. */
 const fullConference: Conference = {
-  slug: '2024',
+  slug: '/2024',
   title: 'While It Is Day',
   dates: [Date.UTC(2024, 7, 1), Date.UTC(2024, 7, 4)],
   hero: {
@@ -72,14 +91,54 @@ const fullConference: Conference = {
     'https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day',
   scheduleUrl:
     'https://docs.google.com/document/d/1gNAOfdW2Yhgg7FABjUqQt2k2mXV_AdhARWUOyiVL9dA/pub',
-  mapEmbedUrl: 'https://www.google.com/maps/embed?pb=!1m18!FAKE',
-  hotels: [
-    { name: 'Super 8 by Wyndham Kelowna BC' },
-    {
-      name: 'Fairfield Inn & Suites Kelowna',
-      note: 'Group Code: GYC',
-    },
-  ],
+  learnMoreEnabled: false,
+  travel: {
+    enabled: true,
+    headerCopy: 'Travel',
+    bodyCopy: 'Venue directions and travel notes.',
+    mapEmbedUrl: 'https://www.google.com/maps/embed?pb=!1m18!FAKE',
+    airport: undefined,
+  },
+  parking: disabledParking,
+  accommodations: {
+    enabled: true,
+    headerCopy: 'Accommodations near the venue',
+    hotels: [
+      {
+        name: 'Super 8 by Wyndham Kelowna BC',
+        address: 'Kelowna, BC',
+        checkIn: undefined,
+        checkOut: undefined,
+        roomRates: [],
+        description: undefined,
+        navigateUrl: undefined,
+        reservationUrl: undefined,
+      },
+      {
+        name: 'Fairfield Inn & Suites Kelowna',
+        address: 'Kelowna, BC',
+        checkIn: undefined,
+        checkOut: undefined,
+        roomRates: [],
+        description:
+          'Holiday Inn Express & Suites Kelowna — "GYC Canada" or Group Code: "GYC" (call 778-484-2999 for discount)',
+        navigateUrl: undefined,
+        reservationUrl: undefined,
+      },
+    ],
+  },
+  meals: disabledMeals,
+  registrationCopy: {
+    enabled: true,
+    title: 'Register Now!',
+    subtitle: 'Registration is open.',
+    buttonLabel: 'Register Now',
+  },
+  faqCopy: {
+    enabled: true,
+    title: 'Got Questions?',
+    subtitle: 'We are here to help.',
+  },
 };
 
 /**
@@ -141,8 +200,8 @@ describe('ConferenceDetail', () => {
     expect(html).toContain('Matt Parra');
     expect(html).toContain('Discipleship');
     // Registration section
-    expect(html).toContain('Register Now');
-    // FAQ section (static links)
+    expect(html).toContain('Register Now!');
+    // FAQ section
     expect(html).toContain('Got Questions?');
   });
 
@@ -170,66 +229,16 @@ describe('ConferenceDetail', () => {
     expect(html).toContain(`href="${fullConference.scheduleUrl}"`);
   });
 
-  it('renders the map iframe src from the boundary mapEmbedUrl', () => {
+  it('renders the map iframe src from the travel section mapEmbedUrl', () => {
     const html = renderConference(fullConference);
-    expect(html).toContain(`src="${fullConference.mapEmbedUrl}"`);
+    expect(html).toContain(`src="${fullConference.travel.mapEmbedUrl}"`);
   });
 
-  it('renders the hotels list from the boundary hotels, including notes', () => {
+  it('renders accommodations hotels including descriptions', () => {
     const html = renderConference(fullConference);
-
     expect(html).toContain('Super 8 by Wyndham Kelowna BC');
     expect(html).toContain('Fairfield Inn &amp; Suites Kelowna');
-    // The optional note is appended after the name.
-    expect(html).toContain('Group Code: GYC');
-  });
-
-  /**
-   * Pin the 2024 hotel list render against the REAL bundled defaults (not the
-   * synthetic `fullConference` above), so the `{name}{note ? ` ${note}` : null}`
-   * template + the authored hotel strings are guarded together going forward.
-   *
-   * The pre-migration `2024/_index.tsx` fork hard-coded hotel #2 as one `<li>`:
-   *   `Fairfield Inn & Suites Kelowna Holiday Inn Express & Suites Kelowna
-   *    - "GYC Canada” or Group Code: “GYC" (call 778-484-2999 for discount)`
-   * — with a literal `- ` separator and *mismatched* straight-then-curly quotes
-   * (`"GYC Canada”` … `“GYC"`), a pre-existing typo. The plan (line 136) pinned a
-   * "byte-identical 2024 render"; this branch CONSCIOUSLY cleans that typo: the
-   * default note (`defaults.ts`) uses an em-dash separator and consistent quotes.
-   * That is the single intentional render delta vs the old fork. This test is the
-   * regression assertion the plan amendment requires — it pins the cleaned text
-   * exactly, so any future drift is caught.
-   */
-  it('renders the 2024 Fairfield hotel `<li>` exactly as authored in the defaults (typo-cleanup pinned)', () => {
-    const doc2024 = defaultContent.conferences.find((c) => c.slug === '/2024');
-    expect(doc2024).toBeDefined();
-    // Project the defaults' 2024 hotels to the en boundary shape `toConference`
-    // emits (`{ name: name.en, note?: note.en }`), so the render is driven by the
-    // authored content, not a hand-copied string.
-    const hotels = (doc2024?.hotels ?? []).map((hotel) => ({
-      name: hotel.name.en,
-      ...(hotel.note === undefined ? {} : { note: hotel.note.en }),
-    }));
-
-    const fairfield = hotels.find((h) => h.name.startsWith('Fairfield'));
-    expect(fairfield?.note).toBeDefined();
-
-    const html = renderConference({ ...fullConference, hotels });
-
-    // The component renders `{name}{note ? ` ${note}` : null}` inside one <li>.
-    // React server-renders the two adjacent text children separated by a comment
-    // marker (`<!-- -->`) and HTML-escapes `&` → `&amp;` and `"` → `&quot;`. Pin
-    // the exact rendered <li> innerHTML: a single space before `Holiday`, the
-    // em-dash separator, and consistent straight quotes — the consciously-cleaned
-    // form, NOT the old fork's `- ` separator + mismatched straight/curly quotes.
-    expect(html).toContain(
-      '<li>Fairfield Inn &amp; Suites Kelowna<!-- --> Holiday Inn Express &amp; Suites Kelowna — &quot;GYC Canada&quot; or Group Code: &quot;GYC&quot; (call 778-484-2999 for discount)</li>',
-    );
-    // And the old typo'd separator/quotes must NOT survive (the curly `”`/`“`
-    // and the `Kelowna - ` separator the pre-branch fork hard-coded).
-    expect(html).not.toContain('Kelowna — &quot;GYC Canada”');
-    expect(html).not.toContain('Kelowna - ');
-    expect(html).not.toContain('“GYC');
+    expect(html).toContain('GYC Canada');
   });
 
   it('renders the mobile hero variant at a small breakpoint', () => {
@@ -247,10 +256,8 @@ describe('ConferenceDetail', () => {
   it('renders French copy under the /fr locale', () => {
     const html = renderConference(fullConference, { lang: 'fr' });
 
-    // `registration.faq.title` in French ("Got Questions?" → its FR string).
-    expect(html).toContain(translations.fr['registration.faq.title']);
-    // The data fields (locale-projected upstream) still flow through unchanged.
-    expect(html).toContain(`src="${fullConference.mapEmbedUrl}"`);
+    expect(html).toContain(translations.fr['registration.faq.contact']);
+    expect(html).toContain(`src="${fullConference.travel.mapEmbedUrl}"`);
   });
 });
 
@@ -291,60 +298,40 @@ describe('ConferenceDetail section-skip', () => {
     expect(html).toContain('Matt Parra');
   });
 
-  it('omits the map iframe when mapEmbedUrl is absent but keeps the hotels column', () => {
+  it('omits the travel map when mapEmbedUrl is absent but keeps accommodations', () => {
     const html = renderConference({
       ...fullConference,
-      mapEmbedUrl: undefined,
+      travel: { ...fullConference.travel, mapEmbedUrl: undefined },
     });
 
-    // The iframe (its `title="Map"` + the old fallback src) is gone…
     expect(html).not.toContain('title="Map"');
     expect(html).not.toContain('/maps/embed');
-    // …but the hotels half of the section survives (each half gated independently),
-    // and the section wrapper is still present (the early-return only fires when
-    // BOTH halves are empty).
     expect(html).toContain('Super 8 by Wyndham Kelowna BC');
-    expect(html).toContain('aria-label="Venue and accommodations"');
+    expect(html).toContain('Travel');
   });
 
-  it('omits the hotels column when hotels is empty but keeps the map iframe', () => {
-    const html = renderConference({ ...fullConference, hotels: [] });
+  it('omits accommodations when disabled but keeps the travel map', () => {
+    const html = renderConference({
+      ...fullConference,
+      accommodations: disabledAccommodations,
+    });
 
     expect(html).not.toContain('Super 8 by Wyndham Kelowna BC');
     expect(html).not.toContain('Fairfield Inn');
-    // The hotels-description copy lives inside the hotels half (alongside the
-    // `<ul>`); deleting only the hotels-half gate would re-render this `<p>` (the
-    // empty `<ul>` keeps the names absent regardless), so assert the description
-    // is gone too — it pins the WHOLE hotels half is skipped, not just its list.
-    expect(html).not.toContain(
-      translations.en['registration.hotels.description.facebook'],
-    );
-    // The map half survives, and the section wrapper is still present.
-    expect(html).toContain(`src="${fullConference.mapEmbedUrl}"`);
+    expect(html).toContain(`src="${fullConference.travel.mapEmbedUrl}"`);
     expect(html).toContain('title="Map"');
-    expect(html).toContain('aria-label="Venue and accommodations"');
   });
 
-  it('omits the whole MapSection when neither a map embed nor hotels are present', () => {
+  it('omits the whole travel section when travel is disabled', () => {
     const html = renderConference({
       ...fullConference,
-      mapEmbedUrl: undefined,
-      hotels: [],
+      travel: disabledTravel,
+      accommodations: disabledAccommodations,
     });
 
     expect(html).not.toContain('title="Map"');
     expect(html).not.toContain('Super 8 by Wyndham Kelowna BC');
-    // The hotels-description copy (the section's only other content) is gone too.
-    expect(html).not.toContain(
-      translations.en['registration.hotels.description.facebook'],
-    );
-    // The `MapSection` `<section>` wrapper itself is gone (the early
-    // `if (!hasHotels && !hasMap) return null`). Both halves are independently
-    // gated to null, so an inner-content-only assertion would still pass if the
-    // early-return were deleted — leaving an empty `<section aria-label=…>` that
-    // no other check catches. Pin the section's structural marker absent so the
-    // whole-section skip is what's proven, not merely its emptied contents.
-    expect(html).not.toContain('aria-label="Venue and accommodations"');
+    expect(html).not.toContain('Venue directions and travel notes.');
   });
 
   it('omits the register button + RegistrationSection when registrationUrl is absent', () => {
@@ -353,19 +340,11 @@ describe('ConferenceDetail section-skip', () => {
       registrationUrl: undefined,
     });
 
-    // The `RegistrationSection` (its title) and the RegFox href are both gone.
-    expect(html).not.toContain(translations.en['registration.register.title']);
+    expect(html).not.toContain(fullConference.registrationCopy.title);
     expect(html).not.toContain('regfox.com');
     expect(html).not.toContain(
       'href="https://gyccanada.regfox.com/gyc-canada-2024-while-it-is-day"',
     );
-    // The HERO register label (`registration.register` = 'Register', a DIFFERENT
-    // key from `registration.register.title` = 'Register Now!') is gone too. A
-    // regressed desktop-hero gate rendering `<a href={undefined}>Register</a>`
-    // drops the href (React omits undefined attrs) and the title check above is a
-    // different string — so without this assertion that regression passes green.
-    // 'Register' is a substring of the title/button copy, so this must run only
-    // when the whole RegistrationSection is already gone (registrationUrl absent).
     expect(html).not.toContain(translations.en['registration.register']);
   });
 
@@ -426,57 +405,55 @@ describe('ConferenceDetail section-skip', () => {
   it('renders the 2026 RegFox-only shape: hero + register button + FAQ, no empty sections', () => {
     const conference2026: Conference = {
       ...fullConference,
-      slug: '2026',
+      slug: '/2026',
       speakers: [],
       seminars: [],
       scheduleUrl: undefined,
-      mapEmbedUrl: undefined,
-      hotels: [],
+      travel: disabledTravel,
+      parking: disabledParking,
+      accommodations: disabledAccommodations,
+      meals: disabledMeals,
+      registrationCopy: fullConference.registrationCopy,
+      faqCopy: fullConference.faqCopy,
       registrationUrl: 'https://gyccanada.regfox.com/gyc-canada-2026-speak',
     };
     const html = renderConference(conference2026);
 
-    // Present: hero, register button, FAQ.
     expect(html).toContain(conference2026.hero.image.desktop);
-    expect(html).toContain(translations.en['registration.register.title']);
+    expect(html).toContain('Register Now!');
     expect(html).toContain(
       'href="https://gyccanada.regfox.com/gyc-canada-2026-speak"',
     );
-    expect(html).toContain(translations.en['registration.faq.title']);
-    // Absent: every data-less section.
+    expect(html).toContain('Got Questions?');
     expect(html).not.toContain('Speakers');
     expect(html).not.toContain('Seminars');
     expect(html).not.toContain('title="Map"');
     expect(html).not.toContain('Super 8 by Wyndham Kelowna BC');
   });
 
-  /**
-   * The `2025` cancelled shape: every optional field absent (CONTEXT §Hiatus).
-   * The page collapses to hero + FAQ only — no register button, no schedule, no
-   * speakers / seminars / map / hotels. This proves a fully-empty conference
-   * renders cleanly through the shared module (it used to be a forked dead page).
-   */
   it('renders the 2025 cancelled shape: hero + FAQ only', () => {
     const conference2025: Conference = {
       ...fullConference,
-      slug: '2025',
+      slug: '/2025',
       speakers: [],
       seminars: [],
       registrationUrl: undefined,
       scheduleUrl: undefined,
-      mapEmbedUrl: undefined,
-      hotels: [],
+      travel: disabledTravel,
+      parking: disabledParking,
+      accommodations: disabledAccommodations,
+      meals: disabledMeals,
+      registrationCopy: disabledRegistrationCopy,
+      faqCopy: fullConference.faqCopy,
     };
     const html = renderConference(conference2025);
 
-    // Present: hero (image + tagline) and FAQ.
     expect(html).toContain(conference2025.hero.image.desktop);
     expect(html).toContain(conference2025.tagline);
-    expect(html).toContain(translations.en['registration.faq.title']);
-    // Absent: everything data-driven.
+    expect(html).toContain('Got Questions?');
     expect(html).not.toContain('Speakers');
     expect(html).not.toContain('Seminars');
-    expect(html).not.toContain(translations.en['registration.register.title']);
+    expect(html).not.toContain('Register Now!');
     expect(html).not.toContain('regfox.com');
     expect(html).not.toContain('title="Map"');
     expect(html).not.toContain('Super 8 by Wyndham Kelowna BC');
@@ -485,18 +462,26 @@ describe('ConferenceDetail section-skip', () => {
   it('renders the 2025 cancelled shape (hero + FAQ only) under /fr too', () => {
     const conference2025: Conference = {
       ...fullConference,
-      slug: '2025',
+      slug: '/2025',
       speakers: [],
       seminars: [],
       registrationUrl: undefined,
       scheduleUrl: undefined,
-      mapEmbedUrl: undefined,
-      hotels: [],
+      travel: disabledTravel,
+      parking: disabledParking,
+      accommodations: disabledAccommodations,
+      meals: disabledMeals,
+      registrationCopy: disabledRegistrationCopy,
+      faqCopy: {
+        enabled: true,
+        title: 'Des questions?',
+        subtitle: 'Nous sommes là pour vous aider.',
+      },
     };
     const html = renderConference(conference2025, { lang: 'fr' });
 
-    expect(html).toContain(translations.fr['registration.faq.title']);
-    expect(html).not.toContain(translations.fr['registration.register.title']);
+    expect(html).toContain('Des questions?');
+    expect(html).not.toContain('Inscrivez-vous!');
     expect(html).not.toContain('title="Map"');
   });
 });

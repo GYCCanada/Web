@@ -270,6 +270,46 @@ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', ()
     );
   });
 
+  it('add parking / hotel / meal reopens from draft even without a clock advance (same-second reload)', async () => {
+    const seed = await seedBody();
+    const parkingId = newListItemId();
+    const hotelId = newListItemId();
+    const mealId = newListItemId();
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+
+        // NO TestClock.adjust — the draft is written in the same second as the
+        // epoch-seeded published document (second-granular S3/MinIO behaviour).
+        yield* editor.applyListOps(siteScope, [
+          addOp('conferences./2024.parking.options', parkingId),
+          addOp('conferences./2024.accommodations.hotels', hotelId),
+          addOp('conferences./2024.meals.items', mealId),
+        ]);
+
+        const draft = yield* editor.load(siteScope);
+        const conf = draft.content.conferences.find((c) => c.slug === '/2024');
+        return {
+          source: draft.source,
+          parkingIds: (conf?.parking.options ?? []).map((item) => String(item.id)),
+          hotelIds: (conf?.accommodations.hotels ?? []).map((item) => String(item.id)),
+          mealIds: (conf?.meals.items ?? []).map((item) => String(item.id)),
+          addedHotelRoomRates: conf?.accommodations.hotels.find(
+            (item) => String(item.id) === String(hotelId),
+          )?.roomRates,
+        };
+      }),
+      { [SITE_CONTENT_KEY]: { body: seed } },
+    );
+
+    expect(result.source).toBe('draft');
+    expect(result.parkingIds).toContain(String(parkingId));
+    expect(result.hotelIds).toContain(String(hotelId));
+    expect(result.mealIds).toContain(String(mealId));
+    expect(result.addedHotelRoomRates).toEqual([]);
+  });
+
   it('add → untouched Save draft succeeds (an incomplete item blocks publish, not save)', async () => {
     const seed = await seedBody();
     const newId = newListItemId();

@@ -7,7 +7,7 @@ import {
   useNavigation,
 } from 'react-router';
 
-import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
+import { adminMeta, adminRedirectWithStatus, adminFlashStatus, adminSecurityHeaders } from '~/lib/admin-headers';
 import { Auth } from '~/lib/auth.server';
 import {
   DraftEditor,
@@ -25,7 +25,7 @@ import {
 import { prepareImage } from '~/lib/content/image-optimize.server';
 import { collectListOps, fieldName } from '~/lib/content/list-edit';
 import { PAGE_SPECS, PageId } from '~/lib/content/pages/registry';
-import { ListItemId, newListItemId } from '~/lib/content/schema';
+import { ListItemId } from '~/lib/content/schema';
 import { Env } from '~/lib/env.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction, routeHandler } from '~/lib/effect/route';
@@ -127,6 +127,7 @@ const requirePageId = Effect.fn('admin/pages.requirePageId')(function* () {
 export const loader = routeHandler(function* () {
   yield* requireAdmin();
   const page = yield* requirePageId();
+  const { request } = yield* ReactRouterContext;
 
   const editor = yield* DraftEditor.Service;
   const env = yield* Env.Service;
@@ -136,8 +137,9 @@ export const loader = routeHandler(function* () {
   const encode = Schema.encodeUnknownEffect(PAGE_SPECS[page].draftSchema);
   const encoded = (yield* encode(content)) as Json;
   const bucketConfigured = Option.isSome(env.bucket);
+  const status = adminFlashStatus(request);
 
-  return { page, encoded, source, bucketConfigured };
+  return { page, encoded, source, bucketConfigured, status };
 });
 
 export const action = routeAction(function* () {
@@ -207,8 +209,9 @@ export const action = routeAction(function* () {
       .applyImageUpload(scope, uploadTarget, key)
       .pipe(Effect.result);
     if (applied._tag === 'Failure') return issueResponse(applied.failure);
-    return redirect(
-      `/admin/pages/${page}?status=${encodeURIComponent(`Image uploaded: ${key}`)}`,
+    return adminRedirectWithStatus(
+      `/admin/pages/${page}`,
+      `Image uploaded: ${key}`,
     );
   }
 
@@ -223,7 +226,7 @@ export const action = routeAction(function* () {
     }
     const applied = yield* editor.applyListOps(scope, ops).pipe(Effect.result);
     if (applied._tag === 'Failure') return issueResponse(applied.failure);
-    return redirect(`/admin/pages/${page}?status=List%20updated.`);
+    return Response.json({ ok: true as const });
   }
 
   if (intent !== 'save-draft' && intent !== 'publish') {
@@ -246,13 +249,14 @@ export const action = routeAction(function* () {
   if (edited._tag === 'Failure') return issueResponse(edited.failure);
 
   if (intent === 'save-draft') {
-    return redirect(`/admin/pages/${page}?status=Draft%20saved.`);
+    return adminRedirectWithStatus(`/admin/pages/${page}`, 'Draft saved.');
   }
 
   const published = yield* editor.publish(scope).pipe(Effect.result);
   if (published._tag === 'Failure') return issueResponse(published.failure);
-  return redirect(
-    `/admin/pages/${page}?status=Published.%20Live%20on%20the%20next%20page%20load.`,
+  return adminRedirectWithStatus(
+    `/admin/pages/${page}`,
+    'Published. Live on the next page load.',
   );
 });
 
@@ -327,7 +331,7 @@ function ListSection({
     <fieldset className="space-y-3">
       <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
         <span>{title}</span>
-        <AddItemButton listPath={listPath} label={addLabel} newId={newListItemId()} />
+        <AddItemButton listPath={listPath} label={addLabel} />
       </legend>
       {items.map((item, index) => {
         // Re-assert the `ListItemId` brand at this view boundary: the encoded
@@ -681,16 +685,11 @@ function PageEditor({
 }
 
 export default function AdminPageEditor() {
-  const { page, encoded, source, bucketConfigured } =
+  const { page, encoded, source, bucketConfigured, status } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<ActionResponse>();
   const navigation = useNavigation();
   const submitting = navigation.state === 'submitting';
-
-  const status =
-    typeof window === 'undefined'
-      ? null
-      : new URLSearchParams(window.location.search).get('status');
 
   return (
     <div className="space-y-6">

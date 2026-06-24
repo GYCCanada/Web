@@ -13,11 +13,12 @@ import {
 } from '../content.server';
 import {
   deepMerge,
+  normalizeMergedSiteContent,
   pruneKeylessImageOverrides,
   setAtPath,
   type Json,
 } from './admin-form';
-import { defaultContent } from './defaults';
+import { defaultDraftContent } from './defaults';
 import { backfillListItemIds } from './id-backfill';
 import { applyListEdit, type ListOp } from './list-edit';
 import {
@@ -321,7 +322,7 @@ const encodeSitePublishJson = Schema.encodeUnknownEffect(
 
 const siteCodec: ScopeCodec = {
   keys: scopeKeys(siteScope),
-  default: defaultContent,
+  default: defaultDraftContent,
   fromBucket: (json) =>
     parseJson(json).pipe(
       Effect.map(backfillListItemIds),
@@ -417,11 +418,13 @@ export class Service extends Context.Service<
   {
     /**
      * Load the document the `/admin` editor edits for `scope`: the unpublished
-     * draft when it is strictly newer than the published document, else the
+     * draft when it is at least as new as the published document, else the
      * published document, else the bundled defaults. The reconciliation is by
-     * bucket `lastModified`, not by mere draft *presence*, so a stale or
-     * failed-delete draft can never reopen as the edit source. Never fails (a
-     * bad draft is logged and ignored), so the editor always opens.
+     * bucket `lastModified`, not by mere draft *presence*, so a stale draft
+     * written before the last publish still loses. A tie goes to the draft so a
+     * list-op saved in the same second as the published object (common on
+     * second-granular S3/MinIO) reopens with the edit. Never fails (a bad draft
+     * is logged and ignored), so the editor always opens.
      */
     readonly load: <S extends ContentScope>(
       scope: S,
@@ -524,12 +527,12 @@ export const layer = Layer.effect(
           const publishedHead = yield* storage
             .head(publishedKey)
             .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
-          const draftIsNewer =
+          const draftIsAtLeastAsNew =
             Option.isSome(draftHead) &&
             Option.isSome(publishedHead) &&
-            draftHead.value.lastModified.getTime() >
+            draftHead.value.lastModified.getTime() >=
               publishedHead.value.lastModified.getTime();
-          if (draftIsNewer) {
+          if (draftIsAtLeastAsNew) {
             return { content: draft.value, source: 'draft' as const };
           }
           return { content: published.value, source: 'published' as const };
@@ -614,7 +617,7 @@ export const layer = Layer.effect(
       // image object never lands — that object is draft-valid but PUBLISH-invalid
       // (`<slot>.key: Missing key`). A no-op for every scope without those slots.
       const pruned = pruneKeylessImageOverrides(base, override);
-      const merged = deepMerge(base, pruned);
+      const merged = normalizeMergedSiteContent(deepMerge(base, pruned));
       const decoded = yield* decodeOrReject(codec, merged);
       return (yield* storeDraft(codec, decoded)) as ScopeEncoded<S>;
     });
@@ -679,6 +682,7 @@ export const layer = Layer.effect(
       // published object get written.
       const draftJson = yield* codec.encodeDraftJson(source).pipe(Effect.orDie);
       const strict = yield* parseJson(draftJson).pipe(
+        Effect.map((parsed) => normalizeMergedSiteContent(parsed as Json)),
         Effect.flatMap(codec.decodePublish),
         Effect.mapError(
           (error) =>

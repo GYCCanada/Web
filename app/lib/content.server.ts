@@ -109,6 +109,74 @@ export interface Seminar {
   readonly description: string;
 }
 
+export interface ConferenceAirportTransitOption {
+  readonly description: string;
+}
+
+export interface ConferenceAirport {
+  readonly name: string;
+  readonly transitOptions: readonly ConferenceAirportTransitOption[];
+}
+
+export interface ConferenceTravelSection {
+  readonly enabled: boolean;
+  readonly headerCopy: string;
+  readonly bodyCopy: string | undefined;
+  readonly mapEmbedUrl: string | undefined;
+  readonly airport: ConferenceAirport | undefined;
+}
+
+export interface ConferenceParkingOption {
+  readonly title: string;
+  readonly link: string | undefined;
+  readonly address: string | undefined;
+  readonly description: string | undefined;
+}
+
+export interface ConferenceParkingSection {
+  readonly enabled: boolean;
+  readonly headerCopy: string;
+  readonly bodyCopy: string | undefined;
+  readonly options: readonly ConferenceParkingOption[];
+}
+
+export interface ConferenceAccommodationHotel {
+  readonly name: string;
+  readonly address: string;
+  readonly checkIn: string | undefined;
+  readonly checkOut: string | undefined;
+  readonly roomRates: readonly { readonly description: string }[];
+  readonly description: string | undefined;
+  readonly navigateUrl: string | undefined;
+  readonly reservationUrl: string | undefined;
+}
+
+export interface ConferenceAccommodationsSection {
+  readonly enabled: boolean;
+  readonly headerCopy: string;
+  readonly hotels: readonly ConferenceAccommodationHotel[];
+}
+
+export interface ConferenceMealsSection {
+  readonly enabled: boolean;
+  readonly headerCopy: string;
+  readonly bodyCopy: string | undefined;
+  readonly items: readonly { readonly label: string; readonly price: string }[];
+}
+
+export interface ConferenceRegistrationCopySection {
+  readonly enabled: boolean;
+  readonly title: string;
+  readonly subtitle: string;
+  readonly buttonLabel: string;
+}
+
+export interface ConferenceFaqCopySection {
+  readonly enabled: boolean;
+  readonly title: string;
+  readonly subtitle: string;
+}
+
 export interface Conference {
   readonly slug: string;
   readonly title: string;
@@ -141,25 +209,15 @@ export interface Conference {
    * document field is the correctly-named `accentColor` (CMS decision D5).
    */
   readonly theme: string;
-  /**
-   * The optional detail-page data the forked `/YYYY` pages hard-coded
-   * (registration-launch Branch 3, settled #4). The document models each as
-   * `Option` (`OptionFromOptionalKey` / empty list); this boundary projects them
-   * to `string | undefined` and a plain object array so React never sees an
-   * `Option<string>` (`boundary-discipline`). An absent field is `undefined`, an
-   * absent list is `[]` — that is the section-presence discriminator Branch 4's
-   * section-skip gates on (`registrationUrl !== undefined`,
-   * `mapEmbedUrl !== undefined`, `hotels.length > 0`). Each URL crossed the
-   * `ExternalHttpsUrl` / `GoogleMapsEmbedUrl` brand on decode, so the rendered
-   * `href` / iframe `src` is already an XSS-safe https string.
-   */
   readonly registrationUrl: string | undefined;
   readonly scheduleUrl: string | undefined;
-  readonly mapEmbedUrl: string | undefined;
-  readonly hotels: readonly {
-    readonly name: string;
-    readonly note?: string;
-  }[];
+  readonly learnMoreEnabled: boolean;
+  readonly travel: ConferenceTravelSection;
+  readonly parking: ConferenceParkingSection;
+  readonly accommodations: ConferenceAccommodationsSection;
+  readonly meals: ConferenceMealsSection;
+  readonly registrationCopy: ConferenceRegistrationCopySection;
+  readonly faqCopy: ConferenceFaqCopySection;
 }
 
 /**
@@ -218,21 +276,6 @@ const toSeminar = (seminar: DocSeminar, locale: Locale): Seminar => ({
   description: seminar.description[locale],
 });
 
-/**
- * Project a document `Hotel` to the boundary shape: the bilingual `name`/`note`
- * `Text`s collapse to this locale's string, and the optional `note` becomes a
- * `string | undefined` (omitted when the document carries no note). The `id`
- * (list identity, ADR 0006) is not part of the read boundary the detail page
- * renders, so it is dropped here.
- */
-const toHotel = (
-  hotel: DocConference['hotels'][number],
-  locale: Locale,
-): Conference['hotels'][number] => ({
-  name: hotel.name[locale],
-  ...(hotel.note === undefined ? {} : { note: hotel.note[locale] }),
-});
-
 const toConference = (
   conference: DocConference,
   locale: Locale,
@@ -241,8 +284,6 @@ const toConference = (
   title: conference.themeName[locale],
   theme: conference.accentColor,
   hero: {
-    // Hero art is per-locale on disk; select this locale's key for each crop
-    // and resolve it to the served URL so the rendered `src` is unchanged.
     image: {
       desktop: assetUrl(conference.hero.desktop.key[locale]),
       mobile: assetUrl(conference.hero.mobile.key[locale]),
@@ -269,16 +310,87 @@ const toConference = (
   speakers: conference.speakers.map((speaker) => toSpeaker(speaker, locale)),
   seminars: conference.seminars.map((seminar) => toSeminar(seminar, locale)),
   promos: [...conference.promos],
-  // The optional detail-page fields: each document `Option` projects to
-  // `string | undefined` via `Option.getOrUndefined` (the convention for ALL
-  // new optional Conference fields — `Option` at the document layer, plain
-  // `string | undefined` at the boundary so React never sees an `Option`,
-  // matching the `registration` `Option.isSome` gate above). `hotels` projects
-  // each item to this locale's strings; an empty document list stays `[]`.
   registrationUrl: Option.getOrUndefined(conference.registrationUrl),
   scheduleUrl: Option.getOrUndefined(conference.scheduleUrl),
-  mapEmbedUrl: Option.getOrUndefined(conference.mapEmbedUrl),
-  hotels: conference.hotels.map((hotel) => toHotel(hotel, locale)),
+  learnMoreEnabled: conference.learnMoreEnabled,
+  travel: {
+    enabled: conference.travel.enabled,
+    headerCopy: conference.travel.headerCopy[locale],
+    bodyCopy:
+      conference.travel.bodyCopy === undefined
+        ? undefined
+        : conference.travel.bodyCopy[locale],
+    mapEmbedUrl: Option.getOrUndefined(conference.travel.mapEmbedUrl),
+    airport:
+      conference.travel.airport === undefined
+        ? undefined
+        : {
+            name: conference.travel.airport.name[locale],
+            transitOptions: conference.travel.airport.transitOptions.map(
+              (opt) => ({ description: opt.description[locale] }),
+            ),
+          },
+  },
+  parking: {
+    enabled: conference.parking.enabled,
+    headerCopy: conference.parking.headerCopy[locale],
+    bodyCopy:
+      conference.parking.bodyCopy === undefined
+        ? undefined
+        : conference.parking.bodyCopy[locale],
+    options: conference.parking.options.map((option) => ({
+      title: option.title[locale],
+      link: Option.getOrUndefined(option.link),
+      address:
+        option.address === undefined ? undefined : option.address[locale],
+      description:
+        option.description === undefined
+          ? undefined
+          : option.description[locale],
+    })),
+  },
+  accommodations: {
+    enabled: conference.accommodations.enabled,
+    headerCopy: conference.accommodations.headerCopy[locale],
+    hotels: conference.accommodations.hotels.map((hotel) => ({
+      name: hotel.name[locale],
+      address: hotel.address[locale],
+      checkIn:
+        hotel.checkIn === undefined ? undefined : hotel.checkIn[locale],
+      checkOut:
+        hotel.checkOut === undefined ? undefined : hotel.checkOut[locale],
+      roomRates: hotel.roomRates.map((rate) => ({
+        description: rate.description[locale],
+      })),
+      description:
+        hotel.description === undefined ? undefined : hotel.description[locale],
+      navigateUrl: Option.getOrUndefined(hotel.navigateUrl),
+      reservationUrl: Option.getOrUndefined(hotel.reservationUrl),
+    })),
+  },
+  meals: {
+    enabled: conference.meals.enabled,
+    headerCopy: conference.meals.headerCopy[locale],
+    bodyCopy:
+      conference.meals.bodyCopy === undefined
+        ? undefined
+        : conference.meals.bodyCopy[locale],
+    items: conference.meals.items.map((item) => ({
+      label: item.label[locale],
+      price: item.price[locale],
+    })),
+  },
+  registrationCopy: {
+    enabled: conference.registrationCopy.enabled,
+    title: conference.registrationCopy.title[locale],
+    subtitle: conference.registrationCopy.subtitle[locale],
+    buttonLabel: conference.registrationCopy.buttonLabel[locale],
+  },
+  faqCopy: {
+    enabled: conference.faqCopy.enabled,
+    title: conference.faqCopy.title[locale],
+    subtitle: conference.faqCopy.subtitle[locale],
+  },
 });
 
 const toTeamMember = (member: DocTeamMember): TeamMember => ({

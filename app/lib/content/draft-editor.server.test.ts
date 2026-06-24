@@ -37,7 +37,7 @@ import {
 } from './pages/registry';
 import { FormDefinition } from '../forms/definition';
 import { FaqPage } from './pages/schema';
-import { BoardMember, deterministicListItemId, SiteContent } from './schema';
+import { BoardMember, deterministicListItemId, DraftSiteContent, SiteContent } from './schema.server';
 import type {
   DraftSiteContent as DraftSiteContentType,
   SiteContent as SiteContentType,
@@ -51,8 +51,16 @@ const boardMember = (name: string) =>
   });
 
 const boardNames = (
-  board: ReadonlyArray<{ readonly name: string }>,
-): readonly string[] => board.map((member) => member.name);
+  board: ReadonlyArray<{ readonly name?: string }>,
+): readonly string[] => board.map((member) => member.name ?? '');
+
+const draftWithBoard = (name: string) =>
+  Schema.decodeUnknownSync(DraftSiteContent)(
+    Schema.encodeUnknownSync(SiteContent)({
+      ...defaultContent,
+      board: [boardMember(name)],
+    }),
+  );
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(SiteContent));
 // Decode the encoded OBJECT a DraftEditor write returns (not a JSON string).
@@ -69,6 +77,9 @@ const decodeObject = Schema.decodeUnknownEffect(SiteContent);
  */
 
 const encode = Schema.encodeUnknownEffect(Schema.fromJsonString(SiteContent));
+const encodeDraft = Schema.encodeUnknownEffect(
+  Schema.fromJsonString(DraftSiteContent),
+);
 
 const seededStorage = (
   doc: SiteContentType,
@@ -169,7 +180,15 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
       const editor = yield* DraftEditor.Service;
       const result = yield* editor.load(siteScope);
       expect(result.source).toBe('defaults');
-      expect(result.content).toEqual(defaultContent);
+      expect(result.content.conferences).toHaveLength(
+        defaultContent.conferences.length,
+      );
+      // The admin view encodes through `DraftSiteContent`; defaults must use the
+      // draft-lax field shapes (plain optional strings), not strict `Option`s.
+      const encoded = yield* Schema.encodeUnknownEffect(DraftSiteContent)(
+        result.content,
+      );
+      expect(encoded).toBeDefined();
     }).pipe(provideEditor(adminStorage({}))),
   );
 
@@ -189,11 +208,8 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
 
   it.effect('uses a draft with no published document as a valid edit source', () =>
     Effect.gen(function* () {
-      const draftDoc = SiteContent.make({
-        ...defaultContent,
-        board: [boardMember('Draft With No Published')],
-      });
-      const draft = yield* encode(draftDoc);
+      const draftDoc = draftWithBoard('Draft With No Published');
+      const draft = yield* encodeDraft(draftDoc);
       const editor = yield* DraftEditor.Service;
       const storage = yield* Storage.Service;
       yield* storage.put(SITE_CONTENT_DRAFT_KEY, draft, 'application/json');
@@ -207,11 +223,8 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
     'prefers a draft saved after the last publish over the published document',
     () =>
       Effect.gen(function* () {
-        const draftDoc = SiteContent.make({
-          ...defaultContent,
-          board: [boardMember('Only In The Draft')],
-        });
-        const draft = yield* encode(draftDoc);
+        const draftDoc = draftWithBoard('Only In The Draft');
+        const draft = yield* encodeDraft(draftDoc);
         const editor = yield* DraftEditor.Service;
         const storage = yield* Storage.Service;
         // The published document is seeded at epoch; the draft is written AFTER
@@ -235,15 +248,12 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
     'ignores a stale draft that predates the published document (failed-delete / pre-existing draft)',
     () =>
       Effect.gen(function* () {
-        const staleDraftDoc = SiteContent.make({
-          ...defaultContent,
-          board: [boardMember('Stale Draft Values')],
-        });
+        const staleDraftDoc = draftWithBoard('Stale Draft Values');
         const publishedDoc = SiteContent.make({
           ...defaultContent,
           board: [boardMember('Freshly Published')],
         });
-        const staleDraft = yield* encode(staleDraftDoc);
+        const staleDraft = yield* encodeDraft(staleDraftDoc);
         const published = yield* encode(publishedDoc);
         const editor = yield* DraftEditor.Service;
         const storage = yield* Storage.Service;

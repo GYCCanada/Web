@@ -4,11 +4,7 @@ import { Clock, Context, DateTime, Effect, Layer, Schema } from 'effect';
 
 import { Content } from '../content.server';
 import { type FormId, submissionKey } from '../content/pages/registry';
-import {
-  deterministicListItemId,
-  IsoDate,
-  newListItemId,
-} from '../content/schema';
+import { deterministicListItemId, IsoDate, newListItemId } from '../content/schema.server';
 import { Storage, type StorageError } from '../storage.server';
 
 import type { DecodedForm } from './decode';

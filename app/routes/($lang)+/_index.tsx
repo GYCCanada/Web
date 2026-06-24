@@ -180,6 +180,7 @@ function Hero() {
 
 function MobileHero() {
   const { conference } = useLoaderData<typeof loader>();
+  const translate = useTranslate();
   return (
     <section
       style={
@@ -210,11 +211,21 @@ function MobileHero() {
         </h2>
       </div>
       <p className="text-xl italic">{conference.tagline}</p>
+      {conference.learnMoreEnabled ? (
+        <Link
+          to={conference.slug}
+          className={buttonStyle}
+          data-variant="accent"
+        >
+          {translate("main.reserve")}
+        </Link>
+      ) : null}
     </section>
   );
 }
 function DesktopHero() {
   const { conference } = useLoaderData<typeof loader>();
+  const translate = useTranslate();
   // const hints = useHints();
 
   return (
@@ -259,15 +270,15 @@ function DesktopHero() {
             </h1>
           </div>
           <div className="flex flex-col gap-10">
-            <div>
-              {/* <Link
+            {conference.learnMoreEnabled ? (
+              <Link
                 to={conference.slug}
-                className={clsx(buttonStyle)}
+                className={buttonStyle}
                 data-variant="accent"
               >
-                {translate('main.reserve')}
-              </Link> */}
-            </div>
+                {translate("main.reserve")}
+              </Link>
+            ) : null}
           </div>
         </div>
       </div>

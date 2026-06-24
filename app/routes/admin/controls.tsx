@@ -1,7 +1,8 @@
-import { useRef } from 'react';
-import { useFetcher } from 'react-router';
+import { useEffect, useRef } from 'react';
+import { useFetcher, useRevalidator } from 'react-router';
 
 import { listOpFieldName } from '~/lib/content/list-edit';
+import { newListItemId } from '~/lib/content/schema';
 
 /**
  * Shared `/admin` editor controls + field inputs (registration-launch Branch 5.5).
@@ -214,19 +215,20 @@ export function ImageUpload({
 export function ListOpButton({
   listPath,
   kind,
-  value,
+  value = '',
   label,
   variant = 'default',
   disabled = false,
 }: {
   readonly listPath: string;
   readonly kind: 'add' | 'remove' | 'reorder';
-  readonly value: string;
+  readonly value?: string;
   readonly label: string;
   readonly variant?: 'default' | 'add' | 'danger';
   readonly disabled?: boolean;
 }) {
   const fetcher = useFetcher<ActionResult>();
+  const revalidator = useRevalidator();
   const pending = fetcher.state !== 'idle';
   const className =
     variant === 'add'
@@ -235,22 +237,39 @@ export function ListOpButton({
         ? 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-rose-300 px-3 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50'
         : 'inline-flex min-h-9 cursor-pointer items-center rounded-md border border-neutral-300 px-2 text-xs font-medium hover:bg-neutral-100 disabled:opacity-50';
 
+  useEffect(() => {
+    if (fetcher.state !== 'idle' || fetcher.data === undefined) return;
+    if (fetcher.data.ok) {
+      void revalidator.revalidate();
+    }
+  }, [fetcher.state, fetcher.data, revalidator]);
+
   const submit = () => {
     const data = new FormData();
     data.set('intent', 'list-op');
-    data.set(listOpFieldName(listPath, kind), value);
+    data.set(
+      listOpFieldName(listPath, kind),
+      kind === 'add' ? newListItemId() : value,
+    );
     void fetcher.submit(data, { method: 'post' });
   };
 
   return (
-    <button
-      type="button"
-      onClick={submit}
-      disabled={disabled || pending}
-      className={className}
-    >
-      {pending ? '…' : label}
-    </button>
+    <span className="inline-flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={submit}
+        disabled={disabled || pending}
+        className={className}
+      >
+        {pending ? '…' : label}
+      </button>
+      {fetcher.data && !fetcher.data.ok ? (
+        <span className="max-w-xs text-right text-xs text-rose-700">
+          {fetcher.data.error}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -310,23 +329,15 @@ export function ItemControls({
   );
 }
 
-/** The "Add item" control: mints a fresh id client-side and appends an empty item. */
+/** The "Add item" control: mints a fresh id on click and appends an empty item. */
 export function AddItemButton({
   listPath,
   label,
-  newId,
 }: {
   readonly listPath: string;
   readonly label: string;
-  readonly newId: string;
 }) {
   return (
-    <ListOpButton
-      listPath={listPath}
-      kind="add"
-      value={newId}
-      label={label}
-      variant="add"
-    />
+    <ListOpButton listPath={listPath} kind="add" label={label} variant="add" />
   );
 }

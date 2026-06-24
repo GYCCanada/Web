@@ -117,6 +117,22 @@ export const translationFieldName = (locale: 'en' | 'fr', key: string): string =
 const isTranslationField = (name: string): boolean =>
   name.startsWith(TRANSLATION_FIELD_PREFIX);
 
+/** FormData checkbox leaves that must decode as real booleans (Codex #5/#12). */
+const BOOLEAN_LEAVES = new Set(['enabled', 'learnMoreEnabled']);
+
+/**
+ * Optional URL fields the editor clears by posting an empty string. Absent keys
+ * decode as `Option.none()` / omitted optional fields; a present `""` does not.
+ */
+const OPTIONAL_URL_LEAVES = new Set([
+  'registrationUrl',
+  'scheduleUrl',
+  'mapEmbedUrl',
+  'link',
+  'navigateUrl',
+  'reservationUrl',
+]);
+
 /**
  * Collect every `t:<locale>:<key>` form field into the bilingual translations
  * override, e.g. `t:en:main.newsletter.title` → `{ en: { 'main.newsletter.title':
@@ -208,20 +224,88 @@ export const assembleOverrides = (
     const path = name.split('.');
     const leaf = path[path.length - 1];
     // Leaf-name coercion so the form's string FormData decodes at the typed schema
-    // boundary: `chapter`/`verse` are numbers; `enabled` (the per-page visibility
-    // checkbox, Feature C) is a real boolean — a bare `"true"`/`"false"` string
-    // would NOT decode as `Schema.Boolean` (Codex #5/#12). The hidden-companion +
-    // checkbox always post an `enabled` value, so this coercion is deterministic.
+    // boundary: `chapter`/`verse` are numbers; checkbox leaves are real booleans —
+    // a bare `"true"`/`"false"` string would NOT decode as `Schema.Boolean`
+    // (Codex #5/#12). The hidden-companion + checkbox always post a value, so this
+    // coercion is deterministic.
     const coerced: Json =
       (leaf === 'chapter' || leaf === 'verse') && value.trim() !== ''
         ? Number(value)
-        : leaf === 'enabled'
+        : leaf !== undefined && BOOLEAN_LEAVES.has(leaf)
           ? value === 'true'
           : value;
     setPath(root, path, coerced);
   }
   return root;
 };
+
+/**
+ * Drop optional URL leaves whose merged value is an empty/whitespace string so
+ * clearing a URL field in the editor removes the key instead of posting `""`,
+ * which strict URL brands reject.
+ */
+export const stripEmptyOptionalUrlLeaves = (node: Json): Json => {
+  if (Array.isArray(node)) {
+    return node.map(stripEmptyOptionalUrlLeaves);
+  }
+  if (isPlainObject(node)) {
+    const result: MutableJsonObject = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (
+        OPTIONAL_URL_LEAVES.has(key) &&
+        typeof value === 'string' &&
+        value.trim() === ''
+      ) {
+        continue;
+      }
+      result[key] = stripEmptyOptionalUrlLeaves(value);
+    }
+    return result;
+  }
+  return node;
+};
+
+const isBilingualLeaf = (
+  value: Json,
+): value is { readonly en?: Json; readonly fr?: Json } => {
+  if (!isPlainObject(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length > 0 && keys.every((key) => key === 'en' || key === 'fr');
+};
+
+const isBothLocalesEmpty = (value: {
+  readonly en?: Json;
+  readonly fr?: Json;
+}): boolean => {
+  const empty = (leaf: Json | undefined) =>
+    leaf === undefined || (typeof leaf === 'string' && leaf.trim() === '');
+  return empty(value.en) && empty(value.fr);
+};
+
+/**
+ * Drop `{ en, fr }` leaves whose both locales are empty/whitespace. Optional
+ * bilingual fields (`checkIn`, `description`, …) render as blank inputs in the
+ * editor and post `""` for each locale; absent keys decode as omitted optional
+ * fields, but a present `{ en: "", fr: "" }` fails strict `Text`.
+ */
+export const stripEmptyBilingualLeaves = (node: Json): Json => {
+  if (Array.isArray(node)) {
+    return node.map(stripEmptyBilingualLeaves);
+  }
+  if (isPlainObject(node)) {
+    const result: MutableJsonObject = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (isBilingualLeaf(value) && isBothLocalesEmpty(value)) continue;
+      result[key] = stripEmptyBilingualLeaves(value);
+    }
+    return result;
+  }
+  return node;
+};
+
+/** Normalize a merged site-content document before draft/publish decode. */
+export const normalizeMergedSiteContent = (node: Json): Json =>
+  stripEmptyBilingualLeaves(stripEmptyOptionalUrlLeaves(node));
 
 /**
  * Rewrite a FAQ-answer override leaf from the editor's plain-text bilingual input

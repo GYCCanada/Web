@@ -227,6 +227,51 @@ describe('applyListEdit — id-keyed, not positional', () => {
     expect(base).toEqual(snapshot);
   });
 
+  test('creates a missing nested section list when adding parking / hotel / meal items', () => {
+    const base: Json = {
+      conferences: [
+        {
+          slug: '/2024',
+          parking: {
+            enabled: false,
+            headerCopy: { en: 'Parking', fr: 'Stationnement' },
+          },
+          accommodations: {
+            enabled: true,
+            headerCopy: { en: 'Hotels', fr: 'Hébergement' },
+          },
+          meals: {
+            enabled: false,
+            headerCopy: { en: 'Meals', fr: 'Repas' },
+            bodyCopy: { en: '—', fr: '—' },
+          },
+        },
+      ],
+    };
+    const parkingId = id('parking-option-id00001');
+    const hotelId = id('hotel-item-id000000001');
+    const mealId = id('meal-item-id000000001');
+    const next = applyListEdit(base, [
+      addOp('conferences./2024.parking.options', parkingId),
+      addOp('conferences./2024.accommodations.hotels', hotelId),
+      addOp('conferences./2024.meals.items', mealId),
+    ]) as {
+      conferences: ReadonlyArray<{
+        parking: { options: ReadonlyArray<{ id: string }> };
+        accommodations: { hotels: ReadonlyArray<{ id: string; roomRates: readonly unknown[] }> };
+        meals: { items: ReadonlyArray<{ id: string }> };
+      }>;
+    };
+    const conf = next.conferences[0];
+    expect(conf?.parking.options.map((item) => item.id)).toEqual(['parking-option-id00001']);
+    expect(conf?.accommodations.hotels.map((item) => item.id)).toEqual(['hotel-item-id000000001']);
+    expect(conf?.meals.items.map((item) => item.id)).toEqual(['meal-item-id000000001']);
+    expect(conf?.accommodations.hotels[0]).toEqual({
+      id: 'hotel-item-id000000001',
+      roomRates: [],
+    });
+  });
+
   test('a listPath that does not resolve to an array is left untouched', () => {
     const base: Json = { team: list({ id: 'a' }) };
     const next = applyListEdit(base, [addOp('missing', id('b'))]);
