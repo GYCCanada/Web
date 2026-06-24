@@ -47,8 +47,12 @@ const backfillAccommodationHotels = (value: unknown): readonly Json[] | undefine
   return value.map((item) => {
     if (!isObject(item)) return item;
     const hotel: Record<string, Json> = { ...item };
-    const roomRates = backfillItems(item['roomRates']);
-    if (roomRates !== undefined) hotel['roomRates'] = roomRates;
+    if (!('roomRates' in hotel)) {
+      hotel['roomRates'] = [];
+    } else if (Array.isArray(hotel['roomRates'])) {
+      const roomRates = backfillItems(hotel['roomRates']);
+      if (roomRates !== undefined) hotel['roomRates'] = roomRates;
+    }
     return withId(hotel);
   });
 };
@@ -79,8 +83,11 @@ const backfillConferenceSections = (conference: Record<string, Json>): void => {
     conference['parking'] = { ...disabledParkingSection };
   } else if (isObject(conference['parking'])) {
     const parking = { ...conference['parking'] };
-    const options = backfillItems(parking['options']);
-    if (options !== undefined) parking['options'] = options;
+    if (!('options' in parking)) {
+      parking['options'] = [];
+    } else if (Array.isArray(parking['options'])) {
+      parking['options'] = backfillItems(parking['options']) ?? parking['options'];
+    }
     conference['parking'] = parking;
   }
 
@@ -88,8 +95,12 @@ const backfillConferenceSections = (conference: Record<string, Json>): void => {
     conference['accommodations'] = { ...disabledAccommodationsSection };
   } else if (isObject(conference['accommodations'])) {
     const accommodations = { ...conference['accommodations'] };
-    const hotels = backfillAccommodationHotels(accommodations['hotels']);
-    if (hotels !== undefined) accommodations['hotels'] = hotels;
+    if (!('hotels' in accommodations)) {
+      accommodations['hotels'] = [];
+    } else if (Array.isArray(accommodations['hotels'])) {
+      const hotels = backfillAccommodationHotels(accommodations['hotels']);
+      if (hotels !== undefined) accommodations['hotels'] = hotels;
+    }
     conference['accommodations'] = accommodations;
   }
 
@@ -97,8 +108,11 @@ const backfillConferenceSections = (conference: Record<string, Json>): void => {
     conference['meals'] = { ...disabledMealsSection };
   } else if (isObject(conference['meals'])) {
     const meals = { ...conference['meals'] };
-    const items = backfillItems(meals['items']);
-    if (items !== undefined) meals['items'] = items;
+    if (!('items' in meals)) {
+      meals['items'] = [];
+    } else if (Array.isArray(meals['items'])) {
+      meals['items'] = backfillItems(meals['items']) ?? meals['items'];
+    }
     conference['meals'] = meals;
   }
 

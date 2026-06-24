@@ -40,7 +40,6 @@ import { collectListOps, fieldName } from '~/lib/content/list-edit';
 import {
   DraftSiteContent,
   ListItemId,
-  newListItemId,
   TeamPosition,
 } from '~/lib/content/schema';
 import { ReactRouterContext } from '~/lib/effect/router-context';
@@ -206,7 +205,7 @@ export const action = routeAction(function* () {
     }
     const applied = yield* editor.applyListOps(siteScope, ops).pipe(Effect.result);
     if (applied._tag === 'Failure') return issueResponse(applied.failure);
-    return adminRedirectWithStatus('/admin/content', 'List updated.');
+    return Response.json({ ok: true as const });
   }
 
   if (intent !== 'save-draft' && intent !== 'publish') {
@@ -590,14 +589,15 @@ export default function AdminContentEditor() {
                 />
               </fieldset>
               <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
-                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
-                  <span>Parking section</span>
+                <legend className="text-sm font-medium text-neutral-800">
+                  Parking section
+                </legend>
+                <div className="flex justify-end">
                   <AddItemButton
                     listPath={parkingPath}
                     label="+ Add parking option"
-                    newId={newListItemId()}
                   />
-                </legend>
+                </div>
                 <Checkbox
                   label="Enabled"
                   name={`${conf}.parking.enabled`}
@@ -648,14 +648,12 @@ export default function AdminContentEditor() {
                 })}
               </fieldset>
               <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
-                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
-                  <span>Accommodations section</span>
-                  <AddItemButton
-                    listPath={hotelsPath}
-                    label="+ Add hotel"
-                    newId={newListItemId()}
-                  />
+                <legend className="text-sm font-medium text-neutral-800">
+                  Accommodations section
                 </legend>
+                <div className="flex justify-end">
+                  <AddItemButton listPath={hotelsPath} label="+ Add hotel" />
+                </div>
                 <Checkbox
                   label="Enabled"
                   name={`${conf}.accommodations.enabled`}
@@ -727,7 +725,6 @@ export default function AdminContentEditor() {
                           <AddItemButton
                             listPath={roomRatesPath}
                             label="+ Add rate"
-                            newId={newListItemId()}
                           />
                         </div>
                         {(hotel.roomRates ?? []).map((rate, ri) => {
@@ -758,14 +755,12 @@ export default function AdminContentEditor() {
                 })}
               </fieldset>
               <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
-                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
-                  <span>Meals section</span>
-                  <AddItemButton
-                    listPath={mealsPath}
-                    label="+ Add meal"
-                    newId={newListItemId()}
-                  />
+                <legend className="text-sm font-medium text-neutral-800">
+                  Meals section
                 </legend>
+                <div className="flex justify-end">
+                  <AddItemButton listPath={mealsPath} label="+ Add meal" />
+                </div>
                 <Checkbox
                   label="Enabled"
                   name={`${conf}.meals.enabled`}
@@ -884,14 +879,13 @@ export default function AdminContentEditor() {
                 ))}
               </fieldset>
               <fieldset className="space-y-3">
-                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
-                  <span>Speakers</span>
+                <legend className="text-sm font-medium text-neutral-800">Speakers</legend>
+                <div className="flex justify-end">
                   <AddItemButton
                     listPath={speakersPath}
                     label="+ Add speaker"
-                    newId={newListItemId()}
                   />
-                </legend>
+                </div>
                 {conference.speakers.map((speaker, si) => {
                   // Re-assert the `ListItemId` brand at this view boundary: the
                   // encoded document carries the id as a bare `string` (encode
@@ -942,14 +936,13 @@ export default function AdminContentEditor() {
                 })}
               </fieldset>
               <fieldset className="space-y-3">
-                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
-                  <span>Seminars</span>
+                <legend className="text-sm font-medium text-neutral-800">Seminars</legend>
+                <div className="flex justify-end">
                   <AddItemButton
                     listPath={seminarsPath}
                     label="+ Add seminar"
-                    newId={newListItemId()}
                   />
-                </legend>
+                </div>
                 {(conference.seminars ?? []).map((seminar, sei) => {
                   const seminarId = ListItemId.make(seminar.id);
                   return (
@@ -1005,11 +998,7 @@ export default function AdminContentEditor() {
 
         <Section title="Team">
           <div className="flex items-center justify-end">
-            <AddItemButton
-              listPath="team"
-              label="+ Add team member"
-              newId={newListItemId()}
-            />
+            <AddItemButton listPath="team" label="+ Add team member" />
           </div>
           {team.map((member, ti) => {
             // Re-assert the brand at this boundary (see the speakers note).
@@ -1044,11 +1033,7 @@ export default function AdminContentEditor() {
 
         <Section title="Board of Directors">
           <div className="flex items-center justify-end">
-            <AddItemButton
-              listPath="board"
-              label="+ Add board member"
-              newId={newListItemId()}
-            />
+            <AddItemButton listPath="board" label="+ Add board member" />
           </div>
           {board.map((member, bi) => {
             const memberId = ListItemId.make(member.id);

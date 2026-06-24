@@ -100,6 +100,31 @@ describe('backfillListItemIds — production read-safety (ADR 0006)', () => {
     }
   });
 
+  test('adds empty nested lists when a conference section exists without them', () => {
+    const doc = {
+      conferences: [
+        {
+          slug: '/2024',
+          parking: { enabled: false, headerCopy: { en: 'Parking', fr: 'P' } },
+          accommodations: {
+            enabled: false,
+            headerCopy: { en: 'Hotels', fr: 'H' },
+          },
+          meals: {
+            enabled: false,
+            headerCopy: { en: 'Meals', fr: 'M' },
+            bodyCopy: { en: '—', fr: '—' },
+          },
+        },
+      ],
+    };
+    const repaired = backfillListItemIds(doc) as JsonRecord;
+    const conference = (repaired['conferences'] as JsonRecord[])[0] as JsonRecord;
+    expect((conference['parking'] as JsonRecord)['options']).toEqual([]);
+    expect((conference['accommodations'] as JsonRecord)['hotels']).toEqual([]);
+    expect((conference['meals'] as JsonRecord)['items']).toEqual([]);
+  });
+
   test('a present-but-malformed accommodations.hotels is left for the decoder to reject', () => {
     for (const malformed of ['not a list', null, {}] as const) {
       const doc = stripIds(encodedDefaults());

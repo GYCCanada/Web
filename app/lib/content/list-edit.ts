@@ -96,13 +96,20 @@ const navIdentity = (item: Json): string | undefined => {
  * op kinds are exhaustive over the `ListOp` union, so adding a kind without
  * handling it is a type error (`make-impossible-states-unrepresentable`).
  */
+const stubListItem = (listPath: ListPath, id: ListItemId): Json => {
+  if (listPath.endsWith('.hotels')) {
+    return { id, roomRates: [] };
+  }
+  return { id };
+};
+
 const applyOp = (list: readonly Json[], op: ListOp): readonly Json[] => {
   if ('add' in op) {
     // Appending a duplicate id would make two items share an identity, which the
     // id-keyed merge could no longer distinguish — guard it (the caller mints a
     // fresh id, so this only fires on a malformed resubmission).
     if (list.some((item) => itemId(item) === op.add.id)) return list;
-    return [...list, { id: op.add.id }];
+    return [...list, stubListItem(op.add.listPath, op.add.id)];
   }
   if ('remove' in op) {
     return list.filter((item) => itemId(item) !== op.remove.id);
@@ -146,22 +153,41 @@ const updateListAtPath = (
   root: Json,
   path: readonly string[],
   update: (list: readonly Json[]) => readonly Json[],
+  depth = 0,
 ): Json => {
-  const [head, ...rest] = path;
-  if (head === undefined) {
+  if (path.length === 0) {
     return Array.isArray(root) ? update(root) : root;
   }
+  const [head, ...rest] = path;
+  if (head === undefined) return root;
+
   if (Array.isArray(root)) {
     const index = root.findIndex((item) => navIdentity(item) === head);
     if (index < 0) return root;
     const next = [...root];
-    next[index] = updateListAtPath(root[index] as Json, rest, update);
+    next[index] = updateListAtPath(root[index] as Json, rest, update, depth + 1);
     return next;
   }
+
   if (isPlainObject(root)) {
-    if (!(head in root)) return root;
-    return { ...root, [head]: updateListAtPath(root[head] as Json, rest, update) };
+    if (!(head in root)) {
+      if (rest.length > 0) {
+        return {
+          ...root,
+          [head]: updateListAtPath({}, rest, update, depth + 1),
+        };
+      }
+      // A missing top-level list path is a no-op; nested section lists may be
+      // materialized on add (e.g. parking.options on a legacy section object).
+      if (depth === 0) return root;
+      return { ...root, [head]: update([]) };
+    }
+    return {
+      ...root,
+      [head]: updateListAtPath(root[head] as Json, rest, update, depth + 1),
+    };
   }
+
   return root;
 };
 

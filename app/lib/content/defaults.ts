@@ -9,11 +9,7 @@ import {
   disabledRegistrationCopySection,
   disabledTravelSection,
 } from "./conference-section-defaults";
-import {
-  deterministicListItemId,
-  DraftSiteContent,
-  SiteContent,
-} from "./schema";
+import { deterministicListItemId, DraftSiteContent, SiteContent } from './schema.server';
 
 /**
  * The bundled-default `SiteContent` document (CMS plan §"Defaults / seed",

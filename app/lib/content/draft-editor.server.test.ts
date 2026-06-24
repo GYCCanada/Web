@@ -37,7 +37,7 @@ import {
 } from './pages/registry';
 import { FormDefinition } from '../forms/definition';
 import { FaqPage } from './pages/schema';
-import { BoardMember, deterministicListItemId, DraftSiteContent, SiteContent } from './schema';
+import { BoardMember, deterministicListItemId, DraftSiteContent, SiteContent } from './schema.server';
 import type {
   DraftSiteContent as DraftSiteContentType,
   SiteContent as SiteContentType,

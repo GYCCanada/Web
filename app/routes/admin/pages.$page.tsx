@@ -25,7 +25,7 @@ import {
 import { prepareImage } from '~/lib/content/image-optimize.server';
 import { collectListOps, fieldName } from '~/lib/content/list-edit';
 import { PAGE_SPECS, PageId } from '~/lib/content/pages/registry';
-import { ListItemId, newListItemId } from '~/lib/content/schema';
+import { ListItemId } from '~/lib/content/schema';
 import { Env } from '~/lib/env.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction, routeHandler } from '~/lib/effect/route';
@@ -226,7 +226,7 @@ export const action = routeAction(function* () {
     }
     const applied = yield* editor.applyListOps(scope, ops).pipe(Effect.result);
     if (applied._tag === 'Failure') return issueResponse(applied.failure);
-    return adminRedirectWithStatus(`/admin/pages/${page}`, 'List updated.');
+    return Response.json({ ok: true as const });
   }
 
   if (intent !== 'save-draft' && intent !== 'publish') {
@@ -331,7 +331,7 @@ function ListSection({
     <fieldset className="space-y-3">
       <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
         <span>{title}</span>
-        <AddItemButton listPath={listPath} label={addLabel} newId={newListItemId()} />
+        <AddItemButton listPath={listPath} label={addLabel} />
       </legend>
       {items.map((item, index) => {
         // Re-assert the `ListItemId` brand at this view boundary: the encoded
