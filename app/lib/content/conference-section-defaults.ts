@@ -9,7 +9,6 @@ const placeholder = { en: '—', fr: '—' } as const;
 export const disabledTravelSection = {
   enabled: false,
   headerCopy: { en: 'Travel', fr: 'Voyage' },
-  bodyCopy: placeholder,
 } as const;
 
 export const disabledParkingSection = {

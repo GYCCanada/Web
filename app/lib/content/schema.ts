@@ -430,17 +430,31 @@ export const MealItem = Schema.Struct({
 });
 export type MealItem = typeof MealItem.Type;
 
+export const AirportTransitOption = Schema.Struct({
+  id: ListItemId,
+  description: Text,
+});
+export type AirportTransitOption = typeof AirportTransitOption.Type;
+
+export const Airport = Schema.Struct({
+  name: Text,
+  transitOptions: IdListArray(AirportTransitOption),
+});
+export type Airport = typeof Airport.Type;
+
 export const TravelSection = Schema.Struct({
   enabled: SectionEnabledFlag,
   headerCopy: Text,
-  bodyCopy: Text,
+  bodyCopy: Schema.optionalKey(Text),
   mapEmbedUrl: Schema.OptionFromOptionalKey(GoogleMapsEmbedUrl),
+  airport: Schema.optionalKey(Airport),
 });
 export type TravelSection = typeof TravelSection.Type;
 
 export const ParkingSection = Schema.Struct({
   enabled: SectionEnabledFlag,
   headerCopy: Text,
+  bodyCopy: Schema.optionalKey(Text),
   options: IdListArray(ParkingOption),
 });
 export type ParkingSection = typeof ParkingSection.Type;
@@ -747,16 +761,31 @@ const DraftMealItem = Schema.Struct({
   price: Schema.optionalKey(DraftText),
 });
 
+const DraftAirportTransitOption = Schema.Struct({
+  id: ListItemId,
+  description: Schema.optionalKey(DraftText),
+});
+
+const DraftAirport = Schema.Struct({
+  name: Schema.optionalKey(DraftText),
+  /** Default to [] so an airport stub created without transit options decodes. */
+  transitOptions: IdListArray(DraftAirportTransitOption).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
+});
+
 const DraftTravelSection = Schema.Struct({
   enabled: SectionEnabledFlag,
   headerCopy: Schema.optionalKey(DraftText),
   bodyCopy: Schema.optionalKey(DraftText),
   mapEmbedUrl: Schema.optionalKey(Schema.String),
+  airport: Schema.optionalKey(DraftAirport),
 });
 
 const DraftParkingSection = Schema.Struct({
   enabled: SectionEnabledFlag,
   headerCopy: Schema.optionalKey(DraftText),
+  bodyCopy: Schema.optionalKey(DraftText),
   options: IdListArray(DraftParkingOption),
 });
 

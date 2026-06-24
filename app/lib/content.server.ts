@@ -109,11 +109,21 @@ export interface Seminar {
   readonly description: string;
 }
 
+export interface ConferenceAirportTransitOption {
+  readonly description: string;
+}
+
+export interface ConferenceAirport {
+  readonly name: string;
+  readonly transitOptions: readonly ConferenceAirportTransitOption[];
+}
+
 export interface ConferenceTravelSection {
   readonly enabled: boolean;
   readonly headerCopy: string;
-  readonly bodyCopy: string;
+  readonly bodyCopy: string | undefined;
   readonly mapEmbedUrl: string | undefined;
+  readonly airport: ConferenceAirport | undefined;
 }
 
 export interface ConferenceParkingOption {
@@ -126,6 +136,7 @@ export interface ConferenceParkingOption {
 export interface ConferenceParkingSection {
   readonly enabled: boolean;
   readonly headerCopy: string;
+  readonly bodyCopy: string | undefined;
   readonly options: readonly ConferenceParkingOption[];
 }
 
@@ -305,12 +316,28 @@ const toConference = (
   travel: {
     enabled: conference.travel.enabled,
     headerCopy: conference.travel.headerCopy[locale],
-    bodyCopy: conference.travel.bodyCopy[locale],
+    bodyCopy:
+      conference.travel.bodyCopy === undefined
+        ? undefined
+        : conference.travel.bodyCopy[locale],
     mapEmbedUrl: Option.getOrUndefined(conference.travel.mapEmbedUrl),
+    airport:
+      conference.travel.airport === undefined
+        ? undefined
+        : {
+            name: conference.travel.airport.name[locale],
+            transitOptions: conference.travel.airport.transitOptions.map(
+              (opt) => ({ description: opt.description[locale] }),
+            ),
+          },
   },
   parking: {
     enabled: conference.parking.enabled,
     headerCopy: conference.parking.headerCopy[locale],
+    bodyCopy:
+      conference.parking.bodyCopy === undefined
+        ? undefined
+        : conference.parking.bodyCopy[locale],
     options: conference.parking.options.map((option) => ({
       title: option.title[locale],
       link: Option.getOrUndefined(option.link),

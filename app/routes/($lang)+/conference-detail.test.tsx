@@ -13,13 +13,15 @@ import { ConferenceDetail } from './conference-detail';
 const disabledTravel = {
   enabled: false,
   headerCopy: 'Travel',
-  bodyCopy: '—',
+  bodyCopy: undefined,
   mapEmbedUrl: undefined,
+  airport: undefined,
 } as const;
 
 const disabledParking = {
   enabled: false,
   headerCopy: 'Parking',
+  bodyCopy: undefined,
   options: [],
 } as const;
 
@@ -95,6 +97,7 @@ const fullConference: Conference = {
     headerCopy: 'Travel',
     bodyCopy: 'Venue directions and travel notes.',
     mapEmbedUrl: 'https://www.google.com/maps/embed?pb=!1m18!FAKE',
+    airport: undefined,
   },
   parking: disabledParking,
   accommodations: {

@@ -76,6 +76,16 @@ const backfillConferenceSections = (conference: Record<string, Json>): void => {
     conference['travel'] = { ...disabledTravelSection };
   } else if (isObject(conference['travel'])) {
     const travel = { ...conference['travel'] };
+    if (isObject(travel['airport'])) {
+      const airport = { ...travel['airport'] };
+      if (!('transitOptions' in airport)) {
+        airport['transitOptions'] = [];
+      } else if (Array.isArray(airport['transitOptions'])) {
+        airport['transitOptions'] =
+          backfillItems(airport['transitOptions']) ?? airport['transitOptions'];
+      }
+      travel['airport'] = airport;
+    }
     conference['travel'] = travel;
   }
 

@@ -310,10 +310,18 @@ export default function AdminContentEditor() {
       headerCopy?: { en: string; fr: string };
       bodyCopy?: { en: string; fr: string };
       mapEmbedUrl?: string;
+      airport?: {
+        name?: { en: string; fr: string };
+        transitOptions?: ReadonlyArray<{
+          id: string;
+          description?: { en: string; fr: string };
+        }>;
+      };
     };
     parking?: {
       enabled?: boolean;
       headerCopy?: { en: string; fr: string };
+      bodyCopy?: { en: string; fr: string };
       options?: ReadonlyArray<{
         id: string;
         title?: { en: string; fr: string };
@@ -453,6 +461,8 @@ export default function AdminContentEditor() {
           const seminarIds = (conference.seminars ?? []).map((s) => s.id);
           const parkingPath = `${conf}.parking.options`;
           const parkingOptionIds = (conference.parking?.options ?? []).map((o) => o.id);
+          const transitPath = `${conf}.travel.airport.transitOptions`;
+          const transitOptionIds = (conference.travel?.airport?.transitOptions ?? []).map((t) => t.id);
           const hotelsPath = `${conf}.accommodations.hotels`;
           const hotelIds = (conference.accommodations?.hotels ?? []).map((h) => h.id);
           const mealsPath = `${conf}.meals.items`;
@@ -460,13 +470,15 @@ export default function AdminContentEditor() {
           const travel = {
             enabled: conference.travel?.enabled ?? false,
             headerCopy: conference.travel?.headerCopy ?? emptyText,
-            bodyCopy: conference.travel?.bodyCopy ?? emptyText,
+            bodyCopy: conference.travel?.bodyCopy,
             mapEmbedUrl: conference.travel?.mapEmbedUrl ?? '',
+            airport: conference.travel?.airport,
           };
-          const parking = conference.parking ?? {
-            enabled: false,
-            headerCopy: emptyText,
-            options: [],
+          const parking = {
+            enabled: conference.parking?.enabled ?? false,
+            headerCopy: conference.parking?.headerCopy ?? emptyText,
+            bodyCopy: conference.parking?.bodyCopy,
+            options: conference.parking?.options ?? [],
           };
           const accommodations = conference.accommodations ?? {
             enabled: false,
@@ -577,7 +589,7 @@ export default function AdminContentEditor() {
                   value={travel.headerCopy ?? emptyText}
                 />
                 <Bilingual
-                  label="Body copy"
+                  label="Body copy (optional)"
                   name={`${conf}.travel.bodyCopy`}
                   value={travel.bodyCopy ?? emptyText}
                   multiline
@@ -587,6 +599,51 @@ export default function AdminContentEditor() {
                   name={`${conf}.travel.mapEmbedUrl`}
                   defaultValue={travel.mapEmbedUrl ?? ''}
                 />
+                <div className="space-y-2 border-t border-neutral-200 pt-2">
+                  <p className="text-xs font-medium text-neutral-600">
+                    Airport transit (optional)
+                  </p>
+                  {travel.airport !== undefined ? (
+                    <Bilingual
+                      label="Airport name"
+                      name={`${conf}.travel.airport.name`}
+                      value={travel.airport.name ?? emptyText}
+                    />
+                  ) : null}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-neutral-600">
+                        Transit options
+                      </span>
+                      <AddItemButton
+                        listPath={transitPath}
+                        label="+ Add transit option"
+                      />
+                    </div>
+                    {(travel.airport?.transitOptions ?? []).map((opt, ti) => {
+                      const optId = ListItemId.make(opt.id);
+                      return (
+                        <div
+                          key={opt.id}
+                          className="space-y-2 rounded border border-neutral-200 bg-neutral-50 p-2"
+                        >
+                          <div className="flex items-center justify-end">
+                            <ItemControls
+                              listPath={transitPath}
+                              ids={transitOptionIds}
+                              index={ti}
+                            />
+                          </div>
+                          <Bilingual
+                            label="Description"
+                            name={fieldName(transitPath, optId, 'description')}
+                            value={opt.description ?? emptyText}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </fieldset>
               <fieldset className="space-y-3 rounded-md border border-neutral-200 p-3">
                 <legend className="text-sm font-medium text-neutral-800">
@@ -607,6 +664,12 @@ export default function AdminContentEditor() {
                   label="Header"
                   name={`${conf}.parking.headerCopy`}
                   value={parking.headerCopy ?? emptyText}
+                />
+                <Bilingual
+                  label="Body copy (optional)"
+                  name={`${conf}.parking.bodyCopy`}
+                  value={parking.bodyCopy ?? emptyText}
+                  multiline
                 />
                 {(parking.options ?? []).map((option, oi) => {
                   const optionId = ListItemId.make(option.id);

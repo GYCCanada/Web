@@ -1,25 +1,25 @@
-import { useSearchParams } from 'react-router';
-import clsx from 'clsx';
+import { useSearchParams } from "react-router";
+import clsx from "clsx";
 import {
   AnimatePresence,
   motion,
   MotionConfig,
   transform,
   useMotionValue,
-} from 'framer-motion';
-import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react';
-import * as React from 'react';
-import { useButton } from '@base-ui/react/internals/use-button';
-import { match } from 'ts-pattern';
+} from "framer-motion";
+import { ArrowLeftIcon, ArrowRightIcon, PlaneLandingIcon } from "lucide-react";
+import * as React from "react";
+import { useButton } from "@base-ui/react/internals/use-button";
+import { match } from "ts-pattern";
 
-import { Breakpoint, useBreakpoint, useHints } from '~/lib/client-hints';
-import type { Conference } from '~/lib/content.server';
-import { dayjs } from '~/lib/dayjs';
-import { useLocale, useTranslate } from '~/lib/localization/context';
-import { buttonStyle } from '~/ui/button';
-import { ExternalLink } from '~/ui/external-link';
-import { Link } from '~/ui/link';
-import { Main } from '~/ui/main';
+import { Breakpoint, useBreakpoint, useHints } from "~/lib/client-hints";
+import type { Conference } from "~/lib/content.server";
+import { dayjs } from "~/lib/dayjs";
+import { useLocale, useTranslate } from "~/lib/localization/context";
+import { buttonStyle } from "~/ui/button";
+import { ExternalLink } from "~/ui/external-link";
+import { Link } from "~/ui/link";
+import { Main } from "~/ui/main";
 
 export function ConferenceDetail({ conference }: { conference: Conference }) {
   return (
@@ -52,7 +52,7 @@ function HeroCtas({ conference }: { conference: Conference }) {
     <div className="flex flex-wrap items-center gap-4">
       {conference.registrationUrl === undefined ? null : (
         <a className={buttonStyle} href={conference.registrationUrl}>
-          {translate('registration.register')}
+          {translate("registration.register")}
         </a>
       )}
       {conference.scheduleUrl === undefined ? null : (
@@ -62,7 +62,7 @@ function HeroCtas({ conference }: { conference: Conference }) {
           target="_blank"
           rel="noopener noreferrer"
         >
-          {translate('registration.schedule')}
+          {translate("registration.schedule")}
         </a>
       )}
     </div>
@@ -84,10 +84,10 @@ function MobileHero({ conference }: { conference: Conference }) {
       <div className="flex flex-col gap-4 px-4">
         <div className="flex flex-col gap-2 text-4xl">
           <h2>
-            {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
-            {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
-            {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
-            {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format("MMM")}{" "}
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format("D")}-
+            {dayjs(conference.dates[1]).tz(hints.timeZone).format("D")},{" "}
+            {dayjs(conference.dates[0]).tz(hints.timeZone).format("YYYY")}
           </h2>
           <h3>{conference.location}</h3>
         </div>
@@ -101,9 +101,9 @@ function MobileHero({ conference }: { conference: Conference }) {
           <a
             className={buttonStyle}
             data-variant="accent"
-            href={`https://www.biblegateway.com/passage/?search=${conference.bible.book}+${conference.bible.chapter}&version=${locale === 'en' ? 'NKJV' : 'LSG'}`}
+            href={`https://www.biblegateway.com/passage/?search=${conference.bible.book}+${conference.bible.chapter}&version=${locale === "en" ? "NKJV" : "LSG"}`}
           >
-            {translate('main.read_bible')}
+            {translate("main.read_bible")}
           </a>
         </div>
       </div>
@@ -124,10 +124,10 @@ function DesktopHero({ conference }: { conference: Conference }) {
           />
           <div className="flex flex-col gap-6">
             <h2 className="text-5xl">
-              {dayjs(conference.dates[0]).tz(hints.timeZone).format('MMM')}{' '}
-              {dayjs(conference.dates[0]).tz(hints.timeZone).format('D')}-
-              {dayjs(conference.dates[1]).tz(hints.timeZone).format('D')},{' '}
-              {dayjs(conference.dates[0]).tz(hints.timeZone).format('YYYY')}
+              {dayjs(conference.dates[0]).tz(hints.timeZone).format("MMM")}{" "}
+              {dayjs(conference.dates[0]).tz(hints.timeZone).format("D")}-
+              {dayjs(conference.dates[1]).tz(hints.timeZone).format("D")},{" "}
+              {dayjs(conference.dates[0]).tz(hints.timeZone).format("YYYY")}
             </h2>
             <h3 className="text-5xl">{conference.location}</h3>
           </div>
@@ -136,7 +136,7 @@ function DesktopHero({ conference }: { conference: Conference }) {
         <div className="flex w-1/4 flex-col gap-10">
           <div
             className="flex flex-col justify-end uppercase"
-            style={{ writingMode: 'vertical-rl' }}
+            style={{ writingMode: "vertical-rl" }}
           >
             <h1 className="text-[96px] font-black leading-tight tracking-tight">
               {conference.bible.book}
@@ -153,18 +153,43 @@ function DesktopHero({ conference }: { conference: Conference }) {
 }
 
 function sectionHeadingClassName() {
-  return 'text-accent-600 text-4xl font-bold';
+  return "text-accent-600 text-4xl font-bold mb-2";
 }
 
 function TravelSection({ conference }: { conference: Conference }) {
   if (!conference.travel.enabled) return null;
 
   return (
-    <section className="flex flex-col gap-6 p-4 pb-16">
-      <h2 className={sectionHeadingClassName()}>{conference.travel.headerCopy}</h2>
-      <p className="whitespace-pre-line">{conference.travel.bodyCopy}</p>
+    <section className="flex flex-col sm:flex-row gap-6 p-4 pb-16">
+      <div className="sm:basis-1/2 flex flex-col gap-4">
+        <h2 className={sectionHeadingClassName()}>
+          {conference.travel.headerCopy}
+        </h2>
+        {conference.travel.bodyCopy === undefined ? null : (
+          <p className="whitespace-pre-line">{conference.travel.bodyCopy}</p>
+        )}
+        {conference.travel.airport === undefined ? null : (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <PlaneLandingIcon className="size-5 text-neutral-500" />
+              <span className="font-semibold">
+                {conference.travel.airport.name}
+              </span>
+            </div>
+            {conference.travel.airport.transitOptions.length === 0 ? null : (
+              <ul className="flex flex-col gap-1 pl-7">
+                {conference.travel.airport.transitOptions.map((opt, i) => (
+                  <li key={i} className="text-neutral-700">
+                    {opt.description}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
       {conference.travel.mapEmbedUrl === undefined ? null : (
-        <div className="aspect-video">
+        <div className="aspect-video sm:basis-1/2">
           <iframe
             src={conference.travel.mapEmbedUrl}
             style={{ border: 0 }}
@@ -188,6 +213,9 @@ function ParkingSection({ conference }: { conference: Conference }) {
       <h2 className={sectionHeadingClassName()}>
         {conference.parking.headerCopy}
       </h2>
+      {conference.parking.bodyCopy === undefined ? null : (
+        <p className="whitespace-pre-line">{conference.parking.bodyCopy}</p>
+      )}
       <ul className="flex flex-col gap-6">
         {conference.parking.options.map((option, index) => (
           <li key={index} className="flex flex-col gap-2">
@@ -199,11 +227,13 @@ function ParkingSection({ conference }: { conference: Conference }) {
               )}
               {option.address === undefined ? null : (
                 <>
-                  {' | '}
+                  {" | "}
                   {option.link === undefined ? (
                     option.address
                   ) : (
-                    <ExternalLink href={option.link}>{option.address}</ExternalLink>
+                    <ExternalLink href={option.link}>
+                      {option.address}
+                    </ExternalLink>
                   )}
                 </>
               )}
@@ -234,12 +264,14 @@ function AccommodationsSection({ conference }: { conference: Conference }) {
             <p>{hotel.address}</p>
             {hotel.checkIn === undefined ? null : (
               <p>
-                {translate('registration.accommodations.check_in')}: {hotel.checkIn}
+                {translate("registration.accommodations.check_in")}:{" "}
+                {hotel.checkIn}
               </p>
             )}
             {hotel.checkOut === undefined ? null : (
               <p>
-                {translate('registration.accommodations.check_out')}: {hotel.checkOut}
+                {translate("registration.accommodations.check_out")}:{" "}
+                {hotel.checkOut}
               </p>
             )}
             {hotel.roomRates.length === 0 ? null : (
@@ -259,7 +291,7 @@ function AccommodationsSection({ conference }: { conference: Conference }) {
                   className={buttonStyle}
                   data-variant="default"
                 >
-                  {translate('registration.accommodations.navigate')}
+                  {translate("registration.accommodations.navigate")}
                 </ExternalLink>
               )}
               {hotel.reservationUrl === undefined ? null : (
@@ -268,7 +300,7 @@ function AccommodationsSection({ conference }: { conference: Conference }) {
                   className={buttonStyle}
                   data-variant="accent"
                 >
-                  {translate('registration.accommodations.reserve')}
+                  {translate("registration.accommodations.reserve")}
                 </ExternalLink>
               )}
             </div>
@@ -284,7 +316,9 @@ function MealsSection({ conference }: { conference: Conference }) {
 
   return (
     <section className="flex flex-col gap-6 p-4 pb-16">
-      <h2 className={sectionHeadingClassName()}>{conference.meals.headerCopy}</h2>
+      <h2 className={sectionHeadingClassName()}>
+        {conference.meals.headerCopy}
+      </h2>
       {conference.meals.bodyCopy === undefined ? null : (
         <p className="whitespace-pre-line">{conference.meals.bodyCopy}</p>
       )}
@@ -306,7 +340,7 @@ function SpeakersAndSeminars({ conference }: { conference: Conference }) {
       {conference.speakers.length === 0 ? null : (
         <section className="relative flex flex-col gap-6 px-3 py-12">
           <h2 className="bg-inherit text-4xl font-bold data-[sticky]:fixed data-[sticky]:top-[60px] data-[sticky]:z-10">
-            {translate('registration.speakers.title')}
+            {translate("registration.speakers.title")}
           </h2>
           <div className="flex flex-col gap-20 md:grid md:grid-cols-1">
             {conference.speakers.map((speaker, i) => (
@@ -318,7 +352,7 @@ function SpeakersAndSeminars({ conference }: { conference: Conference }) {
       {conference.seminars.length === 0 ? null : (
         <section className="flex flex-col gap-6 px-3 py-12">
           <h2 className="sticky top-0 bg-inherit text-4xl font-bold">
-            {translate('registration.seminars.title')}
+            {translate("registration.seminars.title")}
           </h2>
           <div className="flex flex-col gap-20 md:grid md:grid-cols-1">
             {conference.seminars.map((seminar, i) => (
@@ -399,18 +433,18 @@ function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
   const ref = React.useRef<HTMLDivElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const isActive =
-    searchParams.has('speaker') && searchParams.get('speaker') === id;
+    searchParams.has("speaker") && searchParams.get("speaker") === id;
   const { position, rotate } = useCardRotation(ref, isActive);
 
   function onPress() {
     if (isActive) {
       setSearchParams((params) => {
-        params.delete('speaker');
+        params.delete("speaker");
         return params;
       });
     } else {
       setSearchParams((params) => {
-        params.set('speaker', id);
+        params.set("speaker", id);
         return params;
       });
     }
@@ -430,7 +464,7 @@ function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
   const bioButton = useButton({ native: false });
 
   return (
-    <MotionConfig transition={{ type: 'spring', duration: 0.3, bounce: 0 }}>
+    <MotionConfig transition={{ type: "spring", duration: 0.3, bounce: 0 }}>
       <motion.div animate={{ height: heightRef.current || undefined }}>
         <div className="overflow-hidden" ref={containerRef}>
           <AnimatePresence mode="popLayout" initial={false}>
@@ -489,7 +523,9 @@ function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
                       {name}
                     </motion.h3>
                     <ArrowRightIcon className="size-8" />
-                    <motion.p className="text-xl text-white">{activity}</motion.p>
+                    <motion.p className="text-xl text-white">
+                      {activity}
+                    </motion.p>
                   </div>
                 </div>
               </motion.div>
@@ -504,12 +540,12 @@ function MobileSpeakerCard({ name, activity, img, bio }: SpeakerCardProps) {
 const SpeakerCardVariants = {
   initial: (isActive: boolean) => ({
     opacity: 0,
-    x: isActive ? '-100%' : '100%',
+    x: isActive ? "-100%" : "100%",
   }),
   enter: { opacity: 1, x: 0 },
   exit: (isActive: boolean) => ({
     opacity: 0,
-    x: isActive ? '-100%' : '100%',
+    x: isActive ? "-100%" : "100%",
   }),
 };
 
@@ -520,7 +556,7 @@ function useCardRotation(
   const position = useMotionValue(20);
   const rotate = useMotionValue(0);
   React.useEffect(() => {
-    const scrollContainer = document.querySelector('[data-scroll-container]');
+    const scrollContainer = document.querySelector("[data-scroll-container]");
     if (!scrollContainer || !ref.current) return;
 
     let isInViewport = false;
@@ -533,11 +569,14 @@ function useCardRotation(
     observer.observe(ref.current);
 
     const initialCardRect = ref.current.getBoundingClientRect();
-    const bounds = [initialCardRect.top, initialCardRect.top + initialCardRect.height];
+    const bounds = [
+      initialCardRect.top,
+      initialCardRect.top + initialCardRect.height,
+    ];
 
     function onScroll() {
       const containerEle = document.querySelector(
-        '[data-scroll-container]',
+        "[data-scroll-container]",
       ) as HTMLElement;
       if (!containerEle || !isInViewport) return;
       const scrollY = containerEle.scrollTop + containerEle.clientHeight;
@@ -545,10 +584,10 @@ function useCardRotation(
       rotate.set(transform(scrollY, bounds, [0, -3]));
     }
 
-    scrollContainer.addEventListener('scroll', onScroll);
+    scrollContainer.addEventListener("scroll", onScroll);
     return () => {
       observer.disconnect();
-      scrollContainer.removeEventListener('scroll', onScroll);
+      scrollContainer.removeEventListener("scroll", onScroll);
     };
   }, [position, rotate, ref, isActive]);
 
@@ -560,7 +599,7 @@ function RegistrationSection({ conference }: { conference: Conference }) {
   if (conference.registrationUrl === undefined) return null;
 
   return (
-    <section className="flex flex-col gap-6 p-4 md:py-32">
+    <section className="flex flex-col gap-6 p-4 md:py-12">
       <h2 className={sectionHeadingClassName()}>
         {conference.registrationCopy.title}
       </h2>
@@ -583,15 +622,15 @@ function FaqSection({ conference }: { conference: Conference }) {
   if (!conference.faqCopy.enabled) return null;
 
   return (
-    <section className="flex flex-col gap-6 p-4 md:py-32">
+    <section className="flex flex-col gap-6 p-4 md:py-12">
       <h2 className={sectionHeadingClassName()}>{conference.faqCopy.title}</h2>
       <p>{conference.faqCopy.subtitle}</p>
-      <div className="flex flex-col gap-4">
-        <Link to="/contact" className={buttonStyle} data-variant="accent">
-          {translate('registration.faq.contact')}
+      <div className="flex gap-4 items-center flex-wrap">
+        <Link to="/faq" className={buttonStyle} data-variant="accent">
+          {translate("registration.faq.view")}
         </Link>
-        <Link to="/faq" className={buttonStyle} data-variant="default">
-          {translate('registration.faq.view')}
+        <Link to="/contact" className={buttonStyle} data-variant="default">
+          {translate("registration.faq.contact")}
         </Link>
       </div>
     </section>
