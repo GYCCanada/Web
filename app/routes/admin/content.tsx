@@ -1,4 +1,5 @@
 import { Cause, Clock, Effect, Option, Schema } from 'effect';
+import { useEffect, useRef } from 'react';
 import {
   Form,
   redirect,
@@ -36,6 +37,10 @@ import {
 } from '~/lib/content/admin-form';
 import { prepareImage } from '~/lib/content/image-optimize.server';
 import { collectListOps, fieldName } from '~/lib/content/list-edit';
+import {
+  isSeminarPublishReady,
+  isSpeakerPublishReady,
+} from '~/lib/content/publish-readiness';
 import {
   DraftSiteContent,
   ListItemId,
@@ -257,6 +262,33 @@ export const action = routeAction(function* () {
  * value the schema rejects); the leading empty option keeps the field unset on a
  * stub member (draft-valid, publish-invalid until chosen — ADR 0006).
  */
+/** Banner shown on list items that are draft-valid but not publish-ready (ADR 0006). */
+function IncompleteItemBanner({ kind }: { readonly kind: 'speaker' | 'seminar' }) {
+  return (
+    <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-900">
+      Incomplete {kind} — fill every bilingual field (EN and FR), upload a photo
+      with alt text, or remove this item. Publishing is blocked until every
+      speaker and seminar in the document is complete. For a &ldquo;coming
+      soon&rdquo; card, use placeholder copy in every required field (e.g. title /
+      name &ldquo;Coming Soon&rdquo; and a question-mark image).
+    </p>
+  );
+}
+
+/** Map a publish redirect status query param to clearer admin copy. */
+const formatStatusMessage = (status: string): string => {
+  if (status === 'Draft saved.') {
+    return 'Draft saved. The public site is unchanged — click Publish when you are ready to go live.';
+  }
+  if (status.startsWith('Image uploaded:')) {
+    return `${status} Re-check the text fields above before saving or publishing — typing in a field is lost when the page reloads after an upload.`;
+  }
+  if (status === 'List updated.') {
+    return 'List updated. Fill in the new item or remove it before publishing.';
+  }
+  return status;
+};
+
 function PositionSelect({
   name,
   defaultValue,
@@ -288,11 +320,18 @@ export default function AdminContentEditor() {
   const actionData = useActionData<ActionResult>();
   const navigation = useNavigation();
   const submitting = navigation.state === 'submitting';
+  const errorRef = useRef<HTMLDivElement>(null);
 
   const status =
     typeof window === 'undefined'
       ? null
       : new URLSearchParams(window.location.search).get('status');
+
+  useEffect(() => {
+    if (actionData && !actionData.ok) {
+      errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [actionData]);
 
   // Items carry an `id` (ADR 0006), and a freshly-added item is draft-valid with
   // only its `id` — its bilingual content fields are absent until edited. The
@@ -317,6 +356,16 @@ export default function AdminContentEditor() {
       activity?: { en: string; fr: string };
       bio?: { en: string; fr: string };
       photo?: { key: string; alt: { en: string; fr: string } };
+    }>;
+    seminars: ReadonlyArray<{
+      id: string;
+      title?: { en: string; fr: string };
+      description?: { en: string; fr: string };
+      speaker?: {
+        name?: { en: string; fr: string };
+        bio?: { en: string; fr: string };
+        photo?: { key: string; alt: { en: string; fr: string } };
+      };
     }>;
   }>;
   const team = (document.team ?? []) as ReadonlyArray<{
@@ -359,13 +408,21 @@ export default function AdminContentEditor() {
 
       {status && (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          {status}
+          {formatStatusMessage(status)}
         </div>
       )}
 
       {actionData && !actionData.ok && (
-        <div className="space-y-2 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+        <div
+          ref={errorRef}
+          className="sticky top-14 z-10 space-y-2 rounded-md border border-rose-300 bg-rose-50 p-3 text-sm text-rose-900 shadow-sm"
+        >
           <strong>{actionData.error}</strong>
+          <p className="text-xs">
+            Incomplete speakers or seminars anywhere in this form block publishing.
+            Look for the amber &ldquo;Incomplete&rdquo; banners below, or remove
+            unused items you added with + Add.
+          </p>
           {actionData.issues.length > 0 && (
             <ul className="space-y-1 text-xs">
               {actionData.issues.map((issue, i) => (
@@ -384,7 +441,9 @@ export default function AdminContentEditor() {
           // so an edit never lands on the wrong year.
           const conf = `conferences.${conference.slug}`;
           const speakersPath = `${conf}.speakers`;
+          const seminarsPath = `${conf}.seminars`;
           const speakerIds = conference.speakers.map((s) => s.id);
+          const seminarIds = conference.seminars.map((s) => s.id);
           return (
             <Section key={conference.slug} title={`Conference ${conference.slug}`}>
               <Bilingual
@@ -472,6 +531,11 @@ export default function AdminContentEditor() {
                     newId={newListItemId()}
                   />
                 </legend>
+                <p className="text-xs text-neutral-500">
+                  Plenary speakers. Every field is required to publish (EN and FR).
+                  Save draft keeps changes private; Publish makes them live on{' '}
+                  {conference.slug}.
+                </p>
                 {conference.speakers.map((speaker, si) => {
                   // Re-assert the `ListItemId` brand at this view boundary: the
                   // encoded document carries the id as a bare `string` (encode
@@ -492,6 +556,9 @@ export default function AdminContentEditor() {
                           index={si}
                         />
                       </div>
+                      {!isSpeakerPublishReady(speaker) ? (
+                        <IncompleteItemBanner kind="speaker" />
+                      ) : null}
                       <Bilingual
                         label="Name"
                         name={fieldName(speakersPath, speakerId, 'name')}
@@ -516,6 +583,81 @@ export default function AdminContentEditor() {
                         label="Photo alt text"
                         name={fieldName(speakersPath, speakerId, 'photo.alt')}
                         value={speaker.photo?.alt ?? emptyText}
+                      />
+                    </div>
+                  );
+                })}
+              </fieldset>
+              <fieldset className="space-y-3">
+                <legend className="flex items-center justify-between text-sm font-medium text-neutral-800">
+                  <span>Seminars</span>
+                  <AddItemButton
+                    listPath={seminarsPath}
+                    label="+ Add seminar"
+                    newId={newListItemId()}
+                  />
+                </legend>
+                <p className="text-xs text-neutral-500">
+                  Breakout seminars. Title appears as the headline on the card;
+                  description is stored for future use. All fields (including
+                  title) are required to publish — use &ldquo;Coming Soon&rdquo;
+                  placeholders if the slot is not finalized yet.
+                </p>
+                {conference.seminars.map((seminar, si) => {
+                  const seminarId = ListItemId.make(seminar.id);
+                  return (
+                    <div
+                      key={seminar.id}
+                      className="space-y-2 rounded-md bg-neutral-50 p-3"
+                    >
+                      <div className="flex items-center justify-end">
+                        <ItemControls
+                          listPath={seminarsPath}
+                          ids={seminarIds}
+                          index={si}
+                        />
+                      </div>
+                      {!isSeminarPublishReady(seminar) ? (
+                        <IncompleteItemBanner kind="seminar" />
+                      ) : null}
+                      <Bilingual
+                        label="Title"
+                        name={fieldName(seminarsPath, seminarId, 'title')}
+                        value={seminar.title ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Description"
+                        name={fieldName(seminarsPath, seminarId, 'description')}
+                        value={seminar.description ?? emptyText}
+                        multiline
+                      />
+                      <Bilingual
+                        label="Speaker name"
+                        name={fieldName(seminarsPath, seminarId, 'speaker.name')}
+                        value={seminar.speaker?.name ?? emptyText}
+                      />
+                      <Bilingual
+                        label="Speaker bio"
+                        name={fieldName(seminarsPath, seminarId, 'speaker.bio')}
+                        value={seminar.speaker?.bio ?? emptyText}
+                        multiline
+                      />
+                      <ImageUpload
+                        keyPath={fieldName(
+                          seminarsPath,
+                          seminarId,
+                          'speaker.photo.key',
+                        )}
+                        currentKey={seminar.speaker?.photo?.key ?? ''}
+                      />
+                      <Bilingual
+                        label="Speaker photo alt text"
+                        name={fieldName(
+                          seminarsPath,
+                          seminarId,
+                          'speaker.photo.alt',
+                        )}
+                        value={seminar.speaker?.photo?.alt ?? emptyText}
                       />
                     </div>
                   );

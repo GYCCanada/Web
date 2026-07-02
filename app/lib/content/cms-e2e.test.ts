@@ -447,6 +447,76 @@ describe('CMS list-op (add / remove / reorder) via DraftEditor.applyListOps', ()
     expect(result.publicTeamNames).toContain('New Member');
   });
 
+  it('add → fill seminar fields → publish makes the seminar live on the public read', async () => {
+    const seed = await seedBody();
+    const seminarId = newListItemId();
+    const seminars2026 = `conferences./2026.seminars`;
+
+    const result = await run(
+      Effect.gen(function* () {
+        const editor = yield* DraftEditor.Service;
+        const content = yield* Content.Service;
+        const storage = yield* Storage.Service;
+
+        yield* TestClock.adjust('1 second');
+        yield* editor.applyListOps(siteScope, [addOp(seminars2026, seminarId)]);
+
+        const keyPath = fieldName(seminars2026, seminarId, 'speaker.photo.key');
+        const key = uploadedImageKey(keyPath, 'image/png', 1_700_000_000_001);
+        yield* storage.put(key, new Uint8Array([0x89, 0x50, 0x4e, 0x47]), 'image/png');
+        yield* editor.applyImageUpload(siteScope, keyPath, key);
+
+        yield* TestClock.adjust('1 second');
+        const fillExit = yield* Effect.exit(
+          editor.editDocument(
+            siteScope,
+            assembleOverrides([
+              [fieldName(seminars2026, seminarId, 'title.en'), 'Coming Soon'],
+              [fieldName(seminars2026, seminarId, 'title.fr'), 'Bientôt'],
+              [
+                fieldName(seminars2026, seminarId, 'description.en'),
+                'Details soon.',
+              ],
+              [
+                fieldName(seminars2026, seminarId, 'description.fr'),
+                'Détails bientôt.',
+              ],
+              [fieldName(seminars2026, seminarId, 'speaker.name.en'), 'TBA'],
+              [fieldName(seminars2026, seminarId, 'speaker.name.fr'), 'À venir'],
+              [fieldName(seminars2026, seminarId, 'speaker.bio.en'), 'Stay tuned.'],
+              [
+                fieldName(seminars2026, seminarId, 'speaker.bio.fr'),
+                'Restez à l’écoute.',
+              ],
+              [
+                fieldName(seminars2026, seminarId, 'speaker.photo.alt.en'),
+                'Coming soon',
+              ],
+              [
+                fieldName(seminars2026, seminarId, 'speaker.photo.alt.fr'),
+                'Bientôt',
+              ],
+            ]) as Json,
+          ),
+        );
+
+        const publishExit = yield* Effect.exit(editor.publish(siteScope));
+        const publicConf = yield* content.getConference('en', 2026);
+
+        return {
+          fillTag: fillExit._tag,
+          publishTag: publishExit._tag,
+          seminarTitles: publicConf.seminars.map((s) => s.title),
+        };
+      }),
+      { [SITE_CONTENT_KEY]: { body: seed } },
+    );
+
+    expect(result.fillTag).toBe('Success');
+    expect(result.publishTag).toBe('Success');
+    expect(result.seminarTitles).toContain('Coming Soon');
+  });
+
   it('add → fill name → publish adds a board member to the public read', async () => {
     const seed = await seedBody();
     const boardId = newListItemId();
