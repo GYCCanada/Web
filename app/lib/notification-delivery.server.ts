@@ -8,8 +8,6 @@ import {
   DeliveryKey as DeliveryKeySchema,
   type DeliveryKey as DeliveryKeyType,
 } from './forms/notification-intent';
-import { SubmissionGroupId } from './forms/forms.server';
-
 export const DeliveryKey = DeliveryKeySchema;
 export type DeliveryKey = DeliveryKeyType;
 
@@ -25,10 +23,11 @@ export class DeliveryTimeout extends Schema.TaggedErrorClass<DeliveryTimeout>()(
 
 export interface Intent {
   readonly key: DeliveryKeyType;
-  readonly batchId: SubmissionGroupId;
   readonly subject: string;
   readonly content: string;
 }
+
+export type Scope = 'form' | 'registration';
 
 export type DeliveryResult<A> =
   | { readonly _tag: 'Delivered'; readonly value: A }
@@ -50,6 +49,7 @@ export class Service extends Context.Service<
       R
     >;
     readonly pending: (
+      scope: Scope,
       limit?: number,
     ) => Effect.Effect<readonly Intent[], PersistenceError>;
   }
@@ -61,7 +61,6 @@ interface StatusRow {
 
 interface IntentRow {
   readonly key: string;
-  readonly batchId: string;
   readonly subject: string;
   readonly content: string;
 }
@@ -72,7 +71,6 @@ interface ClaimRow {
 
 const decodeIntent = (row: IntentRow): Intent => ({
   key: DeliveryKeySchema.make(row.key),
-  batchId: SubmissionGroupId.make(row.batchId),
   subject: row.subject,
   content: row.content,
 });
@@ -88,7 +86,6 @@ export const layer = Layer.effect(
       const rows = yield* sql<IntentRow>`
         SELECT
           delivery_key AS key,
-          batch_id AS "batchId",
           subject,
           content
         FROM notification_deliveries
@@ -251,17 +248,23 @@ export const layer = Layer.effect(
     });
 
     const pending = Effect.fn('NotificationDelivery.pending')(function* (
+      scope: Scope,
       limit = 50,
     ) {
       const rows = yield* sql<IntentRow>`
         SELECT
           delivery_key AS key,
-          batch_id AS "batchId",
           subject,
           content
         FROM notification_deliveries
-        WHERE status = 'failed'
-           OR (status = 'delivering' AND lease_until <= now())
+        WHERE (
+          status = 'failed'
+          OR (status = 'delivering' AND lease_until <= now())
+        )
+          AND CASE
+            WHEN ${scope} = 'form' THEN batch_id IS NOT NULL
+            ELSE registration_order_id IS NOT NULL
+          END
         ORDER BY updated_at, delivery_key
         LIMIT ${limit}
       `.pipe(

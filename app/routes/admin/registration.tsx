@@ -15,6 +15,7 @@ import { routeAction, routeHandler } from '~/lib/effect/route';
 import { Forms } from '~/lib/forms/forms.server';
 import { OrderId } from '~/lib/registration/order-repository.server';
 import { RegistrationOrders } from '~/lib/registration/order-service.server';
+import { RegistrationAlerts } from '~/lib/registration/registration-alerts.server';
 import { Registrar } from '~/lib/registration/registrar.server';
 import { StripeGateway } from '~/lib/registration/stripe-gateway.server';
 
@@ -48,6 +49,7 @@ export const loader = routeHandler(function* () {
   const channel = yield* (yield* Registrar.Service).get(conference);
   const published = yield* (yield* Forms.Service).current('registration');
   const stripe = yield* StripeGateway.Service;
+  const alerts = yield* RegistrationAlerts.Service;
   const reviews = yield* (yield* RegistrationOrders.Service).openReviews;
   return {
     channel: {
@@ -65,6 +67,7 @@ export const loader = routeHandler(function* () {
     },
     publishedVersion: published.version,
     stripeAvailable: stripe.available,
+    alertsAvailable: alerts.available,
     reviews,
     status: adminFlashStatus(request),
   };
@@ -260,6 +263,7 @@ export default function RegistrationAdmin() {
           {channel.state === 'draining' ? <><Form method="post"><input type="hidden" name="revision" value={channel.revision} /><Submit intent="reopen">Reopen</Submit></Form><Form method="post"><input type="hidden" name="revision" value={channel.revision} /><Submit intent="close">Close after drain</Submit></Form></> : null}
         </div>
         <p className="text-xs text-neutral-500">Stripe readiness: {data.stripeAvailable ? 'configured' : 'not configured'}</p>
+        <p className="text-xs text-neutral-500">Operational alert mailbox: {data.alertsAvailable ? 'configured' : 'not configured'}</p>
       </section>
 
       <section className="space-y-3">

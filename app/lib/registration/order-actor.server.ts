@@ -163,6 +163,11 @@ const processor =
         if (Result.isFailure(created)) {
           yield* Effect.logError('Stripe Checkout creation failed', created.failure);
         }
+        const failureDetail =
+          Result.isFailure(created) &&
+          created.failure instanceof StripeGateway.RequestFailed
+            ? `${created.failure.operation}: ${created.failure.detail}`
+            : 'Stripe Checkout is unavailable';
         yield* repository
           .apply(
             Result.isSuccess(created)
@@ -174,7 +179,13 @@ const processor =
                     checkoutUrl: created.success.url,
                   },
                 }
-              : { orderId, event: { _tag: 'CheckoutCreationFailed' } },
+              : {
+                  orderId,
+                  event: {
+                    _tag: 'CheckoutCreationFailed',
+                    detail: failureDetail,
+                  },
+                },
           )
           .pipe(Effect.asVoid, Effect.orDie);
       },

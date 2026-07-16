@@ -31,11 +31,13 @@ SendGrid, and `/admin` remain optional and are enabled only by their complete co
 sets.
 
 Before moving the CMS channel to `open`, the same environment file must also contain a
-public HTTPS `PUBLIC_ORIGIN`, `STRIPE_API_KEY`, and `STRIPE_WEBHOOK_SECRET`. Configure the
+public HTTPS `PUBLIC_ORIGIN`, `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET`, and a monitored
+`REGISTRATION_ALERT_EMAIL`. Configure the
 Stripe endpoint as `POST <PUBLIC_ORIGIN>/api/stripe-webhook`, subscribe it to Checkout,
 asynchronous-payment, expiry, and refund events, and verify a signed test delivery. Startup
 without those values is allowed so `external` remains the safe default; the CMS readiness
-check refuses `open` or `reopen` until Stripe and the durable Order runner are available.
+check refuses `open` or `reopen` until Stripe, the durable Order runner, SMTP, and the
+Registration alert mailbox are available.
 
 Authenticate the host to GHCR using a read-only package token, then pull both digests:
 
@@ -56,6 +58,8 @@ serving image must never infer channel state from a second boolean or from an ex
 Before deployment, record the current Conference channel state and count of non-terminal
 Orders. A candidate may be deployed while the channel is `external` or `preview`; opening
 first-party intake is a separate audited CMS transition after candidate verification.
+The alert worker sends Checkout failures, refund failures, and daily reminders for reviews
+that remain unresolved after 24 hours to `REGISTRATION_ALERT_EMAIL`.
 `draining` is load-bearing: it stops new intake without abandoning webhooks, refunds, or
 durable Orders already in flight. The CMS refuses a transition from `draining` to `closed` or
 `external` until no Order is non-terminal.

@@ -120,6 +120,12 @@ processing, captured money wins: the Order and linked Registrants become confirm
 race is flagged for operator review. The system neither ignores captured money nor refunds
 it automatically.
 
+Checkout failures, refund failures, and operator reviews create durable mail intents in the
+same PostgreSQL transaction as their Order transition. The alert worker delivers them to the
+mailbox configured by `REGISTRATION_ALERT_EMAIL`; an open review older than 24 hours receives
+one reminder per UTC day until resolved. First-party Registration cannot open unless the SMTP
+transport and alert mailbox are configured.
+
 ## Rejected alternatives
 
 - **Environment-backed registrar modes.** They make operational state invisible to the CMS,

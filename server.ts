@@ -12,6 +12,7 @@ import { Env } from './app/lib/env.server.ts';
 import {
   checkAppReady,
   disposeAppRuntime,
+  drainRegistrationAlerts,
   drainFormNotifications,
   expireRegistrationOrders,
   makeRequestRuntime,
@@ -264,6 +265,13 @@ const StartupCheck = Layer.effectDiscard(
     yield* Effect.promise(expireRegistrationOrders).pipe(
       Effect.catchCause((cause) =>
         Effect.logError('Registration Order expiry worker pass failed', cause),
+      ),
+      Effect.repeat(Schedule.spaced('30 seconds')),
+      Effect.forkScoped,
+    );
+    yield* Effect.promise(drainRegistrationAlerts).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError('Registration alert worker pass failed', cause),
       ),
       Effect.repeat(Schedule.spaced('30 seconds')),
       Effect.forkScoped,

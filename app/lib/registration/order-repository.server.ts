@@ -88,6 +88,10 @@ interface CheckoutRow {
   readonly quoteExpiresAt: string;
 }
 
+interface ReviewRow {
+  readonly reviewId: string;
+}
+
 const millis = (value: string | null): number | undefined =>
   value === null ? undefined : Date.parse(value);
 
@@ -215,20 +219,75 @@ export const layer = Layer.effect(
           }
 
           if (transition.review !== undefined) {
-            yield* sql`
+            const reviewId = nanoid();
+            const reviews = yield* sql<ReviewRow>`
               INSERT INTO registration_order_reviews (
                 review_id,
                 order_id,
                 reason,
                 detail
               ) VALUES (
-                ${nanoid()},
+                ${reviewId},
                 ${command.orderId},
                 ${transition.review.reason},
                 ${transition.review.detail}
               )
               ON CONFLICT (order_id, reason) WHERE status = 'open'
               DO UPDATE SET detail = EXCLUDED.detail
+              RETURNING review_id AS "reviewId"
+            `;
+            const persistedReviewId = reviews[0]?.reviewId;
+            if (persistedReviewId === undefined) {
+              return yield* Effect.die('Review upsert did not return its id');
+            }
+            const refundFailed = transition.review.reason === 'refund_failed';
+            const alertKey =
+              refundFailed
+                ? `order:${command.orderId}:refund-failed:${transition.state.refundStartedAt ?? 'unknown'}`
+                : `review:${persistedReviewId}:opened`;
+            const subject =
+              refundFailed
+                ? `[Registration] Refund failed — ${command.orderId}`
+                : `[Registration] Order review required — ${command.orderId}`;
+            yield* sql`
+              INSERT INTO notification_deliveries (
+                delivery_key,
+                registration_order_id,
+                registration_review_id,
+                subject,
+                content,
+                status
+              ) VALUES (
+                ${alertKey},
+                ${command.orderId},
+                ${persistedReviewId},
+                ${subject},
+                ${`${transition.review.reason}: ${transition.review.detail}\n\nReview this Order in /admin/registration.`},
+                'failed'
+              )
+              ON CONFLICT (delivery_key) DO NOTHING
+            `;
+          }
+
+          if (
+            transition.changed &&
+            command.event._tag === 'CheckoutCreationFailed'
+          ) {
+            yield* sql`
+              INSERT INTO notification_deliveries (
+                delivery_key,
+                registration_order_id,
+                subject,
+                content,
+                status
+              ) VALUES (
+                ${`order:${command.orderId}:checkout-failed`},
+                ${command.orderId},
+                ${`[Registration] Checkout failed — ${command.orderId}`},
+                ${`${command.event.detail}\n\nReview this Order in /admin/registration.`},
+                'failed'
+              )
+              ON CONFLICT (delivery_key) DO NOTHING
             `;
           }
 
