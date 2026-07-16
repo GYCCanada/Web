@@ -92,6 +92,23 @@ describe('Env config', () => {
       expect(Exit.isFailure(exit)).toBe(true);
     }));
 
+  it.effect('treats Docker-style empty required mail declarations as missing', () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.service(Env.Service).pipe(
+        provideEnv({
+          NODE_ENV: 'production',
+          MAIL_HOST: '',
+          MAIL_PORT: '',
+          MAIL_USER: '',
+          MAIL_PASS: '',
+          MAIL_FROM: '',
+          MAIL_TO: '',
+        }),
+        Effect.exit,
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+    }));
+
   it.effect('enables Stripe only when every first-party registration secret is present', () =>
     Effect.gen(function* () {
       const env = yield* Env.Service;
