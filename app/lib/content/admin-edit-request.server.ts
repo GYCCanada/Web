@@ -86,7 +86,22 @@ export const handleAdminEditRequest = Effect.fn(
     const applied = yield* editor
       .applyImageUpload(scope, uploadTarget, key)
       .pipe(Effect.result);
-    if (applied._tag === 'Failure') return issueResponse(applied.failure);
+    if (applied._tag === 'Failure') {
+      const compensated = yield* storage.delete(key).pipe(Effect.result);
+      if (compensated._tag === 'Failure') {
+        return Response.json(
+          {
+            ok: false,
+            error:
+              'The image reference failed and the uploaded object could not be cleaned up. ' +
+              Cause.pretty(compensated.failure),
+            issues: applied.failure.issues,
+          },
+          { status: 502 },
+        );
+      }
+      return issueResponse(applied.failure);
+    }
     return adminRedirectWithStatus(redirectTo, `Image uploaded: ${key}`);
   }
 
