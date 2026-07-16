@@ -153,6 +153,32 @@ describe('Forms', () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect('requires a non-optional registration notification email', () =>
+    Effect.gen(function* () {
+      const forms = yield* Forms.Service;
+      const initial = yield* forms.current('registration');
+      const rejected = yield* forms
+        .publish({
+          form: 'registration',
+          expectedCurrentVersion: Option.some(initial.version),
+          definition: {
+            ...initial.definition,
+            fields: initial.definition.fields.map((field) =>
+              field.name === 'email' ? { ...field, optional: true } : field,
+            ),
+          },
+        })
+        .pipe(Effect.flip);
+
+      expect(rejected._tag).toBe('Forms.DefinitionRejected');
+      if (Forms.DefinitionRejected.is(rejected)) {
+        expect(rejected.issues.join('\n')).toContain(
+          'notification.email must reference a non-optional registration email field',
+        );
+      }
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect('validates a whole batch before consuming its idempotency token', () =>
     Effect.gen(function* () {
       const forms = yield* Forms.Service;

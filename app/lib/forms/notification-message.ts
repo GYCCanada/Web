@@ -205,6 +205,16 @@ export const normalizeNotificationProjection = (
         new Set(['email']),
         issues,
       );
+      const registrationEmail = fields.get(notification.email);
+      if (
+        registrationEmail !== undefined &&
+        registrationEmail._tag === 'email' &&
+        registrationEmail.optional === true
+      ) {
+        issues.push(
+          'notification.email must reference a non-optional registration email field',
+        );
+      }
       if (
         definition.variant === undefined ||
         notification.type !== definition.variant.discriminator

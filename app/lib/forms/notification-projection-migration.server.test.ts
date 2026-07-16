@@ -26,8 +26,12 @@ describe('notification projection preflight migration', () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient;
       const contactBase = withoutNotification(defaultContactForm);
+      const legacyProjection = encodeDefinition(defaultContactForm).notification;
       const historicalContact = decodeDefinition({
         ...contactBase,
+        // Present and accepted by the prior contract, but dangling after the
+        // historical field renames. Explicit mapping must replace it.
+        notification: legacyProjection,
         fields: contactBase.fields.map((field) => {
           switch (field.name) {
             case 'name':

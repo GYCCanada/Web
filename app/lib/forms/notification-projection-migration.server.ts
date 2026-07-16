@@ -98,10 +98,11 @@ export const migrate = Effect.fn(
     const explicit = options.mappings[form] as
       | NotificationProjectionType
       | undefined;
+    // An explicit operator mapping is authoritative even when a projection is
+    // already present: contract upgrades may invalidate a shape accepted by the
+    // previous release, and this preflight must remain able to repair it.
     const candidate =
-      decoded.notification === undefined && explicit !== undefined
-        ? { ...decoded, notification: explicit }
-        : decoded;
+      explicit === undefined ? decoded : { ...decoded, notification: explicit };
     const result = yield* prepareDefinitionVersion(form, candidate).pipe(
       Effect.result,
     );
@@ -121,7 +122,7 @@ export const migrate = Effect.fn(
       currentVersion: row.value.version,
       proposedVersion: result.success.version,
       status:
-        decoded.notification === undefined ? 'ready' : 'current',
+        result.success.version === row.value.version ? 'current' : 'ready',
       issues: [],
       definitionJson: result.success.definitionJson,
     });
