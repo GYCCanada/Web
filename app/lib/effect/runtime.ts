@@ -19,6 +19,7 @@ import { OrderRepository } from '~/lib/registration/order-repository.server';
 import { RegistrationIntake } from '~/lib/registration/intake.server';
 import { Registrar } from '~/lib/registration/registrar.server';
 import { RegistrationOrders } from '~/lib/registration/order-service.server';
+import { RegistrationAlerts } from '~/lib/registration/registration-alerts.server';
 import { StripeGateway } from '~/lib/registration/stripe-gateway.server';
 import { NotFound, Storage, StorageError } from '~/lib/storage.server';
 import { Toast } from '~/lib/toast.server';
@@ -44,6 +45,7 @@ export type AppServices =
   | Registrar.Service
   | RegistrationIntake.Service
   | RegistrationOrders.Service
+  | RegistrationAlerts.Service
   | StripeGateway.Service
   | OrderActor.Sender
   | Auth.Service
@@ -120,7 +122,15 @@ export const makeAppLayer = (
     RegistrationOrders.layer,
   ).pipe(
     Layer.provideMerge(
-      Layer.mergeAll(relationalCore, orderSender, stripeLayer),
+      Layer.mergeAll(
+        relationalCore,
+        orderSender,
+        stripeLayer,
+        RegistrationAlerts.layer.pipe(
+          Layer.provideMerge(relationalCore),
+          Layer.provideMerge(baseLayer),
+        ),
+      ),
     ),
   );
   const notificationLayer = FormNotifications.layer.pipe(
@@ -165,6 +175,16 @@ export const expireRegistrationOrders = (): Promise<number> =>
   AppRuntime.runPromise(
     Effect.gen(function* () {
       return yield* (yield* RegistrationOrders.Service).expireDue(
+        yield* Clock.currentTimeMillis,
+      );
+    }),
+  );
+
+/** Deliver durable Registration failures and unresolved-review reminders. */
+export const drainRegistrationAlerts = (): Promise<number> =>
+  AppRuntime.runPromise(
+    Effect.gen(function* () {
+      return yield* (yield* RegistrationAlerts.Service).drain(
         yield* Clock.currentTimeMillis,
       );
     }),

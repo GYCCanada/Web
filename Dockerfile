@@ -38,7 +38,33 @@ RUN bun install --frozen-lockfile --production --ignore-scripts
 # ---- runtime ----
 FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0
 WORKDIR /app
-ENV NODE_ENV=production
+# Runtime configuration inventory. Effect's environment provider treats these
+# empty image defaults as missing: required values still fail fast, while
+# optional integrations remain disabled until the custom host supplies them.
+# app/lib/docker-env-contract.test.ts keeps this list aligned with .env.example.
+ENV NODE_ENV=production \
+    DATABASE_URL="" \
+    PORT="" \
+    PUBLIC_ORIGIN="" \
+    STRIPE_API_KEY="" \
+    STRIPE_WEBHOOK_SECRET="" \
+    MAIL_HOST="" \
+    MAIL_PORT="" \
+    MAIL_USER="" \
+    MAIL_PASS="" \
+    MAIL_FROM="" \
+    MAIL_TO="" \
+    REGISTRATION_ALERT_EMAIL="" \
+    SENDGRID_API_KEY="" \
+    SENDGRID_LIST_ID="" \
+    BUCKET_ENDPOINT="" \
+    BUCKET_ACCESS_KEY="" \
+    BUCKET_SECRET_KEY="" \
+    BUCKET_NAME="" \
+    BUCKET_REGION="auto" \
+    ADMIN_PASSWORD="" \
+    COOKIE_SECRET="" \
+    TOAST_COOKIE_SECRET=""
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build

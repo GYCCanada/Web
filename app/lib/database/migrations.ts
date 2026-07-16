@@ -424,6 +424,27 @@ const registrationCommerce = Effect.gen(function* () {
   `;
 });
 
+const registrationAlerts = Effect.gen(function* () {
+  const sql = yield* SqlClient;
+  yield* sql`
+    ALTER TABLE notification_deliveries
+      ALTER COLUMN batch_id DROP NOT NULL,
+      ADD COLUMN registration_order_id text
+        REFERENCES registration_orders(order_id) ON DELETE CASCADE,
+      ADD COLUMN registration_review_id text
+        REFERENCES registration_order_reviews(review_id) ON DELETE CASCADE,
+      ADD CONSTRAINT notification_deliveries_origin CHECK (
+        (batch_id IS NOT NULL AND registration_order_id IS NULL AND registration_review_id IS NULL)
+        OR (batch_id IS NULL AND registration_order_id IS NOT NULL)
+      )
+  `;
+  yield* sql`
+    CREATE INDEX notification_deliveries_registration
+    ON notification_deliveries(registration_order_id, updated_at)
+    WHERE registration_order_id IS NOT NULL
+  `;
+});
+
 export const loader = Migrator.fromRecord({
   '0001_form_records': formRecords,
   '0002_submission_tokens': submissionTokens,
@@ -432,4 +453,5 @@ export const loader = Migrator.fromRecord({
   '0005_notification_outbox': notificationOutbox,
   '0006_durable_notification_payloads': durableNotificationPayloads,
   '0007_registration_commerce': registrationCommerce,
+  '0008_registration_alerts': registrationAlerts,
 });

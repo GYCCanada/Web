@@ -32,7 +32,7 @@ export const OrderEvent = Schema.TaggedUnion({
     sessionId: Schema.NonEmptyString,
     checkoutUrl: Schema.NonEmptyString,
   },
-  CheckoutCreationFailed: {},
+  CheckoutCreationFailed: { detail: Schema.NonEmptyString },
   CheckoutCompleted: {
     at: Schema.Number,
     paymentStatus: Schema.Literals(['paid', 'unpaid', 'no_payment_required']),

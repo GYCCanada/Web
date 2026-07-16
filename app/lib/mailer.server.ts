@@ -12,6 +12,14 @@ export class MailError extends Schema.TaggedErrorClass<MailError>()(
   },
 ) {}
 
+export interface Message {
+  readonly recipient?: string;
+  readonly senderName?: string;
+  readonly subject: string;
+  readonly content: string;
+  readonly idempotencyKey?: string;
+}
+
 /**
  * Contact / volunteer email sender, ported from the standalone
  * `nodemailer` module to an Effect `Context.Service`.
@@ -24,11 +32,7 @@ export class MailError extends Schema.TaggedErrorClass<MailError>()(
 export class Service extends Context.Service<
   Service,
   {
-    readonly send: (input: {
-      readonly subject: string;
-      readonly content: string;
-      readonly idempotencyKey?: string;
-    }) => Effect.Effect<void, MailError>;
+    readonly send: (input: Message) => Effect.Effect<void, MailError>;
   }
 >()('gycc/lib/mailer.server/Service') {}
 
@@ -61,16 +65,12 @@ export const layer = Layer.effect(
     });
 
     const send = Effect.fn('Mailer.send')(
-      (input: {
-        readonly subject: string;
-        readonly content: string;
-        readonly idempotencyKey?: string;
-      }) =>
+      (input: Message) =>
         Effect.tryPromise({
           try: () =>
             transporter.sendMail({
-              from: `GYCC Contact <${mail.from}>`,
-              to: mail.to,
+              from: `${input.senderName ?? 'GYCC Contact'} <${mail.from}>`,
+              to: input.recipient ?? mail.to,
               subject: input.subject,
               text: input.content,
               messageId:

@@ -19,6 +19,7 @@ import { FormDefinition } from '../forms/definition';
 import { FormDefinitionVersionId } from '../forms/forms.server';
 import { OrderActor } from './order-actor.server';
 import { StripeGateway } from './stripe-gateway.server';
+import { RegistrationAlerts } from './registration-alerts.server';
 
 export const ConferenceTimeZone = Schema.String.check(
   Schema.makeFilter<string>((timeZone) => {
@@ -104,7 +105,10 @@ export type OpenCommand = ExpectedRevision & {
 export type RegistrarReadinessIssue =
   | ReadinessIssue
   | {
-      readonly code: 'stripe-unavailable' | 'workflows-unavailable';
+      readonly code:
+        | 'stripe-unavailable'
+        | 'workflows-unavailable'
+        | 'alerts-unavailable';
       readonly message: string;
     };
 
@@ -265,6 +269,7 @@ export class Infrastructure extends Context.Service<
     readonly readiness: Effect.Effect<{
       readonly stripe: boolean;
       readonly workflows: boolean;
+      readonly alerts: boolean;
     }>;
   }
 >()('@gycc/app/registration/RegistrarInfrastructure') {}
@@ -273,11 +278,13 @@ export const infrastructureLayer = Layer.effect(
   Infrastructure,
   Effect.gen(function* () {
     const stripe = yield* StripeGateway.Service;
+    const alerts = yield* RegistrationAlerts.Service;
     yield* OrderActor.Sender;
     return Infrastructure.of({
       readiness: Effect.succeed({
         stripe: stripe.available,
         workflows: true,
+        alerts: alerts.available,
       }),
     });
   }),
@@ -480,6 +487,12 @@ export const layer = Layer.effect(
         issues.push({
           code: 'workflows-unavailable',
           message: 'The durable Registration worker is not ready.',
+        });
+      }
+      if (!available.alerts) {
+        issues.push({
+          code: 'alerts-unavailable',
+          message: 'Registration operational mailbox alerts are not configured.',
         });
       }
       if (issues.length > 0) {

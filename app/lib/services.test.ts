@@ -43,6 +43,7 @@ describe('Env config', () => {
       expect(Option.isNone(env.sendgrid)).toBe(true);
       expect(Option.isNone(env.bucket)).toBe(true);
       expect(Option.isNone(env.stripe)).toBe(true);
+      expect(Option.isNone(env.registrationAlertEmail)).toBe(true);
     }).pipe(provideEnv({ NODE_ENV: 'development' })));
 
   it.effect('requires mail in production and keeps sendgrid optional', () =>
@@ -57,6 +58,19 @@ describe('Env config', () => {
         expect(Redacted.value(env.mail.value.pass)).toBe('secret');
       }
     }).pipe(provideEnv(PROD_ENV)));
+
+  it.effect('resolves the dedicated Registration alert mailbox when configured', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.getOrUndefined(env.registrationAlertEmail)).toBe(
+        'registration-ops@example.com',
+      );
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        REGISTRATION_ALERT_EMAIL: '  registration-ops@example.com  ',
+      }),
+    ));
 
   it.effect('resolves sendgrid when configured and redacts the API key', () =>
     Effect.gen(function* () {
@@ -73,6 +87,23 @@ describe('Env config', () => {
     Effect.gen(function* () {
       const exit = yield* Effect.service(Env.Service).pipe(
         provideEnv({ NODE_ENV: 'production', MAIL_HOST: 'only-host' }),
+        Effect.exit,
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+    }));
+
+  it.effect('treats Docker-style empty required mail declarations as missing', () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.service(Env.Service).pipe(
+        provideEnv({
+          NODE_ENV: 'production',
+          MAIL_HOST: '',
+          MAIL_PORT: '',
+          MAIL_USER: '',
+          MAIL_PASS: '',
+          MAIL_FROM: '',
+          MAIL_TO: '',
+        }),
         Effect.exit,
       );
       expect(Exit.isFailure(exit)).toBe(true);

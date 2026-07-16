@@ -47,6 +47,15 @@ export interface StripeConfig {
   readonly publicOrigin: string;
 }
 
+const registrationAlertEmailConfig: Config.Config<Option.Option<string>> =
+  Config.string('REGISTRATION_ALERT_EMAIL').pipe(
+    Config.map((value) => value.trim()),
+    Config.withDefault(''),
+    Config.map((value) =>
+      value.length > 0 ? Option.some(value) : Option.none(),
+    ),
+  );
+
 const mailConfigRequired = Config.all({
   host: Config.string('MAIL_HOST'),
   port: Config.number('MAIL_PORT'),
@@ -163,6 +172,7 @@ export class Service extends Context.Service<
     readonly sendgrid: Option.Option<SendgridConfig>;
     readonly bucket: Option.Option<BucketConfig>;
     readonly stripe: Option.Option<StripeConfig>;
+    readonly registrationAlertEmail: Option.Option<string>;
   }
 >()('gycc/lib/env.server/Service') {}
 
@@ -184,6 +194,7 @@ export const layer = Layer.effect(
     const bucket = yield* bucketConfig;
     const sendgrid = yield* sendgridConfig;
     const stripe = yield* stripeConfig;
+    const registrationAlertEmail = yield* registrationAlertEmailConfig;
 
     if (isProduction) {
       const mail = yield* mailConfigRequired;
@@ -193,11 +204,19 @@ export const layer = Layer.effect(
         sendgrid,
         bucket,
         stripe,
+        registrationAlertEmail,
       });
     }
 
     const mail = yield* Config.option(mailConfigRequired);
-    return Service.of({ isProduction, mail, sendgrid, bucket, stripe });
+    return Service.of({
+      isProduction,
+      mail,
+      sendgrid,
+      bucket,
+      stripe,
+      registrationAlertEmail,
+    });
   }),
 );
 

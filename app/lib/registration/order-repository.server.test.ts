@@ -236,6 +236,94 @@ describe('OrderRepository', () => {
       `;
       expect(orders[0]?.status).toBe('awaiting_payment');
       expect(reviews[0]?.count).toBe(1);
+      const alerts = yield* sql<{ count: number }>`
+        SELECT count(*)::int AS count FROM notification_deliveries
+        WHERE registration_order_id = ${orderId}
+          AND registration_review_id IS NOT NULL
+      `;
+      expect(alerts[0]?.count).toBe(1);
+    }),
+  );
+
+  test('atomically records one alert when Checkout creation fails', () =>
+    Effect.gen(function* () {
+      yield* seedOrder;
+      const sql = yield* SqlClient;
+      yield* sql`
+        UPDATE registration_orders
+        SET status = 'preparing_checkout'
+        WHERE order_id = ${orderId}
+      `;
+      const repository = yield* OrderRepository.Service;
+      const command = {
+        orderId,
+        event: {
+          _tag: 'CheckoutCreationFailed' as const,
+          detail: 'create Checkout Session: Stripe unavailable',
+        },
+      };
+      yield* repository.apply(command);
+      yield* repository.apply(command);
+
+      const alerts = yield* sql<{
+        key: string;
+        status: string;
+        content: string;
+      }>`
+        SELECT delivery_key AS key, status, content
+        FROM notification_deliveries
+        WHERE registration_order_id = ${orderId}
+      `;
+      expect(alerts).toEqual([
+        {
+          key: `order:${orderId}:checkout-failed`,
+          status: 'failed',
+          content:
+            'create Checkout Session: Stripe unavailable\n\nReview this Order in /admin/registration.',
+        },
+      ]);
+    }),
+  );
+
+  test('records a dedicated refund failure alert and open review together', () =>
+    Effect.gen(function* () {
+      yield* seedOrder;
+      const repository = yield* OrderRepository.Service;
+      const at = Date.parse('2026-08-01T12:05:00Z');
+      yield* repository.apply({
+        orderId,
+        event: {
+          _tag: 'CheckoutCompleted',
+          at,
+          paymentStatus: 'paid',
+          amountTotal: Cents.make(5_000),
+          paymentIntentId: 'pi_1',
+        },
+      });
+      yield* repository.apply({
+        orderId,
+        event: { _tag: 'RefundRequested', at: at + 1_000 },
+      });
+      yield* repository.apply({
+        orderId,
+        event: {
+          _tag: 'RefundFailed',
+          at: at + 2_000,
+          detail: 'Stripe rejected the refund',
+        },
+      });
+
+      const sql = yield* SqlClient;
+      const alerts = yield* sql<{ key: string; reviewId: string | null }>`
+        SELECT
+          delivery_key AS key,
+          registration_review_id AS "reviewId"
+        FROM notification_deliveries
+        WHERE registration_order_id = ${orderId}
+      `;
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]?.key).toContain(`order:${orderId}:refund-failed:`);
+      expect(alerts[0]?.reviewId).not.toBeNull();
     }),
   );
 

@@ -44,7 +44,8 @@ describe('Database lifecycle', () => {
             'registration_orders',
             'registration_order_registrants',
             'stripe_event_receipts',
-            'registration_order_reviews'
+            'registration_order_reviews',
+            'notification_deliveries'
           )
         ORDER BY table_name
       `;
@@ -53,6 +54,7 @@ describe('Database lifecycle', () => {
         'form_definition_drafts',
         'form_definition_versions',
         'forms',
+        'notification_deliveries',
         'registrants',
         'registration_channels',
         'registration_order_registrants',

@@ -98,7 +98,7 @@ const testLayer = Layer.mergeAll(
       Layer.succeed(
         Registrar.Infrastructure,
         Registrar.Infrastructure.of({
-          readiness: Effect.succeed({ stripe: true, workflows: true }),
+          readiness: Effect.succeed({ stripe: true, workflows: true, alerts: true }),
         }),
       ),
     ),

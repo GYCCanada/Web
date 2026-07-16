@@ -22,7 +22,7 @@ const formsLayer = Forms.layer.pipe(Layer.provideMerge(DatabaseTest.layer));
 const readyInfrastructure = Layer.succeed(
   Registrar.Infrastructure,
   Registrar.Infrastructure.of({
-    readiness: Effect.succeed({ stripe: true, workflows: true }),
+    readiness: Effect.succeed({ stripe: true, workflows: true, alerts: true }),
   }),
 );
 const testLayer = Registrar.layer.pipe(
@@ -35,7 +35,11 @@ const unavailableTestLayer = Registrar.layer.pipe(
     Layer.succeed(
       Registrar.Infrastructure,
       Registrar.Infrastructure.of({
-        readiness: Effect.succeed({ stripe: false, workflows: false }),
+        readiness: Effect.succeed({
+          stripe: false,
+          workflows: false,
+          alerts: false,
+        }),
       }),
     ),
   ),
@@ -142,6 +146,7 @@ describe('Registrar', () => {
         expect(unavailable.issues.map((issue) => issue.code)).toEqual([
           'stripe-unavailable',
           'workflows-unavailable',
+          'alerts-unavailable',
         ]);
       }
       yield* sql`
