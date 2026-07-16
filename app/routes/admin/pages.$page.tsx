@@ -9,18 +9,12 @@ import {
 
 import { adminMeta, adminFlashStatus, adminSecurityHeaders } from '~/lib/admin-headers';
 import { Auth } from '~/lib/auth.server';
-import {
-  DraftEditor,
-  pageScope,
-} from '~/lib/content/draft-editor.server';
-import {
-  assembleOverrides,
-  normalizeFaqAnswers,
-  type Json,
-} from '~/lib/content/admin-form';
-import { handleAdminEditRequest } from '~/lib/content/admin-edit-request.server';
 import { fieldName } from '~/lib/content/list-edit';
-import { PAGE_SPECS, PageId } from '~/lib/content/pages/registry';
+import { PAGE_LABELS, PageId } from '~/lib/content/pages/registry';
+import {
+  applyPageAuthoring,
+  openPageAuthoring,
+} from '~/lib/content/pages/pages.server';
 import { ListItemId } from '~/lib/content/schema';
 import { Env } from '~/lib/env.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
@@ -75,18 +69,6 @@ export const headers = adminSecurityHeaders;
 /** Decode the `:page` route param to a `PageId`, or `Option.none` if unknown. */
 const decodePageId = Schema.decodeUnknownOption(PageId);
 
-/** A human label for each page (the admin nav + heading). */
-const PAGE_LABELS: { readonly [P in PageId]: string } = {
-  about: 'About',
-  faq: 'FAQ',
-  give: 'Give',
-  contact: 'Contact',
-  volunteer: 'Volunteer',
-  archive: 'Archive',
-  home: 'Home (evergreen sections)',
-  team: 'Team',
-};
-
 type ActionResponse = ActionResult;
 
 /** Auth gate shared by the loader + action (404 when admin is disabled). */
@@ -117,13 +99,8 @@ export const loader = routeHandler(function* () {
   const page = yield* requirePageId();
   const { request } = yield* ReactRouterContext;
 
-  const editor = yield* DraftEditor.Service;
   const env = yield* Env.Service;
-  const { content, source } = yield* editor.load(pageScope(page));
-  // Encode the decoded DRAFT page to the JSON the form renders from — the same
-  // encoded shape `DraftEditor.editDocument` merges the form override onto.
-  const encode = Schema.encodeUnknownEffect(PAGE_SPECS[page].draftSchema);
-  const encoded = (yield* encode(content)) as Json;
+  const { encoded, source } = yield* openPageAuthoring(page);
   const bucketConfigured = Option.isSome(env.bucket);
   const status = adminFlashStatus(request);
 
@@ -135,13 +112,7 @@ export const action = routeAction(function* () {
   const page = yield* requirePageId();
   const { request } = yield* ReactRouterContext;
   const form = yield* Effect.promise(() => request.formData());
-  return yield* handleAdminEditRequest({
-    scope: pageScope(page),
-    form,
-    redirectTo: `/admin/pages/${page}`,
-    buildOverride: (submitted) =>
-      normalizeFaqAnswers(assembleOverrides(submitted.entries())),
-  });
+  return yield* applyPageAuthoring(page, form);
 });
 
 // ---------------------------------------------------------------------------

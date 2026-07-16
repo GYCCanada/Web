@@ -1,27 +1,11 @@
 import { Link } from 'react-router';
 
 import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
-import { PAGE_IDS, type PageId } from '~/lib/content/pages/registry';
+import { PAGE_IDS, PAGE_LABELS } from '~/lib/content/pages/registry';
 
 export const meta = adminMeta;
 
 export const headers = adminSecurityHeaders;
-
-/**
- * Human label per `PageId` for the dashboard's per-page editor links. Exhaustive
- * over `PageId` so adding a page to the registry without a label fails to compile
- * (`make-impossible-states-unrepresentable`).
- */
-const PAGE_LABELS: { readonly [P in PageId]: string } = {
-  about: 'About',
-  faq: 'FAQ',
-  give: 'Give',
-  contact: 'Contact',
-  volunteer: 'Volunteer',
-  archive: 'Archive',
-  home: 'Home (evergreen)',
-  team: 'Team',
-};
 
 /**
  * The authenticated admin landing page. Reaching it means the `_layout` guard

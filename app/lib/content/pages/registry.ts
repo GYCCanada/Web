@@ -86,6 +86,18 @@ export type PageId = typeof PageId.Type;
 /** Every registered Page id, in declaration order (the read path / admin iterate it). */
 export const PAGE_IDS = PageId.literals;
 
+/** The single human label for each Page across every admin surface. */
+export const PAGE_LABELS = {
+  about: 'About',
+  faq: 'FAQ',
+  give: 'Give',
+  contact: 'Contact',
+  volunteer: 'Volunteer',
+  archive: 'Archive',
+  home: 'Home (evergreen)',
+  team: 'Team',
+} as const satisfies { readonly [P in PageId]: string };
+
 /**
  * The closed set of site Forms (CONTEXT §Form definition). Each owns a
  * `FormDefinition` object (`forms/<form>.json`) — the structural field graph the
