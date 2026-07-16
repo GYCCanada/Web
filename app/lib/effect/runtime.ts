@@ -59,7 +59,7 @@ export const makeAppLayer = (
     Content.layer,
     Auth.layer,
   ).pipe(Layer.provideMerge(storageLayer));
-  const formsLayer = Forms.layer.pipe(Layer.provide(databaseLayer));
+  const formsLayer = Forms.layer.pipe(Layer.provideMerge(databaseLayer));
   return Layer.mergeAll(DraftEditor.layer, formsLayer).pipe(
     Layer.provideMerge(baseLayer),
     Layer.provideMerge(Env.layer),
@@ -77,6 +77,14 @@ export type AppLayer = ReturnType<typeof makeAppLayer>;
 const AppRuntime = ManagedRuntime.make(
   makeAppLayer(Storage.layerOptional, Database.layer),
 );
+
+/** Build the shared app runtime and verify its migrated relational adapter. */
+export const checkAppReady = (): Promise<void> =>
+  AppRuntime.runPromise(
+    Effect.gen(function* () {
+      yield* (yield* Database.Service).ready;
+    }),
+  );
 
 const isResponse = (v: unknown): v is Response =>
   typeof v === 'object' && v !== null && v instanceof Response;

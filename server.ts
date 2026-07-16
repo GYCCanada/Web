@@ -10,6 +10,7 @@ import type { ServerBuild } from 'react-router';
 
 import { Env } from './app/lib/env.server.ts';
 import {
+  checkAppReady,
   makeRequestRuntime,
   type RequestRuntime,
 } from './app/lib/effect/runtime.ts';
@@ -195,8 +196,8 @@ const stripQuery = (url: string): string => {
   return q === -1 ? url : url.slice(0, q);
 };
 
-// Container readiness probe. Plain text, no app services — answering 200 here
-// means the process is up and the env layer (below) validated at boot.
+// Container readiness probe. The server is not launched until StartupCheck has
+// validated Env and built the shared migrated database runtime.
 const HealthRoute = HttpRouter.add(
   'GET',
   '/healthz',
@@ -242,15 +243,15 @@ const DevRoutes = Layer.mergeAll(HealthRoute, ImagesRoute, FallbackRoute);
 
 const RoutesLive = isDev ? DevRoutes : ProdRoutes;
 
-// Fail fast at boot: forcing `Env` here makes its layer validate the required
-// mail secrets (in `NODE_ENV=production`) when the server layer is
-// built, instead of lazily on the first Effect-wrapped form action
-// (ADR 0004:38-40). Providing `Env.layer` discharges the requirement, so a
-// missing secret fails `Layer.launch` and `BunRuntime.runMain` exits non-zero.
-// In dev / test the env vars are optional, so this is a cheap no-op.
-const StartupCheck = Layer.effectDiscard(Effect.service(Env.Service)).pipe(
-  Layer.provide(Env.layer),
-);
+// Fail fast at boot on required configuration, migrations, and database
+// connectivity. `checkAppReady` builds the same singleton AppRuntime requests use,
+// so startup does not validate a disposable second adapter.
+const StartupCheck = Layer.effectDiscard(
+  Effect.gen(function* () {
+    yield* Env.Service;
+    yield* Effect.promise(checkAppReady);
+  }),
+).pipe(Layer.provide(Env.layer));
 
 // The `/images/*` route reads through `Storage`. `Storage.defaultLayer` never
 // fails to build (bucket-less it serves `NotFound`, which the route recovers by
