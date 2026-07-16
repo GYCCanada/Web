@@ -1,4 +1,4 @@
-import { DateTime, Effect, Result, Schema } from 'effect';
+import { Clock, DateTime, Effect, Result, Schema } from 'effect';
 import type { ReactNode } from 'react';
 import { Form, useActionData, useLoaderData, useNavigation } from 'react-router';
 
@@ -113,6 +113,7 @@ export const action = routeAction(function* () {
   const revision = decodeRevision(submitted.get('revision'));
   if (Result.isFailure(revision)) return failure(400, 'The channel revision is invalid.');
 
+  const now = yield* Clock.currentTimeMillis;
   const registrar = yield* Registrar.Service;
   const common = { conference, expectedRevision: revision.success };
   switch (intent) {
@@ -140,7 +141,7 @@ export const action = routeAction(function* () {
       return yield* completeTransition(
         registrar.open({
           ...common,
-          at: DateTime.makeUnsafe(Date.now()),
+          at: DateTime.makeUnsafe(now),
         }),
       );
     }
@@ -148,7 +149,7 @@ export const action = routeAction(function* () {
       return yield* completeTransition(registrar.beginDrain(common));
     case 'reopen':
       return yield* completeTransition(
-        registrar.reopen({ ...common, at: DateTime.makeUnsafe(Date.now()) }),
+        registrar.reopen({ ...common, at: DateTime.makeUnsafe(now) }),
       );
     case 'close':
       return yield* completeTransition(registrar.close(common));
@@ -156,7 +157,7 @@ export const action = routeAction(function* () {
       const orderId = decodeOrderId(submitted.get('orderId'));
       if (Result.isFailure(orderId)) return failure(400, 'The Order id is invalid.');
       const result = yield* (yield* RegistrationOrders.Service)
-        .requestRefund(orderId.success, Date.now())
+        .requestRefund(orderId.success, now)
         .pipe(Effect.result);
       return Result.isSuccess(result)
         ? adminRedirectWithStatus('/admin/registration', 'Full refund enqueued.')
@@ -166,7 +167,7 @@ export const action = routeAction(function* () {
       const reviewId = decodeReviewId(submitted.get('reviewId'));
       if (Result.isFailure(reviewId)) return failure(400, 'The review id is invalid.');
       const result = yield* (yield* RegistrationOrders.Service)
-        .resolveReview(reviewId.success, Date.now())
+        .resolveReview(reviewId.success, now)
         .pipe(Effect.result);
       return Result.isSuccess(result)
         ? adminRedirectWithStatus('/admin/registration', 'Order review resolved.')

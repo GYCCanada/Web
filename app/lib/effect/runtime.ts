@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, Layer, ManagedRuntime } from 'effect';
+import { Cause, Clock, Effect, Exit, Layer, ManagedRuntime } from 'effect';
 import { SingleRunner } from 'effect/unstable/cluster';
 import * as ShardingConfig from 'effect/unstable/cluster/ShardingConfig';
 import { data, redirect } from 'react-router';
@@ -164,7 +164,9 @@ export const drainFormNotifications = (): Promise<number> =>
 export const expireRegistrationOrders = (): Promise<number> =>
   AppRuntime.runPromise(
     Effect.gen(function* () {
-      return yield* (yield* RegistrationOrders.Service).expireDue(Date.now());
+      return yield* (yield* RegistrationOrders.Service).expireDue(
+        yield* Clock.currentTimeMillis,
+      );
     }),
   );
 
