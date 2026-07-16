@@ -91,24 +91,70 @@ export class Sender extends Context.Service<
     readonly createCheckout: (
       orderId: OrderId,
     ) => Effect.Effect<void, EnqueueError>;
+    readonly applyStripeEvent: (command: {
+      readonly orderId: OrderId;
+      readonly stripeEventId: StripeEventId;
+      readonly stripeEventType: string;
+      readonly event: typeof OrderEvent.Type;
+    }) => Effect.Effect<void, EnqueueError>;
+    readonly expire: (
+      orderId: OrderId,
+      at: number,
+    ) => Effect.Effect<void, EnqueueError>;
+    readonly refund: (
+      orderId: OrderId,
+      attemptId: string,
+      at: number,
+    ) => Effect.Effect<void, EnqueueError>;
   }
 >()('gycc/lib/registration/order-actor.server/Sender') {}
-
-type CreateCheckoutRequirements = Effect.Services<
-  ReturnType<typeof Order.CreateCheckout.send>
->;
 
 export const senderLayer = Layer.effect(
   Sender,
   Effect.gen(function* () {
-    const context = yield* Effect.context<CreateCheckoutRequirements>();
+    const checkoutContext = yield* Effect.context<
+      Effect.Services<ReturnType<typeof Order.CreateCheckout.send>>
+    >();
+    const stripeContext = yield* Effect.context<
+      Effect.Services<ReturnType<typeof Order.ApplyStripeEvent.send>>
+    >();
+    const expiryContext = yield* Effect.context<
+      Effect.Services<ReturnType<typeof Order.Expire.send>>
+    >();
+    const refundContext = yield* Effect.context<
+      Effect.Services<ReturnType<typeof Order.Refund.send>>
+    >();
     return Sender.of({
       createCheckout: (orderId) =>
         Order.CreateCheckout.send({ orderId }).pipe(
-          Effect.provide(context),
+          Effect.provide(checkoutContext),
           Effect.asVoid,
           Effect.mapError(
             () => new EnqueueError({ operation: 'enqueue Checkout creation' }),
+          ),
+        ),
+      applyStripeEvent: (command) =>
+        Order.ApplyStripeEvent.send(command).pipe(
+          Effect.provide(stripeContext),
+          Effect.asVoid,
+          Effect.mapError(
+            () => new EnqueueError({ operation: 'enqueue Stripe settlement' }),
+          ),
+        ),
+      expire: (orderId, at) =>
+        Order.Expire.send({ orderId, at }).pipe(
+          Effect.provide(expiryContext),
+          Effect.asVoid,
+          Effect.mapError(
+            () => new EnqueueError({ operation: 'enqueue Order expiry' }),
+          ),
+        ),
+      refund: (orderId, attemptId, at) =>
+        Order.Refund.send({ orderId, attemptId, at }).pipe(
+          Effect.provide(refundContext),
+          Effect.asVoid,
+          Effect.mapError(
+            () => new EnqueueError({ operation: 'enqueue Order refund' }),
           ),
         ),
     });

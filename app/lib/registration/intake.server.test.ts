@@ -60,7 +60,12 @@ const testLayer = (
     Forms.layer,
     Layer.succeed(
       OrderActor.Sender,
-      OrderActor.Sender.of({ createCheckout }),
+      OrderActor.Sender.of({
+        createCheckout,
+        applyStripeEvent: () => Effect.die('unused'),
+        expire: () => Effect.die('unused'),
+        refund: () => Effect.die('unused'),
+      }),
     ),
   ).pipe(Layer.provideMerge(DatabaseTest.layer));
   return Layer.mergeAll(Registrar.layer, RegistrationIntake.layer).pipe(
@@ -71,6 +76,7 @@ const testLayer = (
 const openRegistration = Effect.gen(function* () {
   const forms = yield* Forms.Service;
   const registrar = yield* Registrar.Service;
+  const sql = yield* SqlClient;
   const current = yield* forms.current('registration');
   const published = yield* forms.publish({
     form: 'registration',
@@ -108,6 +114,7 @@ const openRegistration = Effect.gen(function* () {
       },
     },
   });
+  yield* sql`DELETE FROM registration_channels WHERE conference_slug = '/2026'`;
   const closed = yield* registrar.ensureClosed(conference);
   const preview = yield* registrar.setPreview({
     conference,
