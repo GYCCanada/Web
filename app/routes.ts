@@ -26,9 +26,7 @@ export default [
   route(':lang?', 'routes/($lang)+/_layout.tsx', [
     index('routes/($lang)+/_index.tsx'),
     route('2024', 'routes/($lang)+/2024/_index.tsx'),
-    route('2024/form', 'routes/($lang)+/2024/form/route.tsx'),
     route('2025', 'routes/($lang)+/2025/_index.tsx'),
-    route('2025/form', 'routes/($lang)+/2025/form/route.tsx'),
     route('2026', 'routes/($lang)+/2026/_index.tsx'),
     route('2026/form', 'routes/($lang)+/2026/form/route.tsx'),
     route('about', 'routes/($lang)+/about.tsx'),
