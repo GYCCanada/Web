@@ -116,9 +116,35 @@ const notificationDeliveries = Effect.gen(function* () {
   `;
 });
 
+const notificationOutbox = Effect.gen(function* () {
+  const sql = yield* SqlClient;
+  yield* sql`
+    ALTER TABLE notification_deliveries
+    ADD COLUMN batch_id text
+  `;
+  yield* sql`
+    UPDATE notification_deliveries AS delivery
+    SET batch_id = batch.batch_id
+    FROM submission_batches AS batch
+    WHERE delivery.delivery_key = 'form:' || batch.batch_id || ':admin-email'
+  `;
+  yield* sql`
+    DELETE FROM notification_deliveries
+    WHERE batch_id IS NULL
+  `;
+  yield* sql`
+    ALTER TABLE notification_deliveries
+      ALTER COLUMN batch_id SET NOT NULL,
+      ADD CONSTRAINT notification_deliveries_batch
+        FOREIGN KEY (batch_id) REFERENCES submission_batches(batch_id) ON DELETE CASCADE,
+      ADD CONSTRAINT notification_deliveries_one_per_batch UNIQUE (batch_id)
+  `;
+});
+
 export const loader = Migrator.fromRecord({
   '0001_form_records': formRecords,
   '0002_submission_tokens': submissionTokens,
   '0003_normalize_submission_aggregate': normalizeSubmissionAggregate,
   '0004_notification_deliveries': notificationDeliveries,
+  '0005_notification_outbox': notificationOutbox,
 });

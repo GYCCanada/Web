@@ -1,9 +1,4 @@
-import { Effect } from 'effect';
-
-import { formValidationError } from '~/lib/effect/errors';
-import { Forms } from '~/lib/forms/forms.server';
 import { registrationAction } from '~/lib/forms/registration-action';
-import { Mailer } from '~/lib/mailer.server';
 
 /**
  * The shared registration route action (registration-launch Branch 7.3). The
@@ -18,51 +13,7 @@ import { Mailer } from '~/lib/mailer.server';
  * mailer failure cannot lose or partially commit a registration.
  */
 
-/** The string value of one decoded registrant field, or `''` when absent. */
-const str = (
-  payload: Forms.Submission<'registration'>['payload'],
-  name: string,
-): string => {
-  const value = payload[name];
-  return typeof value === 'string' ? value : '';
-};
-
-/** One line per persisted registrant: their name, email, type, and record id. */
-const registrantLine = (
-  submission: Forms.Submission<'registration'>,
-): string => {
-  const name = str(submission.payload, 'name');
-  const email = str(submission.payload, 'email');
-  const type = str(submission.payload, 'type');
-  return `- ${name} (${type}) <${email}> — record ${submission.id}`;
-};
-
 export const action = registrationAction({
-  notify: (submissions) =>
-    Effect.gen(function* () {
-      const mailer = yield* Mailer.Service;
-      const count = submissions.length;
-      const result = yield* Effect.exit(
-        mailer.send({
-          subject: `[!] Registration: ${count} registrant${
-            count === 1 ? '' : 's'
-          }`,
-          content: `${count} registrant${
-            count === 1 ? '' : 's'
-          } submitted. The durable records are committed; this is a notification of them.\n\n${submissions
-            .map(registrantLine)
-            .join('\n')}`,
-        }),
-      );
-      if (result._tag === 'Failure') {
-        yield* Effect.logError('Error sending registration email', result.cause);
-        // The records are already persisted; surface a form-level error so the
-        // submitter can retry the notification path without losing the records.
-        return yield* formValidationError({
-          formErrors: ['registration.form.error'],
-        });
-      }
-    }),
   success: {
     title: 'registration.form.success.title',
     description: 'registration.form.success.description',

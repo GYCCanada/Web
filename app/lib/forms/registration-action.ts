@@ -1,6 +1,5 @@
 import { Effect, Result, Schema } from 'effect';
 
-import { Content } from '../content.server';
 import { formValidationError } from '../effect/errors';
 import {
   type FormSuccess,
@@ -13,8 +12,7 @@ import {
   parseSchema,
 } from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
-import { Mailer } from '../mailer.server';
-import { NotificationDelivery } from '../notification-delivery.server';
+import { FormNotifications } from '../form-notifications.server';
 import { Toast } from '../toast.server';
 
 import type { SuccessToast } from './action';
@@ -32,14 +30,7 @@ import {
  * ledger and fails (with any `AppError`, e.g. a mailer failure mapped to a
  * form-level key) to abort the redirect; `success` is the post-submit toast copy.
  */
-export interface RegistrationActionConfig<E> {
-  readonly notify: (
-    submissions: ReadonlyArray<Forms.Submission<'registration'>>,
-  ) => Effect.Effect<
-    void,
-    E,
-    ReactRouterContext | Content.Service | Mailer.Service
-  >;
+export interface RegistrationActionConfig {
   readonly success: SuccessToast;
 }
 
@@ -50,13 +41,13 @@ export interface RegistrationActionConfig<E> {
  * terminal `toast.redirect` fails with a `RedirectError` the wrapper forwards, so
  * the {@link FormSuccess} return is unreachable on success.
  */
-export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
+export const registrationAction = (config: RegistrationActionConfig) =>
   routeFormAction(function* () {
     const { url } = yield* ReactRouterContext;
     const submission = yield* SubmissionContext;
     const forms = yield* Forms.Service;
     const toast = yield* Toast;
-    const deliveries = yield* NotificationDelivery.Service;
+    const notifications = yield* FormNotifications.Service;
 
     const commandSchema = Schema.Struct({
       [FORM_VERSION_FIELD]: Forms.FormDefinitionVersionId,
@@ -108,11 +99,13 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
         }),
       );
 
-    const delivery = yield* deliveries.deliver(
-      NotificationDelivery.DeliveryKey.make(
-        `form:${stored.id}:admin-email`,
-      ),
-      config.notify(stored.submissions),
+    const delivery = yield* notifications.dispatch(stored).pipe(
+      Effect.catchTags({
+        'Mailer.Error': () =>
+          formValidationError({ formErrors: ['registration.form.error'] }),
+        'NotificationDelivery.PersistenceError': () =>
+          formValidationError({ formErrors: ['registration.form.error'] }),
+      }),
     );
     if (delivery._tag === 'InProgress') {
       return yield* formValidationError({

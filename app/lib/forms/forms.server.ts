@@ -27,6 +27,7 @@ import {
   prepareDefinitionVersion,
   submissionCommandHash,
 } from './form-version';
+import { adminEmailDeliveryKey } from './notification-intent';
 import * as SubmissionCommand from './submission-command';
 
 export const FormDefinitionVersionId =
@@ -253,6 +254,9 @@ export class Service extends Context.Service<
       | IdempotencyConflict
       | FormPersistenceError
     >;
+    readonly getBatch: (
+      id: SubmissionGroupId,
+    ) => Effect.Effect<SubmissionBatch, FormPersistenceError>;
   }
 >()('@gycc/app/forms/Forms') {}
 
@@ -468,6 +472,30 @@ export const layer = Layer.effect(
       };
     });
 
+    const loadCommittedWithIntent = Effect.fn(
+      'Forms.loadCommittedWithIntent',
+    )(function* <F extends FormId>(
+      batch: BatchRow,
+      form: F,
+      definition: FormDefinition,
+      replayed: boolean,
+    ) {
+      const committed = yield* loadCommitted(batch, form, definition, replayed);
+      yield* sql`
+        INSERT INTO notification_deliveries (
+          delivery_key,
+          batch_id,
+          status
+        ) VALUES (
+          ${adminEmailDeliveryKey(committed.id)},
+          ${committed.id},
+          'failed'
+        )
+        ON CONFLICT (delivery_key) DO NOTHING
+      `;
+      return committed;
+    });
+
     const prepareSubmission = Effect.fn('Forms.prepareSubmission')(function* <
       F extends FormId,
     >(
@@ -507,6 +535,51 @@ export const layer = Layer.effect(
           payloadJson,
         ),
       };
+    });
+
+    const getBatchUnmapped = Effect.fn('Forms.getBatch.unmapped')(function* (
+      id: SubmissionGroupId,
+    ) {
+      const rows = yield* sql<BatchRow & { readonly form: string }>`
+        SELECT
+          batch_id AS "batchId",
+          form_id AS form,
+          definition_version_id AS "definitionVersionId",
+          idempotency_token AS "idempotencyToken",
+          command_hash AS "commandHash",
+          submitted_at::text AS "submittedAt"
+        FROM submission_batches
+        WHERE batch_id = ${id}
+      `;
+      const row = Option.fromNullishOr(rows[0]);
+      if (Option.isNone(row)) {
+        return yield* new FormPersistenceError({ operation: 'read Submission batch' });
+      }
+      const form = yield* Schema.decodeUnknownEffect(FormId)(row.value.form);
+      const versions = yield* sql<PublishedRow>`
+        SELECT
+          form_id AS form,
+          version_id AS version,
+          definition::text AS "definitionJson",
+          published_at::text AS "publishedAt"
+        FROM form_definition_versions
+        WHERE form_id = ${form}
+          AND version_id = ${row.value.definitionVersionId}
+      `;
+      const version = Option.fromNullishOr(versions[0]);
+      if (Option.isNone(version)) {
+        return yield* new FormPersistenceError({ operation: 'read Submission definition' });
+      }
+      const published = yield* decodePublished(version.value, form);
+      return yield* loadCommitted(row.value, form, published.definition, true);
+    });
+
+    const getBatch = Effect.fn('Forms.getBatch')(function* (
+      id: SubmissionGroupId,
+    ) {
+      return yield* getBatchUnmapped(id).pipe(
+        Effect.mapError(persistenceError('read Submission batch')),
+      );
     });
 
     const submitUnmapped = Effect.fn('Forms.submit.unmapped')(function* <
@@ -566,7 +639,7 @@ export const layer = Layer.effect(
                 token: command.idempotencyToken,
               });
             }
-            return yield* loadCommitted(
+            return yield* loadCommittedWithIntent(
               replay.value,
               command.form,
               historical.definition,
@@ -652,7 +725,7 @@ export const layer = Layer.effect(
                 token: command.idempotencyToken,
               });
             }
-            return yield* loadCommitted(
+            return yield* loadCommittedWithIntent(
               existing.value,
               command.form,
               published.definition,
@@ -676,7 +749,7 @@ export const layer = Layer.effect(
             `;
           }
 
-          return yield* loadCommitted(
+          return yield* loadCommittedWithIntent(
             insertedBatch.value,
             command.form,
             published.definition,
@@ -719,7 +792,7 @@ export const layer = Layer.effect(
       }
     }
 
-    return Service.of({ current, publish, submit });
+    return Service.of({ current, publish, submit, getBatch });
   }),
 );
 

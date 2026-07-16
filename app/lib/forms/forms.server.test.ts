@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'effect-bun-test';
 import { Effect, Layer, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql/SqlClient';
 
 import { Database } from '../database.server';
 
 import { defaultContactForm } from './defaults';
 import { Forms } from './forms.server';
 
-const testLayer = Forms.layer.pipe(Layer.provide(Database.layerTest));
+const testLayer = Forms.layer.pipe(Layer.provideMerge(Database.layerTest));
 
 const validContact = {
   name: 'Ada Lovelace',
@@ -74,6 +75,10 @@ describe('Forms', () => {
           payloads: [validContact, { method: 'email' }],
         })
         .pipe(Effect.flip);
+      const sql = yield* SqlClient;
+      const beforeCommit = yield* sql<{ count: string }>`
+        SELECT count(*)::text AS count FROM notification_deliveries
+      `;
       const accepted = yield* forms.submit({
         form: 'contact',
         expectedVersion: current.version,
@@ -82,8 +87,13 @@ describe('Forms', () => {
       });
 
       expect(rejected._tag).toBe('Forms.SubmissionRejected');
+      expect(beforeCommit[0]?.count).toBe('0');
       expect(accepted.replayed).toBe(false);
       expect(accepted.submissions).toHaveLength(2);
+      const intents = yield* sql<{ batchId: string }>`
+        SELECT batch_id AS "batchId" FROM notification_deliveries
+      `;
+      expect(intents).toEqual([{ batchId: accepted.id }]);
     }).pipe(Effect.provide(testLayer)),
   );
 

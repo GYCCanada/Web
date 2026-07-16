@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import {
   Form,
   type MetaFunction,
@@ -9,7 +9,7 @@ import {
 
 import { readPageView } from "~/lib/content/pages/pages.server";
 import { FormProvider, useForm } from "~/lib/conform";
-import { definitionToSchema, type DecodedForm } from "~/lib/forms/decode";
+import { definitionToSchema } from "~/lib/forms/decode";
 import { FormDefinition } from "~/lib/forms/definition";
 import { Forms } from "~/lib/forms/forms.server";
 import { FormFields } from "~/lib/forms/render";
@@ -19,12 +19,10 @@ import {
   SubmissionCommandInputs,
 } from "~/lib/forms/submission-command";
 import { formAction } from "~/lib/forms/action";
-import { formValidationError } from "~/lib/effect/errors";
 import { routeHandler } from "~/lib/effect/route";
 import { ReactRouterContext } from "~/lib/effect/router-context";
 import { useTranslate } from "~/lib/localization/context";
 import { getLocale } from "~/lib/localization/localization";
-import { Mailer } from "~/lib/mailer.server";
 import { Button } from "~/ui/button";
 import { fieldErrorStyle } from "~/ui/field-error";
 import { Main } from "~/ui/main";
@@ -63,54 +61,9 @@ export const loader = routeHandler(function* () {
   };
 });
 
-// The string value of one decoded field, or `''` when absent — the decoder has
-// already proven these fields' types, so reading them off the generic
-// `DecodedForm` record is a projection, not re-validation (`boundary-discipline`).
-const str = (decoded: DecodedForm, name: string): string => {
-  const value = decoded[name];
-  return typeof value === "string" ? value : "";
-};
-
-/**
- * The method-specific contact line — email, phone, or both — mirroring the
- * hand-tuned action's `ts-pattern` match. The cross-field rules guarantee the
- * gated field is present, so the omitted branches never produce a blank line in
- * practice; a defensive empty string keeps the body well-formed either way.
- */
-const contactLine = (decoded: DecodedForm): string => {
-  const method = str(decoded, "method");
-  const email = `Email: ${str(decoded, "email")}`;
-  const phone = `Phone: ${str(decoded, "phone")}`;
-  if (method === "phone") return phone;
-  if (method === "both") return `${email}\n${phone}`;
-  return email;
-};
-
-// Forms validates and commits first; this route owns only notification copy.
 export const action = formAction({
   form: "contact",
   page: "contact",
-  notify: (submission) =>
-    Effect.gen(function* () {
-      const decoded = submission.payload;
-      const mailer = yield* Mailer.Service;
-      const name = str(decoded, "name");
-      const result = yield* Effect.exit(
-        mailer.send({
-          subject: `[!] Contact Inquiry from ${name}`,
-          content: `Name: ${name}\n${contactLine(decoded)}\nMessage: ${str(
-            decoded,
-            "message",
-          )}`,
-        }),
-      );
-      if (result._tag === "Failure") {
-        yield* Effect.logError("Error sending email", result.cause);
-        return yield* formValidationError({
-          formErrors: ["contact.form.error"],
-        });
-      }
-    }),
   success: {
     title: "contact.form.success.title",
     description: "contact.form.success.description",

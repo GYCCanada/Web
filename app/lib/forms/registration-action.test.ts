@@ -1,14 +1,14 @@
-import { describe, expect, it } from 'bun:test';
-import { Effect, ManagedRuntime } from 'effect';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { Effect, Layer, ManagedRuntime } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
-import { formValidationError } from '../effect/errors';
 import {
   makeTestAppLayer,
   makeRequestRuntimeFromLayer,
   type RequestRuntime,
 } from '../effect/runtime';
 import type { RouteArgs } from '../effect/router-context';
+import { Mailer } from '../mailer.server';
 import { layerTest } from '../storage.test-helper';
 
 import { Forms } from './forms.server';
@@ -19,6 +19,28 @@ import {
   newSubmissionCommandFields,
   type SubmissionCommandFields,
 } from './submission-command';
+
+interface SentMail {
+  readonly subject: string;
+  readonly content: string;
+  readonly idempotencyKey?: string;
+}
+
+const capturingMailer = (sent: SentMail[]) =>
+  Layer.succeed(
+    Mailer.Service,
+    Mailer.Service.of({
+      send: (input) =>
+        Effect.sync(() => {
+          sent.push(input);
+        }),
+    }),
+  );
+
+const requestRuntimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(requestRuntimes.splice(0).map((runtime) => runtime.dispose()));
+});
 
 /**
  * Branch 7.3 — the registration ACTION's own persist-then-notify orchestration.
@@ -33,9 +55,9 @@ import {
  *   - decoding the `{ registrants: Array(definitionToSchema(def)) }` shell from
  *     the conform-parsed bracket payload (`registrants[n].field`);
  *   - one atomic group commit — N registrants → N distinct durable rows;
- *   - persist-FIRST, notify-SECOND ordering for THIS path: `notify` receives the
- *     STORED `Submission[]`, and a notify failure still leaves every record on
- *     the bucket (settled #8 — losing a registrant must never look like success).
+ *   - commit-FIRST, notification-SECOND ordering for THIS path: the canonical
+ *     email is derived from the stored `Submission[]`, and a Mailer failure still
+ *     leaves every relational record committed (settled #8).
  *
  * The action runs through the real request runtime over `makeTestAppLayer` so the
  * published definition version, atomic group commit, retry, and notification all
@@ -88,16 +110,21 @@ const registrantsBody = (
     ),
   );
 
-const makeRegistrationHarness = async () => {
-  const appLayer = makeTestAppLayer(layerTest({}));
+const makeRegistrationHarness = async (
+  mailerLayer: NonNullable<Parameters<typeof makeTestAppLayer>[1]> = Mailer.layer,
+) => {
+  const appLayer = makeTestAppLayer(layerTest({}), mailerLayer);
   const managed = ManagedRuntime.make(appLayer);
   const published = await managed.runPromise(
     Effect.gen(function* () {
       return yield* (yield* Forms.Service).current('registration');
     }),
   );
+  await managed.dispose();
+  const runtime = makeRequestRuntimeFromLayer(appLayer);
+  requestRuntimes.push(runtime);
   return {
-    runtime: makeRequestRuntimeFromLayer(appLayer),
+    runtime,
     command: newSubmissionCommandFields(published.version),
   };
 };
@@ -129,15 +156,13 @@ const makeRegistrationArgs = (
 };
 
 describe('registrationAction', () => {
-  it('persists EACH registrant as its own record, then notifies with the stored Submission[]', async () => {
-    const { runtime, command } = await makeRegistrationHarness();
-    let notified: ReadonlyArray<Forms.Submission<'registration'>> | undefined;
+  it('persists EACH registrant as its own record, then sends their notification', async () => {
+    const sent: SentMail[] = [];
+    const { runtime, command } = await makeRegistrationHarness(
+      capturingMailer(sent),
+    );
 
     const action = registrationAction({
-      notify: (submissions) =>
-        Effect.sync(() => {
-          notified = submissions;
-        }),
       success,
     });
 
@@ -158,26 +183,22 @@ describe('registrationAction', () => {
     expect(response.headers.get('location')).toBe('/2026/form');
     expect(response.headers.get('set-cookie')).toContain('toast');
 
-    const companies = notified?.map((entry) => entry.payload['company']).sort();
-    expect(companies).toEqual(['Booth Co. 0 Ltd.', 'Booth Co. 1 Ltd.']);
-
-    // (b) notify received the STORED records — real branded ids + the closed form,
-    // the source of truth its email references (settled #8). The ids the notify
-    // saw are exactly the two on the bucket.
-    expect(notified?.length).toBe(2);
-    expect(notified?.every((s) => s.form === 'registration')).toBe(true);
-    expect(notified?.every((s) => typeof s.id === 'string')).toBe(true);
-    expect(new Set(notified?.map((s) => s.id)).size).toBe(2);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.subject).toBe('[!] Registration: 2 registrants');
+    expect(sent[0]?.content).toContain('Booth Co. 0');
+    expect(sent[0]?.content).toContain('Booth Co. 1');
+    const ids = [...(sent[0]?.content.matchAll(/record ([A-Za-z0-9_-]+)/g) ?? [])]
+      .map((match) => match[1]);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
   });
 
   it('an invalid member commits NONE of the group and retrying the same token with a valid group succeeds', async () => {
-    const { runtime, command } = await makeRegistrationHarness();
-    let notifications = 0;
+    const sent: SentMail[] = [];
+    const { runtime, command } = await makeRegistrationHarness(
+      capturingMailer(sent),
+    );
     const action = registrationAction({
-      notify: () =>
-        Effect.sync(() => {
-          notifications += 1;
-        }),
       success,
     });
 
@@ -185,24 +206,22 @@ describe('registrationAction', () => {
     invalid.set('registrants[1].email', 'not-an-email');
     const rejected = await action(makeRegistrationArgs(runtime, invalid));
     expect(rejected.status).toBe('error');
-    expect(notifications).toBe(0);
+    expect(sent).toHaveLength(0);
 
     const retry = await action(
       makeRegistrationArgs(runtime, registrantsBody(3, command)),
     ).catch((error) => error);
     expect(retry).toBeInstanceOf(Response);
     expect((retry as Response).status).toBe(302);
-    expect(notifications).toBe(1);
+    expect(sent).toHaveLength(1);
   });
 
   it('an exact retry returns the same records without redelivering notification', async () => {
-    const { runtime, command } = await makeRegistrationHarness();
-    const notifiedIds: string[][] = [];
+    const sent: SentMail[] = [];
+    const { runtime, command } = await makeRegistrationHarness(
+      capturingMailer(sent),
+    );
     const action = registrationAction({
-      notify: (submissions) =>
-        Effect.sync(() => {
-          notifiedIds.push(submissions.map((submission) => submission.id).sort());
-        }),
       success,
     });
     const body = registrantsBody(2, command);
@@ -215,25 +234,32 @@ describe('registrationAction', () => {
       expect((thrown as Response).status).toBe(302);
     }
 
-    expect(notifiedIds).toHaveLength(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.idempotencyKey).toMatch(/^form:[A-Za-z0-9_-]+:admin-email$/);
   });
 
   it('a notify failure leaves the committed group available to an exact retry', async () => {
-    const { runtime, command } = await makeRegistrationHarness();
-    let firstIds: string[] = [];
-    const failingAction = registrationAction({
-      notify: (submissions) =>
-        Effect.sync(() => {
-          firstIds = submissions.map((submission) => submission.id).sort();
-        }).pipe(
-          Effect.andThen(
-            Effect.fail(
-              formValidationError({
-                formErrors: ['registration.form.error'],
-              }),
+    const attempts: SentMail[] = [];
+    let attempt = 0;
+    const mailerLayer = Layer.succeed(
+      Mailer.Service,
+      Mailer.Service.of({
+        send: (input) =>
+          Effect.sync(() => {
+            attempts.push(input);
+            attempt += 1;
+            return attempt;
+          }).pipe(
+            Effect.flatMap((currentAttempt) =>
+              currentAttempt === 1
+                ? Effect.fail(new Mailer.MailError({}))
+                : Effect.void,
             ),
           ),
-        ),
+      }),
+    );
+    const { runtime, command } = await makeRegistrationHarness(mailerLayer);
+    const failingAction = registrationAction({
       success,
     });
 
@@ -248,12 +274,7 @@ describe('registrationAction', () => {
     );
     expect(result.command.disposition).toBe('preserve');
 
-    let retryIds: string[] = [];
     const retryAction = registrationAction({
-      notify: (submissions) =>
-        Effect.sync(() => {
-          retryIds = submissions.map((submission) => submission.id).sort();
-        }),
       success,
     });
     const retry = await retryAction(makeRegistrationArgs(runtime, body)).catch(
@@ -261,6 +282,12 @@ describe('registrationAction', () => {
     );
     expect(retry).toBeInstanceOf(Response);
     expect((retry as Response).status).toBe(302);
-    expect(retryIds).toEqual(firstIds);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]?.idempotencyKey).toBe(attempts[0]?.idempotencyKey);
+    const ids = (mail: SentMail | undefined) =>
+      [...(mail?.content.matchAll(/record ([A-Za-z0-9_-]+)/g) ?? [])]
+        .map((match) => match[1])
+        .sort();
+    expect(ids(attempts[1])).toEqual(ids(attempts[0]));
   });
 });

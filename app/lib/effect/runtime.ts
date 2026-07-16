@@ -7,6 +7,7 @@ import { DraftEditor } from '~/lib/content/draft-editor.server';
 import { Database } from '~/lib/database.server';
 import { Env } from '~/lib/env.server';
 import { Forms } from '~/lib/forms/forms.server';
+import { FormNotifications } from '~/lib/form-notifications.server';
 import { Sendgrid, SendgridDisabled, SendgridError } from '~/lib/sendgrid.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
 import { NotificationDelivery } from '~/lib/notification-delivery.server';
@@ -29,6 +30,7 @@ export type AppServices =
   | Content.Service
   | DraftEditor.Service
   | Forms.Service
+  | FormNotifications.Service
   | NotificationDelivery.Service
   | Auth.Service
   | Storage.Service
@@ -53,9 +55,10 @@ export type AppError =
 export const makeAppLayer = (
   storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
   databaseLayer: typeof Database.layer | typeof Database.layerTest,
+  mailerLayer: Layer.Layer<Mailer.Service, never, Env.Service> = Mailer.layer,
 ) => {
   const baseLayer = Layer.mergeAll(
-    Mailer.layer,
+    mailerLayer,
     Sendgrid.layer,
     Toast.layer,
     Content.layer,
@@ -65,7 +68,11 @@ export const makeAppLayer = (
     Forms.layer,
     NotificationDelivery.layer,
   ).pipe(Layer.provideMerge(databaseLayer));
-  return Layer.mergeAll(DraftEditor.layer, relationalLayer).pipe(
+  const notificationLayer = FormNotifications.layer.pipe(
+    Layer.provideMerge(relationalLayer),
+    Layer.provideMerge(baseLayer),
+  );
+  return Layer.mergeAll(DraftEditor.layer, notificationLayer).pipe(
     Layer.provideMerge(baseLayer),
     Layer.provideMerge(Env.layer),
   );
@@ -74,7 +81,8 @@ export const makeAppLayer = (
 /** Build the complete app over isolated in-memory storage and PostgreSQL. */
 export const makeTestAppLayer = (
   storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
-) => makeAppLayer(storageLayer, Database.layerTest);
+  mailerLayer: Layer.Layer<Mailer.Service, never, Env.Service> = Mailer.layer,
+) => makeAppLayer(storageLayer, Database.layerTest, mailerLayer);
 
 /** The fully-composed app layer (its error channel is `Env.layer`'s `ConfigError`). */
 export type AppLayer = ReturnType<typeof makeAppLayer>;
@@ -88,6 +96,14 @@ export const checkAppReady = (): Promise<void> =>
   AppRuntime.runPromise(
     Effect.gen(function* () {
       yield* (yield* Database.Service).ready;
+    }),
+  );
+
+/** Drain all currently eligible durable Form notification intents. */
+export const drainFormNotifications = (): Promise<number> =>
+  AppRuntime.runPromise(
+    Effect.gen(function* () {
+      return yield* (yield* FormNotifications.Service).drain;
     }),
   );
 
@@ -137,6 +153,8 @@ export interface RequestRuntime {
     args: RouteArgs,
     effect: Effect.Effect<A, E, R>,
   ) => Promise<A>;
+  /** Release resources owned by a layer-derived runtime; production is process-scoped. */
+  readonly dispose: () => Promise<void>;
 }
 
 /**
@@ -171,10 +189,15 @@ const runWithContext =
  * so relational Form writes and object-backed content reads run end-to-end
  * through their real adapters.
  */
-export const makeRequestRuntimeFromLayer = (layer: AppLayer): RequestRuntime => ({
-  run: runWithContext(ManagedRuntime.make(layer)),
-});
+export const makeRequestRuntimeFromLayer = (layer: AppLayer): RequestRuntime => {
+  const runtime = ManagedRuntime.make(layer);
+  return {
+    run: runWithContext(runtime),
+    dispose: () => runtime.dispose(),
+  };
+};
 
 export const makeRequestRuntime = (): RequestRuntime => ({
   run: runWithContext(AppRuntime),
+  dispose: () => Promise.resolve(),
 });

@@ -3,10 +3,14 @@ export * as NotificationDelivery from './notification-delivery.server';
 import { Context, Effect, Layer, Option, Schema } from 'effect';
 import { SqlClient } from 'effect/unstable/sql/SqlClient';
 
-export const DeliveryKey = Schema.NonEmptyString.check(
-  Schema.isMaxLength(300),
-).pipe(Schema.brand('NotificationDeliveryKey'));
-export type DeliveryKey = typeof DeliveryKey.Type;
+import {
+  DeliveryKey as DeliveryKeySchema,
+  type DeliveryKey as DeliveryKeyType,
+} from './forms/notification-intent';
+import { SubmissionGroupId } from './forms/forms.server';
+
+export const DeliveryKey = DeliveryKeySchema;
+export type DeliveryKey = DeliveryKeyType;
 
 export class PersistenceError extends Schema.TaggedErrorClass<PersistenceError>()(
   'NotificationDelivery.PersistenceError',
@@ -22,14 +26,21 @@ export class Service extends Context.Service<
   Service,
   {
     readonly deliver: <A, E, R>(
-      key: DeliveryKey,
+      key: DeliveryKeyType,
       send: Effect.Effect<A, E, R>,
     ) => Effect.Effect<DeliveryResult<A>, E | PersistenceError, R>;
+    readonly pending: (
+      limit?: number,
+    ) => Effect.Effect<readonly SubmissionGroupId[], PersistenceError>;
   }
 >()('gycc/lib/notification-delivery.server/Service') {}
 
 interface StatusRow {
   readonly status: 'failed' | 'delivering' | 'delivered';
+}
+
+interface PendingRow {
+  readonly batchId: string;
 }
 
 export const layer = Layer.effect(
@@ -41,13 +52,8 @@ export const layer = Layer.effect(
       A,
       E,
       R,
-    >(key: DeliveryKey, send: Effect.Effect<A, E, R>) {
+    >(key: DeliveryKeyType, send: Effect.Effect<A, E, R>) {
       const claimed = yield* Effect.gen(function* () {
-        yield* sql`
-          INSERT INTO notification_deliveries (delivery_key, status)
-          VALUES (${key}, 'failed')
-          ON CONFLICT (delivery_key) DO NOTHING
-        `;
         return yield* sql<StatusRow>`
           UPDATE notification_deliveries
           SET
@@ -120,6 +126,24 @@ export const layer = Layer.effect(
       return { _tag: 'Delivered', value: sent.success } as const;
     });
 
-    return Service.of({ deliver });
+    const pending = Effect.fn('NotificationDelivery.pending')(function* (
+      limit = 50,
+    ) {
+      const rows = yield* sql<PendingRow>`
+        SELECT batch_id AS "batchId"
+        FROM notification_deliveries
+        WHERE status = 'failed'
+           OR (status = 'delivering' AND lease_until <= now())
+        ORDER BY updated_at, delivery_key
+        LIMIT ${limit}
+      `.pipe(
+        Effect.mapError(
+          () => new PersistenceError({ operation: 'list pending notifications' }),
+        ),
+      );
+      return rows.map((row) => SubmissionGroupId.make(row.batchId));
+    });
+
+    return Service.of({ deliver, pending });
   }),
 );

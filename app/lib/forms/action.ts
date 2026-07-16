@@ -10,9 +10,8 @@ import {
 } from '../effect/form';
 import { formatValidationIssues } from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
+import { FormNotifications } from '../form-notifications.server';
 import type { TranslationKey } from '../localization/translations';
-import { Mailer } from '../mailer.server';
-import { NotificationDelivery } from '../notification-delivery.server';
 import { Toast } from '../toast.server';
 
 import { Forms } from './forms.server';
@@ -35,7 +34,7 @@ export interface SuccessToast {
  * delivery ledger. A failed delivery may retry; a delivered batch never sends
  * again when its submission command is replayed.
  */
-export interface FormActionConfig<E> {
+export interface FormActionConfig {
   readonly form: FormId;
   /**
    * The evergreen `PageId` that OWNS this form's route (contact ↔ contact page,
@@ -45,13 +44,6 @@ export interface FormActionConfig<E> {
    * the SAME per-page `enabled` flag the loader/nav read (`derive-dont-sync`).
    */
   readonly page: PageId;
-  readonly notify: (
-    submission: Forms.Submission,
-  ) => Effect.Effect<
-    void,
-    E,
-    ReactRouterContext | Content.Service | Mailer.Service
-  >;
   readonly success: SuccessToast;
 }
 
@@ -68,14 +60,14 @@ export interface FormActionConfig<E> {
  * token provides explicit retry identity. Forms performs validation and commit
  * atomically, then this adapter notifies and redirects.
  */
-export const formAction = <E>(config: FormActionConfig<E>) =>
+export const formAction = (config: FormActionConfig) =>
   routeFormAction(
     function* () {
       const { url } = yield* ReactRouterContext;
       const submission = yield* SubmissionContext;
       const forms = yield* Forms.Service;
       const toast = yield* Toast;
-      const deliveries = yield* NotificationDelivery.Service;
+      const notifications = yield* FormNotifications.Service;
 
       const {
         [FORM_VERSION_FIELD]: rawVersion,
@@ -130,11 +122,13 @@ export const formAction = <E>(config: FormActionConfig<E>) =>
           }),
         );
 
-      const delivery = yield* deliveries.deliver(
-        NotificationDelivery.DeliveryKey.make(
-          `form:${stored.id}:admin-email`,
-        ),
-        config.notify(stored.submissions[0]),
+      const delivery = yield* notifications.dispatch(stored).pipe(
+        Effect.catchTags({
+          'Mailer.Error': () =>
+            formValidationError({ formErrors: [`${config.form}.form.error`] }),
+          'NotificationDelivery.PersistenceError': () =>
+            formValidationError({ formErrors: [`${config.form}.form.error`] }),
+        }),
       );
       if (delivery._tag === 'InProgress') {
         return yield* formValidationError({

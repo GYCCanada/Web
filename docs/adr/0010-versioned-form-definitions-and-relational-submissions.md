@@ -41,8 +41,12 @@ The write boundary loads the current published version, validates the input agai
 inserts the version reference and payload in one database transaction. A multi-registrant
 registration inserts the complete registration group atomically. Retrying with the same
 idempotency token returns the already-committed result; equal payloads with different tokens
-remain distinct submissions. Email is dispatched only after commit and remains a notification
-of the durable record, never the record itself.
+remain distinct submissions. The same transaction inserts one durable admin-email outbox
+intent for the committed batch. Request handling may dispatch it immediately, while a
+process worker retries eligible pending/failed intents independently of browser retries.
+Dispatch claims use a lease, and SMTP receives a stable Message-ID derived from the outbox
+key to reduce duplicate delivery across the unavoidable send-versus-acknowledge crash
+window. Email remains a notification of the durable record, never the record itself.
 
 Existing object-storage records move through the offline
 `bun run migrate:legacy-forms` command. It is a validation-only dry run unless
@@ -78,6 +82,8 @@ registrar reads have been verified.
 - Historical Submissions remain decodable after a Form definition changes.
 - Registration groups are all-or-nothing, and explicit retry identity cannot collapse two
   intentional equal submissions.
+- Notification work cannot be lost between Submission commit and request-time dispatch;
+  failed work remains observable and retryable in the relational outbox.
 - Registrar reads gain indexed ordering, filtering, constraints, and stable version joins.
 - The application gains a PostgreSQL dependency, migrations, backup/restore responsibilities,
   and an explicit dry-run-first migration command for existing Form objects and Submission

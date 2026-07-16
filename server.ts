@@ -11,6 +11,7 @@ import type { ServerBuild } from 'react-router';
 import { Env } from './app/lib/env.server.ts';
 import {
   checkAppReady,
+  drainFormNotifications,
   makeRequestRuntime,
   type RequestRuntime,
 } from './app/lib/effect/runtime.ts';
@@ -250,6 +251,16 @@ const StartupCheck = Layer.effectDiscard(
   Effect.gen(function* () {
     yield* Env.Service;
     yield* Effect.promise(checkAppReady);
+    yield* Effect.forkScoped(
+      Effect.forever(
+        Effect.promise(drainFormNotifications).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError('Form notification worker failed', cause),
+          ),
+          Effect.delay('30 seconds'),
+        ),
+      ),
+    );
   }),
 ).pipe(Layer.provide(Env.layer));
 
