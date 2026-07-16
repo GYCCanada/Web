@@ -18,7 +18,7 @@ import {
   defaultContactForm,
   defaultRegistrationForm,
   defaultVolunteerForm,
-} from '../content/pages/defaults';
+} from './defaults';
 import { ValidationIssue, validationIssues } from '../validation-issue';
 
 import { decodeForm, definitionToSchema } from './decode';

@@ -5,7 +5,7 @@ import {
   defaultContactForm,
   defaultRegistrationForm,
   defaultVolunteerForm,
-} from '../content/pages/defaults';
+} from './defaults';
 import { IsoDate, ListItemId } from '../content/schema';
 import { deterministicListItemId } from '../content/schema.server';
 import { Storage } from '../storage.server';

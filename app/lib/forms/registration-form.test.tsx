@@ -3,7 +3,7 @@ import { Schema } from 'effect';
 import { renderToString } from 'react-dom/server';
 import { createRoutesStub } from 'react-router';
 
-import { defaultRegistrationForm } from '~/lib/content/pages/defaults';
+import { defaultRegistrationForm } from '~/lib/forms/defaults';
 import { FormDefinition } from '~/lib/forms/definition';
 import { Forms } from '~/lib/forms/forms.server';
 import {

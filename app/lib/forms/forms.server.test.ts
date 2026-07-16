@@ -3,7 +3,7 @@ import { Effect, Layer, Option } from 'effect';
 
 import { Database } from '../database.server';
 
-import { defaultContactForm } from '../content/pages/defaults';
+import { defaultContactForm } from './defaults';
 import { Forms } from './forms.server';
 
 const testLayer = Forms.layer.pipe(Layer.provide(Database.layerTest));

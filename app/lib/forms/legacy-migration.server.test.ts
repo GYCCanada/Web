@@ -2,7 +2,7 @@ import { describe, expect, it } from 'effect-bun-test';
 import { Effect, Layer } from 'effect';
 import { SqlClient } from 'effect/unstable/sql/SqlClient';
 
-import { defaultContactForm } from '../content/pages/defaults';
+import { defaultContactForm } from './defaults';
 import { Database } from '../database.server';
 import { layerTest } from '../storage.test-helper';
 
