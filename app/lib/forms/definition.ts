@@ -12,8 +12,8 @@ export const FORM_IDS = FormId.literals;
 
 /**
  * The structural `FormDefinition` schema (ADR 0007, CONTEXT §Form definition;
- * registration-launch Branch 6). A `FormDefinition` is **data** — the JSON object
- * stored at `forms/<form>.json` — describing one of the site's three forms
+ * registration-launch Branch 6). A `FormDefinition` is **data** stored as an
+ * immutable relational version (ADR 0010), describing one of the site's three forms
  * (contact, volunteer, registration): its fields, their kinds (drawn from a
  * CLOSED set), their bilingual labels/placeholders, the discriminated-union
  * variants some forms branch on, and the cross-field requirement rules that no
@@ -46,9 +46,9 @@ export const FORM_IDS = FormId.literals;
  *   - `derive-dont-sync`: `MessageKey`'s valid set IS the `translations` object,
  *     consulted at decode time — never a re-declared copy of the key list.
  *
- * The encoded form of this schema IS the JSON stored at `forms/<form>.json`, so a
- * definition round-trips losslessly through `encode → JSON → decode` (proven in
- * `definition.test.ts`).
+ * Its canonical encoded form is content-addressed to produce the immutable version id,
+ * so a definition round-trips losslessly through `encode → JSON → decode` (proven in
+ * `definition.test.ts`) and historical Submissions keep an exact schema reference.
  */
 
 // ---------------------------------------------------------------------------

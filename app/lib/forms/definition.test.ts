@@ -8,7 +8,7 @@ import { FieldKind, FormDefinition } from './definition';
  *
  * These tests pin the two load-bearing guarantees the engine (Branch 6.2+) builds
  * on:
- *   - the encoded form IS the JSON stored at `forms/<form>.json`, so a definition
+ *   - the encoded form IS the canonical JSON content-addressed into a relational version, so a definition
  *     exercising every `FieldKind`, a discriminated `variant`, and a cross-field
  *     `rule` round-trips losslessly through `encode → JSON → decode`
  *     (`prove-it-works`);

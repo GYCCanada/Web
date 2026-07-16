@@ -1,10 +1,13 @@
 # CMS Patterns Polish — Plan
 
+> **Historical implementation plan — completed.** Retained as the execution and
+> review record for the CMS polish work; it is not current architecture guidance.
+
 **Branch:** `cms/patterns-polish` (stacked on `cms/storage-foundation` PR #11 → `revival/2026-speak` PR #10).
-**Status:** in progress (ultracode workflow `.claude/workflows/gyc-cms-polish.js`).
+**Status:** completed.
 
 This document is handed to Codex on **every** `okra counsel` review so it situates each
-sub-commit against the whole effort. Keep it current.
+sub-commit against the whole effort. Preserve it as historical context.
 
 ---
 
