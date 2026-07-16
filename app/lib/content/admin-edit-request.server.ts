@@ -94,7 +94,7 @@ export const handleAdminEditRequest = Effect.fn(
             ok: false,
             error:
               'The image reference failed and the uploaded object could not be cleaned up. ' +
-              Cause.pretty(compensated.failure),
+              String(compensated.failure),
             issues: applied.failure.issues,
           },
           { status: 502 },
