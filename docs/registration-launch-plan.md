@@ -1,9 +1,11 @@
 # Registration Launch + CMS Expansion — Stacked-PR Plan
 
 > **Historical implementation plan — completed.** ADR 0010 supersedes the
-> per-form and per-Submission object-storage design in Branches 5–7. The live system
-> publishes immutable Form versions and stores transactional Submission aggregates in
-> PostgreSQL. Treat the bucket paths below only as records of the superseded plan.
+> per-form and per-Submission object-storage design in Branches 5–7, and ADR 0011
+> supersedes the RegFox-only Registration channel. The live system publishes immutable
+> Form versions, stores transactional Submission aggregates in PostgreSQL, and projects
+> its public Registration channel from CMS-owned lifecycle state. Treat the bucket paths
+> below only as records of the superseded plan.
 
 **Base branch:** `feature/registration-launch` (off `main`).
 **Stack tool:** `stacked` — one branch per FEATURE; each branch holds multiple gate-green sub-commits.

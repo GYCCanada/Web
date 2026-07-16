@@ -1,8 +1,9 @@
 # Registration Launch + CMS Expansion — Workflow Brief
 
 > **Historical implementation brief — completed.** ADR 0010 supersedes every
-> bucket-backed Form-definition and Submission persistence decision below. Current
-> deployment and persistence authority is ADR 0009 and ADR 0010; this file is retained
+> bucket-backed Form-definition and Submission persistence decision below, and ADR 0011
+> supersedes the RegFox-only Registration channel. Current deployment, persistence, and
+> Registration-channel authority is ADR 0009, ADR 0010, and ADR 0011; this file is retained
 > only as the execution record for the completed registration-launch work.
 
 **Branch base:** `feature/registration-launch` (off `main`). Implementation lands as a
