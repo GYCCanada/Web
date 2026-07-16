@@ -118,7 +118,7 @@ export const makeAppLayer = (
           ),
         );
   const registrationLayer = Layer.mergeAll(
-    Registrar.layer,
+    Registrar.layer.pipe(Layer.provideMerge(Registrar.infrastructureLayer)),
     RegistrationIntake.layer,
     RegistrationOrders.layer,
   ).pipe(

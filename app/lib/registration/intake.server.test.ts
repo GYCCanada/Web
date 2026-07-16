@@ -67,6 +67,12 @@ const testLayer = (
         refund: () => Effect.die('unused'),
       }),
     ),
+    Layer.succeed(
+      Registrar.Infrastructure,
+      Registrar.Infrastructure.of({
+        readiness: Effect.succeed({ stripe: true, workflows: true }),
+      }),
+    ),
   ).pipe(Layer.provideMerge(DatabaseTest.layer));
   return Layer.mergeAll(Registrar.layer, RegistrationIntake.layer).pipe(
     Layer.provideMerge(foundation),
@@ -126,7 +132,6 @@ const openRegistration = Effect.gen(function* () {
     conference,
     expectedRevision: preview.revision,
     at,
-    infrastructure: { stripe: true, workflows: true },
   });
   return published.version;
 });

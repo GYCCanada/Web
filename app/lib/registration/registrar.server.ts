@@ -17,6 +17,8 @@ import {
 import { compileForm, type ReadinessIssue } from '../forms/compiled-form';
 import { FormDefinition } from '../forms/definition';
 import { FormDefinitionVersionId } from '../forms/forms.server';
+import { OrderActor } from './order-actor.server';
+import { StripeGateway } from './stripe-gateway.server';
 
 export const ConferenceTimeZone = Schema.String.check(
   Schema.makeFilter<string>((timeZone) => {
@@ -36,17 +38,19 @@ type ChannelBase = {
   readonly updatedAt: DateTime.Utc;
 };
 
+type PinnedChannel = ChannelBase & {
+  readonly state: 'preview' | 'open' | 'draining';
+  readonly formVersion: FormDefinitionVersionId;
+  readonly timeZone: ConferenceTimeZone;
+};
+
 export type Channel =
   | (ChannelBase & { readonly state: 'closed' })
   | (ChannelBase & {
       readonly state: 'external';
       readonly url: typeof ExternalHttpsUrl.Type;
     })
-  | (ChannelBase & {
-      readonly state: 'preview' | 'open' | 'draining';
-      readonly formVersion: FormDefinitionVersionId;
-      readonly timeZone: ConferenceTimeZone;
-    });
+  | PinnedChannel;
 
 export type ExpectedRevision = {
   readonly conference: typeof ConferenceSlug.Type;
@@ -64,10 +68,6 @@ export type SetPreviewCommand = ExpectedRevision & {
 
 export type OpenCommand = ExpectedRevision & {
   readonly at: DateTime.Utc;
-  readonly infrastructure: {
-    readonly stripe: boolean;
-    readonly workflows: boolean;
-  };
 };
 
 export type RegistrarReadinessIssue =
@@ -228,6 +228,30 @@ const rowSelection = `
   updated_at::text AS "updatedAt"
 `;
 
+export class Infrastructure extends Context.Service<
+  Infrastructure,
+  {
+    readonly readiness: Effect.Effect<{
+      readonly stripe: boolean;
+      readonly workflows: boolean;
+    }>;
+  }
+>()('@gycc/app/registration/RegistrarInfrastructure') {}
+
+export const infrastructureLayer = Layer.effect(
+  Infrastructure,
+  Effect.gen(function* () {
+    const stripe = yield* StripeGateway.Service;
+    yield* OrderActor.Sender;
+    return Infrastructure.of({
+      readiness: Effect.succeed({
+        stripe: stripe.available,
+        workflows: true,
+      }),
+    });
+  }),
+);
+
 export class Service extends Context.Service<
   Service,
   {
@@ -276,12 +300,13 @@ export class Service extends Context.Service<
       | RegistrarPersistenceError
     >;
     readonly reopen: (
-      command: ExpectedRevision,
+      command: OpenCommand,
     ) => Effect.Effect<
       Channel,
       | ChannelNotFound
       | RevisionConflict
       | InvalidTransition
+      | ChannelNotReady
       | RegistrarPersistenceError
     >;
     readonly close: (
@@ -301,6 +326,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const sql = yield* SqlClient;
+    const infrastructure = yield* Infrastructure;
 
     const select = Effect.fn('Registrar.select')(function* (
       conference: typeof ConferenceSlug.Type,
@@ -384,6 +410,52 @@ export const layer = Layer.effect(
       const count = rows[0]?.count ?? 0;
       if (count > 0) {
         return yield* new ActiveOrders({ conference, count });
+      }
+    });
+
+    const assertOpenReady = Effect.fn('Registrar.assertOpenReady')(function* (
+      channel: PinnedChannel,
+      at: DateTime.Utc,
+    ) {
+      const definitions = yield* sql<DefinitionRow>`
+        SELECT definition::text AS "definitionJson"
+        FROM form_definition_versions
+        WHERE form_id = 'registration'
+          AND version_id = ${channel.formVersion}
+      `;
+      const definition = Option.fromNullishOr(definitions[0]);
+      if (Option.isNone(definition)) {
+        return yield* new ChannelNotReady({
+          conference: channel.conference,
+          issues: [{
+            code: 'registration-pricing-missing',
+            message: 'The pinned Registration Form version is unavailable.',
+          }],
+        });
+      }
+      const issues: RegistrarReadinessIssue[] = [
+        ...compileForm(
+          yield* decodeDefinition(definition.value.definitionJson),
+        ).readiness(at),
+      ];
+      const available = yield* infrastructure.readiness;
+      if (!available.stripe) {
+        issues.push({
+          code: 'stripe-unavailable',
+          message: 'Stripe Checkout is not configured.',
+        });
+      }
+      if (!available.workflows) {
+        issues.push({
+          code: 'workflows-unavailable',
+          message: 'The durable Registration worker is not ready.',
+        });
+      }
+      if (issues.length > 0) {
+        return yield* new ChannelNotReady({
+          conference: channel.conference,
+          issues,
+        });
       }
     });
 
@@ -475,48 +547,7 @@ export const layer = Layer.effect(
               to: 'open',
             });
           }
-          const definitions = yield* sql<DefinitionRow>`
-            SELECT definition::text AS "definitionJson"
-            FROM form_definition_versions
-            WHERE form_id = 'registration'
-              AND version_id = ${current.formVersion}
-          `;
-          const definition = Option.fromNullishOr(definitions[0]);
-          if (Option.isNone(definition)) {
-            return yield* new ChannelNotReady({
-              conference: command.conference,
-              issues: [
-                {
-                  code: 'registration-pricing-missing',
-                  message: 'The pinned Registration Form version is unavailable.',
-                },
-              ],
-            });
-          }
-          const compiled = compileForm(
-            yield* decodeDefinition(definition.value.definitionJson),
-          );
-          const issues: RegistrarReadinessIssue[] = [
-            ...compiled.readiness(command.at),
-          ];
-          if (!command.infrastructure.stripe) {
-            issues.push({
-              code: 'stripe-unavailable',
-              message: 'Stripe Checkout is not configured.',
-            });
-          }
-          if (!command.infrastructure.workflows) {
-            issues.push({
-              code: 'workflows-unavailable',
-              message: 'The durable Registration worker is not ready.',
-            });
-          }
-          if (issues.length > 0) {
-            return yield* new ChannelNotReady({
-              conference: command.conference,
-              issues,
-            });
-          }
+          yield* assertOpenReady(current, command.at);
           return yield* save(
             command.conference,
             'open',
@@ -568,7 +599,31 @@ export const layer = Layer.effect(
       'open',
       'draining',
     );
-    const reopen = transition('Registrar.reopen', 'draining', 'open');
+    const reopen = Effect.fn('Registrar.reopen')(function* (
+      command: OpenCommand,
+    ) {
+      return yield* sql.withTransaction(
+        Effect.gen(function* () {
+          const current = yield* select(command.conference, true);
+          yield* assertRevision(current, command.expectedRevision);
+          if (current.state !== 'draining') {
+            return yield* new InvalidTransition({
+              conference: command.conference,
+              from: current.state,
+              to: 'open',
+            });
+          }
+          yield* assertOpenReady(current, command.at);
+          return yield* save(
+            command.conference,
+            'open',
+            null,
+            current.formVersion,
+            current.timeZone,
+          );
+        }),
+      );
+    });
 
     const close = Effect.fn('Registrar.close')(function* (
       command: ExpectedRevision,

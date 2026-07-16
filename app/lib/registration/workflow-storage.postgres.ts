@@ -96,7 +96,16 @@ const orderHandlers = OrderActor.handlers.pipe(
 
 const testLayer = Layer.mergeAll(
   probeHandlers,
-  Registrar.layer,
+  Registrar.layer.pipe(
+    Layer.provideMerge(
+      Layer.succeed(
+        Registrar.Infrastructure,
+        Registrar.Infrastructure.of({
+          readiness: Effect.succeed({ stripe: true, workflows: true }),
+        }),
+      ),
+    ),
+  ),
   orderHandlers,
 ).pipe(
   Layer.provideMerge(runnerLayer),

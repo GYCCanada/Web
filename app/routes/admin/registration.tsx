@@ -136,19 +136,19 @@ export const action = routeAction(function* () {
       );
     }
     case 'open': {
-      const stripe = yield* StripeGateway.Service;
       return yield* completeTransition(
         registrar.open({
           ...common,
           at: DateTime.makeUnsafe(Date.now()),
-          infrastructure: { stripe: stripe.available, workflows: true },
         }),
       );
     }
     case 'drain':
       return yield* completeTransition(registrar.beginDrain(common));
     case 'reopen':
-      return yield* completeTransition(registrar.reopen(common));
+      return yield* completeTransition(
+        registrar.reopen({ ...common, at: DateTime.makeUnsafe(Date.now()) }),
+      );
     case 'close':
       return yield* completeTransition(registrar.close(common));
     case 'refund': {

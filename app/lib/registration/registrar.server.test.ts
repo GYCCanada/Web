@@ -18,7 +18,27 @@ import {
 } from './registrar.server';
 
 const formsLayer = Forms.layer.pipe(Layer.provideMerge(DatabaseTest.layer));
-const testLayer = Registrar.layer.pipe(Layer.provideMerge(formsLayer));
+const readyInfrastructure = Layer.succeed(
+  Registrar.Infrastructure,
+  Registrar.Infrastructure.of({
+    readiness: Effect.succeed({ stripe: true, workflows: true }),
+  }),
+);
+const testLayer = Registrar.layer.pipe(
+  Layer.provideMerge(formsLayer),
+  Layer.provideMerge(readyInfrastructure),
+);
+const unavailableTestLayer = Registrar.layer.pipe(
+  Layer.provideMerge(formsLayer),
+  Layer.provideMerge(
+    Layer.succeed(
+      Registrar.Infrastructure,
+      Registrar.Infrastructure.of({
+        readiness: Effect.succeed({ stripe: false, workflows: false }),
+      }),
+    ),
+  ),
+);
 const test = it.effect.layer(testLayer);
 
 const conference = ConferenceSlug.make('/2026');
@@ -69,6 +89,41 @@ const publishReadyRegistration = Effect.gen(function* () {
 });
 
 describe('Registrar', () => {
+  it.effect('derives infrastructure readiness internally before opening', () =>
+    Effect.gen(function* () {
+      const registrar = yield* Registrar.Service;
+      const sql = yield* SqlClient;
+      const ready = yield* publishReadyRegistration;
+      yield* sql`DELETE FROM registration_channels WHERE conference_slug = '/2026'`;
+      const closed = yield* registrar.ensureClosed(conference);
+      const preview = yield* registrar.setPreview({
+        conference,
+        expectedRevision: closed.revision,
+        formVersion: ready.version,
+        timeZone,
+      });
+      const unavailable = yield* registrar
+        .open({ conference, expectedRevision: preview.revision, at })
+        .pipe(Effect.flip);
+      expect(unavailable).toBeInstanceOf(ChannelNotReady);
+      if (unavailable instanceof ChannelNotReady) {
+        expect(unavailable.issues.map((issue) => issue.code)).toEqual([
+          'stripe-unavailable',
+          'workflows-unavailable',
+        ]);
+      }
+      yield* sql`
+        UPDATE registration_channels
+        SET state = 'draining'
+        WHERE conference_slug = ${conference}
+      `;
+      const reopen = yield* registrar
+        .reopen({ conference, expectedRevision: preview.revision, at })
+        .pipe(Effect.flip);
+      expect(reopen).toBeInstanceOf(ChannelNotReady);
+    }).pipe(Effect.provide(unavailableTestLayer)),
+  );
+
   test('serializes the named closed → external → preview → open lifecycle', () =>
     Effect.gen(function* () {
       const registrar = yield* Registrar.Service;
@@ -99,27 +154,10 @@ describe('Registrar', () => {
       });
       expect(preview.state).toBe('preview');
 
-      const unavailable = yield* registrar
-        .open({
-          conference,
-          expectedRevision: preview.revision,
-          at,
-          infrastructure: { stripe: false, workflows: false },
-        })
-        .pipe(Effect.flip);
-      expect(unavailable).toBeInstanceOf(ChannelNotReady);
-      if (unavailable instanceof ChannelNotReady) {
-        expect(unavailable.issues.map((issue) => issue.code)).toEqual([
-          'stripe-unavailable',
-          'workflows-unavailable',
-        ]);
-      }
-
       const opened = yield* registrar.open({
         conference,
         expectedRevision: preview.revision,
         at,
-        infrastructure: { stripe: true, workflows: true },
       });
       expect(opened.state).toBe('open');
 
@@ -159,7 +197,6 @@ describe('Registrar', () => {
         conference,
         expectedRevision: preview.revision,
         at,
-        infrastructure: { stripe: true, workflows: true },
       });
       const draining = yield* registrar.beginDrain({
         conference,
