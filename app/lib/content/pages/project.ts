@@ -1,5 +1,6 @@
 import type { Locale } from '../../localization/localization';
 import { assetUrl } from '../asset-url';
+import type { PageContent, PageId } from './registry';
 import type {
   AboutPage,
   ArchivePage,
@@ -166,6 +167,18 @@ export interface TeamView {
   readonly portrait?: { readonly src: string; readonly alt: string };
 }
 
+/** The public, single-locale view returned for each closed Page id. */
+export interface PageViewById {
+  readonly about: AboutView;
+  readonly faq: FaqView;
+  readonly give: GiveView;
+  readonly contact: ContactView;
+  readonly volunteer: VolunteerView;
+  readonly archive: ArchiveView;
+  readonly home: HomeView;
+  readonly team: TeamView;
+}
+
 // ---------------------------------------------------------------------------
 // Per-page converters (document → this-locale view)
 // ---------------------------------------------------------------------------
@@ -273,3 +286,42 @@ export const toTeamView = (page: TeamPage, locale: Locale): TeamView => ({
     ? { src: assetUrl(page.portrait.key), alt: page.portrait.alt[locale] }
     : undefined,
 });
+
+type PageProjectors = {
+  readonly [P in PageId]: (
+    page: PageContent<P>,
+    locale: Locale,
+  ) => PageViewById[P];
+};
+
+/**
+ * The closed Page-to-view dispatch table. Keeping this exhaustively keyed by
+ * `PageId` makes adding a Page fail compilation until its Locale projection is
+ * registered, while callers no longer need to select a matching projector.
+ */
+const PAGE_PROJECTORS = {
+  about: toAboutView,
+  faq: toFaqView,
+  give: toGiveView,
+  contact: toContactView,
+  volunteer: toVolunteerView,
+  archive: toArchiveView,
+  home: toHomeView,
+  team: toTeamView,
+} as const satisfies PageProjectors;
+
+/** Project one decoded Page document to the precise view for one Locale. */
+export const projectPage = <P extends PageId>(
+  page: P,
+  content: PageContent<P>,
+  locale: Locale,
+): PageViewById[P] => {
+  // TypeScript cannot preserve the correlation between two generic indexed
+  // accesses after selecting a heterogeneous function from a mapped record.
+  // The closed, `satisfies PageProjectors` table proves that correlation here.
+  const project = PAGE_PROJECTORS[page] as (
+    value: PageContent<P>,
+    selectedLocale: Locale,
+  ) => PageViewById[P];
+  return project(content, locale);
+};
