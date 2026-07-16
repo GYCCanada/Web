@@ -67,6 +67,9 @@ export class FormValidationError extends Schema.TaggedErrorClass<FormValidationE
         Schema.Record(Schema.String, Schema.Array(Schema.String)),
       ),
     }),
+    commandDisposition: Schema.optional(
+      Schema.Literals(['preserve', 'refreshDefinition', 'rotateToken']),
+    ),
   },
 ) {
   static is = Schema.is(this);
@@ -81,6 +84,9 @@ export type HttpError =
 
 /** Validation error payload carried by {@link FormValidationError}. */
 export type FormValidationErrorInput = FormValidationError['error'];
+export type FormCommandDisposition = NonNullable<
+  FormValidationError['commandDisposition']
+>;
 
 /**
  * Build a {@link RedirectError}. The instance is a yieldable Effect error, so
@@ -99,6 +105,7 @@ export function notFound(): NotFoundError {
 /** Build a {@link FormValidationError} (yieldable). */
 export function formValidationError(
   error: FormValidationErrorInput,
+  commandDisposition: FormCommandDisposition = 'preserve',
 ): FormValidationError {
-  return new FormValidationError({ error });
+  return new FormValidationError({ error, commandDisposition });
 }

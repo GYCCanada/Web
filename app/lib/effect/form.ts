@@ -5,6 +5,7 @@ import { Context, Effect } from 'effect';
 import { isHoneypotTriggered } from '../honeypot';
 import {
   BadRequestError,
+  type FormCommandDisposition,
   FormValidationError,
   InternalServerError,
   NotFoundError,
@@ -57,7 +58,10 @@ export interface FormSuccess {
 export type FormResult = {
   readonly result: SubmissionResult<string[]>;
   readonly status: 'success' | 'error';
-  readonly preserved: Readonly<Record<string, string>>;
+  readonly command: {
+    readonly disposition: FormCommandDisposition;
+    readonly preserved: Readonly<Record<string, string>>;
+  };
 };
 
 /** Build a successful {@link FormResult} from the body's `reset` flag. */
@@ -68,7 +72,7 @@ const successResult = (
 ): FormResult => ({
   result: report(submission, { reset }),
   status: 'success',
-  preserved,
+  command: { disposition: 'preserve', preserved },
 });
 
 /** Build the error-status {@link FormResult} for a set of form-level messages. */
@@ -76,10 +80,11 @@ const formLevelError = (
   submission: Submission,
   message: string,
   preserved: Readonly<Record<string, string>>,
+  disposition: FormCommandDisposition = 'preserve',
 ): FormResult => ({
   result: report(submission, { error: { formErrors: [message] } }),
   status: 'error',
-  preserved,
+  command: { disposition, preserved },
 });
 
 /** Build the error-status {@link FormResult} from validation error buckets. */
@@ -87,6 +92,7 @@ const validationResult = (
   submission: Submission,
   error: FormValidationError['error'],
   preserved: Readonly<Record<string, string>>,
+  disposition: FormCommandDisposition,
 ): FormResult => ({
   result: report(submission, {
     error: {
@@ -103,7 +109,7 @@ const validationResult = (
     },
   }),
   status: 'error',
-  preserved,
+  command: { disposition, preserved },
 });
 
 /**
@@ -122,7 +128,14 @@ const handleFormError = (
 ): Effect.Effect<FormResult, unknown> => {
   if (RedirectError.is(error)) return Effect.fail(error);
   if (FormValidationError.is(error)) {
-    return Effect.succeed(validationResult(submission, error.error, preserved));
+    return Effect.succeed(
+      validationResult(
+        submission,
+        error.error,
+        preserved,
+        error.commandDisposition ?? 'preserve',
+      ),
+    );
   }
   if (BadRequestError.is(error)) {
     return Effect.succeed(

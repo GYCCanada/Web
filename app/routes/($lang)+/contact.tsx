@@ -15,7 +15,7 @@ import { Forms } from "~/lib/forms/forms.server";
 import { FormFields } from "~/lib/forms/render";
 import {
   newSubmissionCommandFields,
-  preserveSubmissionCommandFields,
+  resolveSubmissionCommandFields,
   SubmissionCommandInputs,
 } from "~/lib/forms/submission-command";
 import { formAction } from "~/lib/forms/action";
@@ -134,9 +134,9 @@ export default function Index() {
   );
 
   const actionData = useActionData<typeof action>();
-  const submissionCommand = preserveSubmissionCommandFields(
+  const submissionCommand = resolveSubmissionCommandFields(
     command,
-    actionData?.preserved,
+    actionData?.command,
   );
   const { form: f } = useForm(clientSchema, {
     id: "contact",

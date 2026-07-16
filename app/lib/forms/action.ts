@@ -110,17 +110,20 @@ export const formAction = <E>(config: FormActionConfig<E>) =>
           }),
           Effect.catchTags({
             'Forms.DefinitionAdvanced': () =>
-              formValidationError({
-                formErrors: [`${config.form}.form.error`],
-              }),
+              formValidationError(
+                { formErrors: [`${config.form}.form.error`] },
+                'refreshDefinition',
+              ),
             'Forms.IdempotencyConflict': () =>
-              formValidationError({
-                formErrors: [`${config.form}.form.error`],
-              }),
+              formValidationError(
+                { formErrors: [`${config.form}.form.error`] },
+                'rotateToken',
+              ),
             'Forms.FormNotPublished': () =>
-              formValidationError({
-                formErrors: [`${config.form}.form.error`],
-              }),
+              formValidationError(
+                { formErrors: [`${config.form}.form.error`] },
+                'refreshDefinition',
+              ),
           }),
         );
 

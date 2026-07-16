@@ -80,7 +80,30 @@ describe('routeFormAction', () => {
       makeFormArgs({ attempt: 'same-command', ignored: 'drop-me' }),
     );
 
-    expect(result.preserved).toEqual({ attempt: 'same-command' });
+    expect(result.command).toEqual({
+      disposition: 'preserve',
+      preserved: { attempt: 'same-command' },
+    });
+  });
+
+  it('carries an explicit refresh disposition without discarding submitted fields', async () => {
+    const action = routeFormAction(
+      function* () {
+        yield* formValidationError(
+          { formErrors: ['contact.form.error'] },
+          'refreshDefinition',
+        );
+        return { reset: false } satisfies FormSuccess;
+      },
+      { preserveFields: ['attempt'] },
+    );
+
+    const result = await action(makeFormArgs({ attempt: 'stale-command' }));
+
+    expect(result.command).toEqual({
+      disposition: 'refreshDefinition',
+      preserved: { attempt: 'stale-command' },
+    });
   });
 
   it('propagates a RedirectError as a redirect Response (C1 mapping)', async () => {

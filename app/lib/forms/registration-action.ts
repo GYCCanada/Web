@@ -85,17 +85,20 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
         }),
         Effect.catchTags({
           'Forms.DefinitionAdvanced': () =>
-            formValidationError({
-              formErrors: ['registration.form.error'],
-            }),
+            formValidationError(
+              { formErrors: ['registration.form.error'] },
+              'refreshDefinition',
+            ),
           'Forms.IdempotencyConflict': () =>
-            formValidationError({
-              formErrors: ['registration.form.error'],
-            }),
+            formValidationError(
+              { formErrors: ['registration.form.error'] },
+              'rotateToken',
+            ),
           'Forms.FormNotPublished': () =>
-            formValidationError({
-              formErrors: ['registration.form.error'],
-            }),
+            formValidationError(
+              { formErrors: ['registration.form.error'] },
+              'refreshDefinition',
+            ),
         }),
       );
 

@@ -244,10 +244,11 @@ describe('registrationAction', () => {
 
     expect(result.status).toBe('error');
     expect(result.result.error?.formErrors).toEqual(['registration.form.error']);
-    expect(result.preserved[FORM_VERSION_FIELD]).toBe(command.definitionVersion);
-    expect(result.preserved[IDEMPOTENCY_TOKEN_FIELD]).toBe(
+    expect(result.command.preserved[FORM_VERSION_FIELD]).toBe(command.definitionVersion);
+    expect(result.command.preserved[IDEMPOTENCY_TOKEN_FIELD]).toBe(
       command.idempotencyToken,
     );
+    expect(result.command.disposition).toBe('preserve');
 
     let retryIds: string[] = [];
     const retryAction = registrationAction({

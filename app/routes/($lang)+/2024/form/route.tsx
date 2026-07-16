@@ -6,7 +6,7 @@ import { routeHandler } from '~/lib/effect/route';
 import { Forms } from '~/lib/forms/forms.server';
 import {
   newSubmissionCommandFields,
-  preserveSubmissionCommandFields,
+  resolveSubmissionCommandFields,
 } from '~/lib/forms/submission-command';
 import { getLocale } from '~/lib/localization/localization';
 
@@ -63,7 +63,7 @@ export default function Registration2024() {
     <RegistrationForm
       year={2024}
       definition={definition}
-      command={preserveSubmissionCommandFields(command, actionData?.preserved)}
+      command={resolveSubmissionCommandFields(command, actionData?.command)}
       actionData={actionData?.result}
     />
   );

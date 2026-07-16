@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { Effect, ManagedRuntime } from 'effect';
+import { Effect, ManagedRuntime, Option } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
 import { Schema } from 'effect';
@@ -21,6 +21,7 @@ import {
   FORM_VERSION_FIELD,
   IDEMPOTENCY_TOKEN_FIELD,
   newSubmissionCommandFields,
+  resolveSubmissionCommandFields,
 } from './submission-command';
 
 /**
@@ -236,14 +237,108 @@ describe('formAction', () => {
     expect(result.result.error?.formErrors).toEqual(['contact.form.error']);
     expect(
       Schema.is(Forms.FormDefinitionVersionId)(
-        result.preserved[FORM_VERSION_FIELD],
+        result.command.preserved[FORM_VERSION_FIELD],
       ),
     ).toBe(true);
     expect(
       Schema.is(Forms.IdempotencyToken)(
-        result.preserved[IDEMPOTENCY_TOKEN_FIELD],
+        result.command.preserved[IDEMPOTENCY_TOKEN_FIELD],
       ),
     ).toBe(true);
+    expect(result.command.disposition).toBe('preserve');
+  });
+
+  it('refreshes the loader command after the rendered definition advances', async () => {
+    const action = formAction({
+      form: 'contact',
+      page: 'contact',
+      notify: () => Effect.void,
+      success: {
+        title: 'contact.form.success.title',
+        description: 'contact.form.success.description',
+      },
+    });
+    const args = await makeFormArgs({
+      method: 'email',
+      name: 'Ada',
+      email: 'ada@example.com',
+      message: 'hi',
+    });
+    const published = await args.context.runtime.run(
+      args,
+      Effect.gen(function* () {
+        const forms = yield* Forms.Service;
+        const current = yield* forms.current('contact');
+        return yield* forms.publish({
+          form: 'contact',
+          expectedCurrentVersion: Option.some(current.version),
+          definition: {
+            ...current.definition,
+            title: { en: 'Advanced', fr: 'Avancé' },
+          },
+        });
+      }),
+    );
+
+    const result = await action(args);
+    const fallback = newSubmissionCommandFields(published.version);
+
+    expect(result.command.disposition).toBe('refreshDefinition');
+    expect(resolveSubmissionCommandFields(fallback, result.command)).toBe(
+      fallback,
+    );
+  });
+
+  it('rotates the loader token after an idempotency conflict', async () => {
+    const action = formAction({
+      form: 'contact',
+      page: 'contact',
+      notify: () => Effect.void,
+      success: {
+        title: 'contact.form.success.title',
+        description: 'contact.form.success.description',
+      },
+    });
+    const args = await makeFormArgs({
+      method: 'email',
+      name: 'Ada',
+      email: 'ada@example.com',
+      message: 'second command',
+    });
+    const posted = await args.request.clone().formData();
+    const version = Schema.decodeUnknownSync(Forms.FormDefinitionVersionId)(
+      posted.get(FORM_VERSION_FIELD),
+    );
+    const token = Schema.decodeUnknownSync(Forms.IdempotencyToken)(
+      posted.get(IDEMPOTENCY_TOKEN_FIELD),
+    );
+    await args.context.runtime.run(
+      args,
+      Effect.gen(function* () {
+        yield* (yield* Forms.Service).submit({
+          form: 'contact',
+          expectedVersion: version,
+          idempotencyToken: token,
+          payloads: [
+            {
+              method: 'email',
+              name: 'Ada',
+              email: 'ada@example.com',
+              message: 'first command',
+            },
+          ],
+        });
+      }),
+    );
+
+    const result = await action(args);
+    const fallback = newSubmissionCommandFields(version);
+
+    expect(result.command.disposition).toBe('rotateToken');
+    expect(resolveSubmissionCommandFields(fallback, result.command)).toBe(
+      fallback,
+    );
+    expect(fallback.idempotencyToken).not.toBe(token);
   });
 
   // Run a contact `formAction` whose owning page is seeded DISABLED, against the

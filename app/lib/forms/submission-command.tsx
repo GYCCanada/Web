@@ -1,6 +1,8 @@
 import { nanoid } from 'nanoid';
 import { Schema } from 'effect';
 
+import type { FormResult } from '../effect/form';
+
 export const FormDefinitionVersionId = Schema.String.check(
   Schema.isPattern(/^sha256:[0-9a-f]{64}$/),
 ).pipe(Schema.brand('FormDefinitionVersionId'));
@@ -27,17 +29,28 @@ export const newSubmissionCommandFields = (
   idempotencyToken: IdempotencyToken.make(nanoid()),
 });
 
-/** Prefer a validated command returned by the action over a revalidated loader command. */
-export const preserveSubmissionCommandFields = (
+/** Apply the action's explicit attempt-lifecycle decision to a revalidated loader command. */
+export const resolveSubmissionCommandFields = (
   fallback: SubmissionCommandFields,
-  preserved?: Readonly<Record<string, string>>,
+  actionCommand?: FormResult['command'],
 ): SubmissionCommandFields => {
-  const definitionVersion = preserved?.[FORM_VERSION_FIELD];
-  const idempotencyToken = preserved?.[IDEMPOTENCY_TOKEN_FIELD];
-  return Schema.is(FormDefinitionVersionId)(definitionVersion) &&
-    Schema.is(IdempotencyToken)(idempotencyToken)
-    ? { definitionVersion, idempotencyToken }
-    : fallback;
+  if (actionCommand === undefined) return fallback;
+
+  switch (actionCommand.disposition) {
+    case 'refreshDefinition':
+    case 'rotateToken':
+      return fallback;
+    case 'preserve': {
+      const definitionVersion =
+        actionCommand.preserved[FORM_VERSION_FIELD];
+      const idempotencyToken =
+        actionCommand.preserved[IDEMPOTENCY_TOKEN_FIELD];
+      return Schema.is(FormDefinitionVersionId)(definitionVersion) &&
+        Schema.is(IdempotencyToken)(idempotencyToken)
+        ? { definitionVersion, idempotencyToken }
+        : fallback;
+    }
+  }
 };
 
 /** Bind a POST to the definition it rendered and to one explicit retry identity. */
