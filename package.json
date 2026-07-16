@@ -19,6 +19,7 @@
     "@conform-to/dom": "^1.19.4",
     "@conform-to/react": "^1.19.4",
     "@effect/platform-bun": "4.0.0-beta.98",
+    "@effect/sql-pg": "4.0.0-beta.98",
     "@epic-web/client-hints": "^1.3.9",
     "@react-router/node": "^8.2.0",
     "@sendgrid/client": "^8.1.6",
@@ -41,6 +42,7 @@
     "ts-pattern": "^5.9.0"
   },
   "devDependencies": {
+    "@effect/sql-pglite": "4.0.0-beta.98",
     "@effect/tsgo": "0.23.0",
     "@react-router/dev": "^8.2.0",
     "@tailwindcss/vite": "^4.3.3",
