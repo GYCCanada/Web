@@ -70,7 +70,7 @@ type Encoded = Record<string, unknown>;
 // ---------------------------------------------------------------------------
 
 /** Required free-text: empty, absent, and non-string all emit `message`. */
-const requiredString = (message: MessageKey) =>
+export const requiredString = (message: MessageKey) =>
   Schema.String.annotate({ message })
     .check(Schema.isMinLength(1, { message }))
     .annotateKey({ messageMissingKey: message });
@@ -112,7 +112,10 @@ const presentEmptyAllowedText = (message: MessageKey) =>
   Schema.String.annotate({ message }).annotateKey({ messageMissingKey: message });
 
 /** Required email: empty/absent emit `requiredMessage`, malformed emits `invalidMessage`. */
-const email = (requiredMessage: MessageKey, invalidMessage: MessageKey) =>
+export const email = (
+  requiredMessage: MessageKey,
+  invalidMessage: MessageKey,
+) =>
   Schema.String.annotate({ message: invalidMessage })
     .check(
       Schema.isMinLength(1, { message: requiredMessage }),

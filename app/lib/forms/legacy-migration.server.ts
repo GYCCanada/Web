@@ -10,7 +10,7 @@ import { IsoDate, ListItemId } from '../content/schema';
 import { deterministicListItemId } from '../content/schema.server';
 import { Storage } from '../storage.server';
 
-import { definitionToSchema } from './decode';
+import { compileForm } from './compiled-form';
 import { FORM_IDS, FormDefinition, FormId, type FormId as FormIdType } from './definition';
 import {
   prepareDefinitionVersion,
@@ -155,11 +155,12 @@ const prepare = Effect.fn('LegacyFormsMigration.prepare')(function* () {
       invalidKeys.push(`${object.key}: no definition prepared for ${form}`);
       continue;
     }
+    const compiled = compileForm(definition.definition);
     const schema = Schema.Struct({
       id: ListItemId,
       form: FormId,
       submittedAt: IsoDate,
-      payload: definitionToSchema(definition.definition),
+      payload: compiled.codec,
     });
     const decoded = yield* readText(object.key).pipe(
       Effect.flatMap((json) => decodeAt(object.key, schema, json)),
@@ -171,7 +172,7 @@ const prepare = Effect.fn('LegacyFormsMigration.prepare')(function* () {
       continue;
     }
     const payloadJson = yield* Schema.encodeUnknownEffect(
-      Schema.fromJsonString(definitionToSchema(definition.definition)),
+      Schema.fromJsonString(compiled.codec),
     )(decoded.payload).pipe(Effect.orDie);
     submissions.push({
       key: object.key,

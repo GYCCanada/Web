@@ -283,7 +283,7 @@ export const defaultVolunteerForm: FormDefinition = Schema.decodeUnknownSync(
  * keeps the multi-registrant SHELL (the `registrants` array, the
  * `registrants[n].` field prefix, the minors-only `parent` client gating, the
  * boolean-RADIO rendering of `meals` / `firstTimeAttending`) and derives its
- * validation from `Schema.Array(definitionToSchema(this))`
+ * validation from the compiled registration codec
  * (`derive-dont-sync`).
  *
  * Two oracle subtleties faithfully transcribed:

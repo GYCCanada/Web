@@ -21,7 +21,7 @@ import {
 } from './defaults';
 import { ValidationIssue, validationIssues } from '../validation-issue';
 
-import { decodeForm, definitionToSchema } from './decode';
+import { compileForm } from './compiled-form';
 import { FORM_IDS, FormDefinition, FormId } from './definition';
 import {
   prepareDefinitionVersion,
@@ -439,7 +439,7 @@ export const layer = Layer.effect(
       const submittedAt = yield* decodeTimestamp(batch.submittedAt);
       const definitionVersion = yield* decodeVersion(batch.definitionVersionId);
       const idempotencyToken = IdempotencyToken.make(batch.idempotencyToken);
-      const payloadSchema = Schema.fromJsonString(definitionToSchema(definition));
+      const payloadSchema = Schema.fromJsonString(compileForm(definition).codec);
       const submissions = yield* Effect.forEach(rows, (row) =>
         Schema.decodeUnknownEffect(payloadSchema)(row.payloadJson).pipe(
           Effect.map((payload) => ({
@@ -509,10 +509,11 @@ export const layer = Layer.effect(
       definition: FormDefinition,
       definitionVersion: FormDefinitionVersionId,
     ) {
+      const compiled = compileForm(definition);
       const decoded: Array<Readonly<Record<string, unknown>>> = [];
       const rejected: Array<SubmissionIssue> = [];
       for (const [index, payload] of command.payloads.entries()) {
-        const result = decodeForm(definition, payload);
+        const result = compiled.decode(payload);
         if (Result.isSuccess(result)) {
           decoded.push(result.success);
         } else {
@@ -530,7 +531,7 @@ export const layer = Layer.effect(
         });
       }
 
-      const payloadSchema = Schema.fromJsonString(definitionToSchema(definition));
+      const payloadSchema = Schema.fromJsonString(compiled.codec);
       const payloadJson = yield* Effect.forEach(decoded, (payload) =>
         Schema.encodeUnknownEffect(payloadSchema)(payload),
       ).pipe(Effect.orDie);

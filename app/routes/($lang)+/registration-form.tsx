@@ -5,7 +5,7 @@ import { Form } from 'react-router';
 import dayjs from 'dayjs';
 
 import { FormProvider, useForm, useFormData } from '~/lib/conform';
-import { definitionToSchema } from '~/lib/forms/decode';
+import { compileForm } from '~/lib/forms/compiled-form';
 import { FormDefinition } from '~/lib/forms/definition';
 import {
   type SubmissionCommandFields,
@@ -27,7 +27,7 @@ import { TextField } from '~/ui/text-field';
  * leaf is the raw `string`/absent value the browser submits (booleans are
  * `'true'`/`'false'`/`'on'` strings here, not decoded booleans), and there are no
  * checks or message keys — the runtime validation is supplied entirely by the
- * engine codec below (`definitionToSchema`). Mirrors the definition graph the
+ * compiled engine codec below (`compileForm`). Mirrors the definition graph the
  * render-parity half of `registration-form.test.tsx` pins (it asserts the live
  * form's emitted submit-names equal `defaultRegistrationForm`'s field names), so a
  * field added/renamed in the definition without a matching accessor here is caught.
@@ -117,7 +117,7 @@ const RegistrationFormShape = Schema.Struct({
 const makeRegistrationStandardSchema = (definition: FormDefinition) => {
   const registrationSchema = Schema.Struct({
     registrants: Schema.mutable(
-      Schema.Array(definitionToSchema(definition)),
+      Schema.Array(compileForm(definition).codec),
     ).annotateKey({ messageMissingKey: 'registration.form.type.required' }),
   });
   return Schema.toStandardSchemaV1(registrationSchema) as unknown as ReturnType<
