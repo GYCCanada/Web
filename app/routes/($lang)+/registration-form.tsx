@@ -287,9 +287,8 @@ export function RegistrationForm({
             const volunteer = fields.volunteer.getFieldset();
 
             return (
-              <>
+              <React.Fragment key={registrant.key}>
                 <fieldset
-                  key={registrant.key}
                   name={registrant.name}
                   className="flex flex-col gap-4"
                 >
@@ -734,7 +733,7 @@ export function RegistrationForm({
                     </>
                   )}
                 </fieldset>
-              </>
+              </React.Fragment>
             );
           })}
           <div>

@@ -27,6 +27,19 @@ export const newSubmissionCommandFields = (
   idempotencyToken: IdempotencyToken.make(nanoid()),
 });
 
+/** Prefer a validated command returned by the action over a revalidated loader command. */
+export const preserveSubmissionCommandFields = (
+  fallback: SubmissionCommandFields,
+  preserved?: Readonly<Record<string, string>>,
+): SubmissionCommandFields => {
+  const definitionVersion = preserved?.[FORM_VERSION_FIELD];
+  const idempotencyToken = preserved?.[IDEMPOTENCY_TOKEN_FIELD];
+  return Schema.is(FormDefinitionVersionId)(definitionVersion) &&
+    Schema.is(IdempotencyToken)(idempotencyToken)
+    ? { definitionVersion, idempotencyToken }
+    : fallback;
+};
+
 /** Bind a POST to the definition it rendered and to one explicit retry identity. */
 export function SubmissionCommandInputs({
   definitionVersion,

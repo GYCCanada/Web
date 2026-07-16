@@ -149,4 +149,33 @@ describe('Forms', () => {
       }
     }).pipe(Effect.provide(testLayer)),
   );
+
+  it.effect('replays a committed attempt after its definition is superseded', () =>
+    Effect.gen(function* () {
+      const forms = yield* Forms.Service;
+      const rendered = yield* forms.current('contact');
+      const command = {
+        form: 'contact' as const,
+        expectedVersion: rendered.version,
+        idempotencyToken: Forms.IdempotencyToken.make('published-retry'),
+        payloads: [validContact] as const,
+      };
+      const committed = yield* forms.submit(command);
+
+      yield* forms.publish({
+        form: 'contact',
+        expectedCurrentVersion: Option.some(rendered.version),
+        definition: {
+          ...rendered.definition,
+          title: { ...rendered.definition.title, en: 'Published after commit' },
+        },
+      });
+
+      const replay = yield* forms.submit(command);
+
+      expect(replay.replayed).toBe(true);
+      expect(replay.id).toBe(committed.id);
+      expect(replay.definitionVersion).toBe(rendered.version);
+    }).pipe(Effect.provide(testLayer)),
+  );
 });

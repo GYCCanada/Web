@@ -477,6 +477,56 @@ export const layer = Layer.effect(
       };
     });
 
+    const prepareSubmission = Effect.fn('Forms.prepareSubmission')(function* <
+      F extends FormId,
+    >(
+      command: SubmitCommand<F>,
+      definition: FormDefinition,
+      definitionVersion: FormDefinitionVersionId,
+    ) {
+      const decoded: Array<Readonly<Record<string, unknown>>> = [];
+      const rejected: Array<SubmissionIssue> = [];
+      for (const [index, payload] of command.payloads.entries()) {
+        const result = decodeForm(definition, payload);
+        if (Result.isSuccess(result)) {
+          decoded.push(result.success);
+        } else {
+          const formatted = formatSchemaResult(result) ?? {
+            formErrors: [],
+            fieldErrors: {},
+          };
+          rejected.push({
+            index,
+            formErrors: formatted.formErrors ? [...formatted.formErrors] : [],
+            fieldErrors: formatted.fieldErrors
+              ? Object.fromEntries(
+                  Object.entries(formatted.fieldErrors).map(([key, value]) => [
+                    key,
+                    [...value],
+                  ]),
+                )
+              : {},
+          });
+        }
+      }
+      if (rejected.length > 0) {
+        return yield* new SubmissionRejected({
+          form: command.form,
+          definitionVersion,
+          issues: rejected,
+        });
+      }
+
+      const payloadSchema = Schema.fromJsonString(definitionToSchema(definition));
+      const payloadJson = yield* Effect.forEach(decoded, (payload) =>
+        Schema.encodeUnknownEffect(payloadSchema)(payload),
+      ).pipe(Effect.orDie);
+      const commandJson = yield* Schema.encodeUnknownEffect(
+        Schema.fromJsonString(Schema.Array(Schema.String)),
+      )([definitionVersion, ...payloadJson]).pipe(Effect.orDie);
+      return { payloadJson, commandHash: yield* hash(commandJson) };
+    });
+
     const submitUnmapped = Effect.fn('Forms.submit.unmapped')(function* <
       F extends FormId,
     >(
@@ -484,6 +534,64 @@ export const layer = Layer.effect(
     ) {
       return yield* sql.withTransaction(
         Effect.gen(function* () {
+          const replayRows = yield* sql<BatchRow>`
+            SELECT
+              batch_id AS "batchId",
+              definition_version_id AS "definitionVersionId",
+              idempotency_token AS "idempotencyToken",
+              command_hash AS "commandHash",
+              submitted_at::text AS "submittedAt"
+            FROM submission_batches
+            WHERE form_id = ${command.form}
+              AND idempotency_token = ${command.idempotencyToken}
+          `;
+          const replay = Option.fromNullishOr(replayRows[0]);
+          if (Option.isSome(replay)) {
+            if (replay.value.definitionVersionId !== command.expectedVersion) {
+              return yield* new IdempotencyConflict({
+                form: command.form,
+                token: command.idempotencyToken,
+              });
+            }
+            const versionRows = yield* sql<PublishedRow>`
+              SELECT
+                form_id AS "form",
+                version_id AS "version",
+                definition::text AS "definitionJson",
+                published_at::text AS "publishedAt"
+              FROM form_definition_versions
+              WHERE form_id = ${command.form}
+                AND version_id = ${command.expectedVersion}
+            `;
+            const versionRow = Option.fromNullishOr(versionRows[0]);
+            if (Option.isNone(versionRow)) {
+              return yield* new FormPersistenceError({
+                operation: 'read replay Form definition',
+              });
+            }
+            const historical = yield* decodePublished(
+              versionRow.value,
+              command.form,
+            );
+            const prepared = yield* prepareSubmission(
+              command,
+              historical.definition,
+              historical.version,
+            );
+            if (replay.value.commandHash !== prepared.commandHash) {
+              return yield* new IdempotencyConflict({
+                form: command.form,
+                token: command.idempotencyToken,
+              });
+            }
+            return yield* loadCommitted(
+              replay.value,
+              command.form,
+              historical.definition,
+              true,
+            );
+          }
+
           const currentRows = yield* sql<PublishedRow>`
             SELECT
               form.form_id AS "form",
@@ -510,51 +618,11 @@ export const layer = Layer.effect(
             });
           }
 
-          const decoded: Array<Readonly<Record<string, unknown>>> = [];
-          const rejected: Array<SubmissionIssue> = [];
-          for (const [index, payload] of command.payloads.entries()) {
-            const result = decodeForm(published.definition, payload);
-            if (Result.isSuccess(result)) {
-              decoded.push(result.success);
-            } else {
-              const formatted = formatSchemaResult(result) ?? {
-                formErrors: [],
-                fieldErrors: {},
-              };
-              rejected.push({
-                index,
-                formErrors: formatted.formErrors
-                  ? [...formatted.formErrors]
-                  : [],
-                fieldErrors: formatted.fieldErrors
-                  ? Object.fromEntries(
-                      Object.entries(formatted.fieldErrors).map(([key, value]) => [
-                        key,
-                        [...value],
-                      ]),
-                    )
-                  : {},
-              });
-            }
-          }
-          if (rejected.length > 0) {
-            return yield* new SubmissionRejected({
-              form: command.form,
-              definitionVersion: published.version,
-              issues: rejected,
-            });
-          }
-
-          const payloadSchema = Schema.fromJsonString(
-            definitionToSchema(published.definition),
+          const prepared = yield* prepareSubmission(
+            command,
+            published.definition,
+            published.version,
           );
-          const payloadJson = yield* Effect.forEach(decoded, (payload) =>
-            Schema.encodeUnknownEffect(payloadSchema)(payload),
-          ).pipe(Effect.orDie);
-          const commandJson = yield* Schema.encodeUnknownEffect(
-            Schema.fromJsonString(Schema.Array(Schema.String)),
-          )([published.version, ...payloadJson]).pipe(Effect.orDie);
-          const commandHash = yield* hash(commandJson);
           const batchId = SubmissionGroupId.make(nanoid());
 
           const inserted = yield* sql<BatchRow>`
@@ -569,7 +637,7 @@ export const layer = Layer.effect(
               ${command.form},
               ${published.version},
               ${command.idempotencyToken},
-              ${commandHash}
+              ${prepared.commandHash}
             )
             ON CONFLICT (form_id, idempotency_token) DO NOTHING
             RETURNING
@@ -596,7 +664,7 @@ export const layer = Layer.effect(
             if (Option.isNone(existing)) {
               return yield* new FormPersistenceError({ operation: 'replay Submission' });
             }
-            if (existing.value.commandHash !== commandHash) {
+            if (existing.value.commandHash !== prepared.commandHash) {
               return yield* new IdempotencyConflict({
                 form: command.form,
                 token: command.idempotencyToken,
@@ -610,7 +678,7 @@ export const layer = Layer.effect(
             );
           }
 
-          for (const [ordinal, json] of payloadJson.entries()) {
+          for (const [ordinal, json] of prepared.payloadJson.entries()) {
             yield* sql`
               INSERT INTO submissions (
                 submission_id,

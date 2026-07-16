@@ -108,4 +108,6 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
       form: 'registration',
     });
     return { reset: true } satisfies FormSuccess;
+  }, {
+    preserveFields: [FORM_VERSION_FIELD, IDEMPOTENCY_TOKEN_FIELD],
   });

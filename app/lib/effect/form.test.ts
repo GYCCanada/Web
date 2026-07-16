@@ -5,8 +5,9 @@ import { RouterContextProvider } from 'react-router';
 import { BadRequestError, formValidationError, redirect } from './errors';
 import { routeFormAction, SubmissionContext, type FormSuccess } from './form';
 import { HONEYPOT_FIELD } from '../honeypot';
-import { makeRequestRuntime } from './runtime';
+import { makeRequestRuntimeFromLayer, makeTestAppLayer } from './runtime';
 import type { RouteArgs } from './router-context';
+import { layerTest } from '../storage.test-helper';
 
 /**
  * Build {@link RouteArgs} whose request carries `fields` as a form POST, with the
@@ -22,7 +23,7 @@ const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
   });
   const context = new RouterContextProvider();
-  context.runtime = makeRequestRuntime();
+  context.runtime = makeRequestRuntimeFromLayer(makeTestAppLayer(layerTest({})));
   return {
     request,
     url: new URL(url),
@@ -64,6 +65,22 @@ describe('routeFormAction', () => {
     expect(result.result.error?.fieldErrors['email']).toEqual([
       'volunteer.form.email.invalid',
     ]);
+  });
+
+  it('preserves requested attempt fields across validation revalidation', async () => {
+    const action = routeFormAction(
+      function* () {
+        yield* formValidationError({ formErrors: ['contact.form.error'] });
+        return { reset: false } satisfies FormSuccess;
+      },
+      { preserveFields: ['attempt'] },
+    );
+
+    const result = await action(
+      makeFormArgs({ attempt: 'same-command', ignored: 'drop-me' }),
+    );
+
+    expect(result.preserved).toEqual({ attempt: 'same-command' });
   });
 
   it('propagates a RedirectError as a redirect Response (C1 mapping)', async () => {

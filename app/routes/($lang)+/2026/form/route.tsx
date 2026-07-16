@@ -4,7 +4,10 @@ import { Content } from '~/lib/content.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeHandler } from '~/lib/effect/route';
 import { Forms } from '~/lib/forms/forms.server';
-import { newSubmissionCommandFields } from '~/lib/forms/submission-command';
+import {
+  newSubmissionCommandFields,
+  preserveSubmissionCommandFields,
+} from '~/lib/forms/submission-command';
 import { getLocale } from '~/lib/localization/localization';
 
 import { action } from '../../registration-route';
@@ -60,7 +63,7 @@ export default function Registration2026() {
     <RegistrationForm
       year={2026}
       definition={definition}
-      command={command}
+      command={preserveSubmissionCommandFields(command, actionData?.preserved)}
       actionData={actionData?.result}
     />
   );

@@ -234,6 +234,16 @@ describe('formAction', () => {
 
     expect(result.status).toBe('error');
     expect(result.result.error?.formErrors).toEqual(['contact.form.error']);
+    expect(
+      Schema.is(Forms.FormDefinitionVersionId)(
+        result.preserved[FORM_VERSION_FIELD],
+      ),
+    ).toBe(true);
+    expect(
+      Schema.is(Forms.IdempotencyToken)(
+        result.preserved[IDEMPOTENCY_TOKEN_FIELD],
+      ),
+    ).toBe(true);
   });
 
   // Run a contact `formAction` whose owning page is seeded DISABLED, against the

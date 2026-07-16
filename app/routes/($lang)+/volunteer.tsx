@@ -15,6 +15,7 @@ import { Forms } from "~/lib/forms/forms.server";
 import { FormFields } from "~/lib/forms/render";
 import {
   newSubmissionCommandFields,
+  preserveSubmissionCommandFields,
   SubmissionCommandInputs,
 } from "~/lib/forms/submission-command";
 import { formAction } from "~/lib/forms/action";
@@ -147,6 +148,10 @@ export default function Index() {
   );
 
   const actionData = useActionData<typeof action>();
+  const submissionCommand = preserveSubmissionCommandFields(
+    command,
+    actionData?.preserved,
+  );
   const { form: f } = useForm(clientSchema, {
     id: "volunteer",
     shouldValidate: "onSubmit",
@@ -175,7 +180,7 @@ export default function Index() {
 
       <FormProvider context={f.context}>
         <Form className="flex flex-col gap-4" method="POST" {...f.props}>
-          <SubmissionCommandInputs {...command} />
+          <SubmissionCommandInputs {...submissionCommand} />
           <FormFields definition={definition} formId={f.id} />
 
           <div>

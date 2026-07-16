@@ -135,6 +135,7 @@ export const formAction = <E>(config: FormActionConfig<E>) =>
       return { reset: true } satisfies FormSuccess;
     },
     {
+      preserveFields: [FORM_VERSION_FIELD, IDEMPOTENCY_TOKEN_FIELD],
       // ROUTE-LEVEL 404 gate, run BEFORE form-data parse + honeypot handling so a
       // disabled page rejects EVERY POST (incl. a honeypot-filled one), not only
       // the normal body path (Feature C, Codex #6, Risk 11). Read off the same
