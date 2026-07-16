@@ -1,5 +1,5 @@
 import { BunHttpServer, BunRuntime } from '@effect/platform-bun';
-import { Data, Effect, Layer } from 'effect';
+import { Data, Effect, Layer, Option } from 'effect';
 import {
   HttpRouter,
   HttpServerRequest,
@@ -15,6 +15,10 @@ import {
 } from './app/lib/effect/runtime.ts';
 import { imageKeyFromPath } from './app/lib/images.server.ts';
 import { Storage } from './app/lib/storage.server.ts';
+import { Submissions } from './app/lib/forms/submissions.server.ts';
+import { Payment } from './app/lib/payment.server.ts';
+import { Order } from './app/lib/order/runner.server.ts';
+import { OrderSweep } from './app/lib/order/sweep.server.ts';
 
 declare module 'react-router' {
   interface RouterContextProvider {
@@ -248,7 +252,7 @@ const RoutesLive = isDev ? DevRoutes : ProdRoutes;
 // (ADR 0004:38-40). Providing `Env.layer` discharges the requirement, so a
 // missing secret fails `Layer.launch` and `BunRuntime.runMain` exits non-zero.
 // In dev / test the env vars are optional, so this is a cheap no-op.
-const StartupCheck = Layer.effectDiscard(Env.Service.asEffect()).pipe(
+const StartupCheck = Layer.effectDiscard(Env.Service).pipe(
   Layer.provide(Env.layer),
 );
 
@@ -260,10 +264,71 @@ const StartupCheck = Layer.effectDiscard(Env.Service.asEffect()).pipe(
 // storage layer is self-contained.
 const StorageLive = Storage.defaultLayer;
 
+// The durable Order workflow's CONSUMER side: the in-process Sharding runner +
+// the `arm`/`settle`/… handlers, hosted in this long-lived `Layer.launch`-ed
+// `ServerLive` graph (G6, order-workflow-plan §1) — NOT the request-handler
+// `makeAppLayer` graph, which is consumed once into the `AppRuntime` singleton
+// and never `Layer.launch`-ed, so it has no process-lifetime supervisor for the
+// runner's mailbox-poll fiber. The runner consumes the SQL mailbox the
+// registration action + Stripe webhook (SENDERS in `AppRuntime`) write to; the
+// two graphs coordinate ONLY through the shared `DATABASE_URL` sqlite FILE.
+//
+// Gated on `Env.database` Some: a DB-less deploy composes `Layer.empty`, so the
+// bucket-only registration/webhook path is byte-identically unaffected and
+// `Layer.launch` still exits non-zero on a missing REQUIRED config (the
+// `StartupCheck` contract). The runner's bucket-authority writes come from
+// `Submissions.defaultLayer` (self-contained); `Env.layer` discharges the
+// `MessageStorageLive` SqlClient gate and the `Env`-read in the gate itself.
+const OrderRunnerLive = Layer.unwrap(
+  Effect.gen(function* () {
+    const env = yield* Env.Service;
+    if (Option.isNone(env.database)) return Layer.empty;
+    // In this branch `Env.database` IS Some, so `MessageStorageLive`'s
+    // `DatabaseUnconfigured` gate cannot fire; `orDie` reflects the
+    // impossibility (a build failure here is a real defect) and keeps the
+    // runner's build-error channel clean.
+    // The runner (consumer) AND the deadline-sweep fiber (a SENDER of
+    // `Order.expire`), both in this long-lived `Layer.launch`-ed graph. The
+    // sweep needs `Order.SenderServices` (`Client | ActorAddressResolver |
+    // MessageStorage`) — which `fullRunnerLayer` already carries in its output
+    // (the handlers' `toLayer` keeps the client/storage services) — so
+    // `provideMerge` wires the sweep's sender requirement from the same runner
+    // build, over the SAME shared sqlite FILE the runner polls. A `send` from
+    // the sweep lands in the rows the runner consumes; the two never coordinate
+    // through anything but the durable DB (the two-runtime topology).
+    // `provideMerge` (not `merge`): the sweep fiber REQUIRES the runner's sender
+    // output (`Client | ActorAddressResolver | MessageStorage`), so the runner
+    // must PROVIDE it to the fiber — `merge` would leave the fiber's requirement
+    // unsatisfied. `provideMerge` feeds `fullRunnerLayer`'s output into the
+    // fiber AND keeps the runner's services in the result (so `Layer.launch`
+    // builds the runner too). Both end up needing `Submissions` (the fiber's
+    // `listOrders` + the handlers' bucket writes), discharged once below.
+    return OrderSweep.fiberLayer().pipe(
+      Layer.provideMerge(Order.fullRunnerLayer(Order.MessageStorageLive)),
+      // The runner's bucket-authority writes come from `Submissions`; the sweep
+      // ALSO reads orders through `Submissions` (`listOrders`). The `refund`
+      // handler (G7) ALSO issues the Stripe refund, so `Payment` is provided
+      // here too (self-contained `defaultLayer`s — both gate on their own `Env`
+      // reads). When `Env.stripe` is None `Payment` is inert and a `refund` op
+      // would die `PaymentDisabled`, but no sender reaches `refund` without a
+      // configured Stripe, so the runner still builds cleanly.
+      Layer.provide(Submissions.defaultLayer),
+      Layer.provide(Payment.defaultLayer),
+      Layer.orDie,
+    );
+  }),
+).pipe(Layer.provide(Env.layer));
+
 const ServerLive = HttpRouter.serve(RoutesLive).pipe(
   Layer.provide(StorageLive),
   Layer.provide(StartupCheck),
   Layer.provide(BunHttpServer.layer({ port: PORT })),
+  // `merge` (not `provide`): nothing in the HTTP graph CONSUMES the runner's
+  // output services, so `Layer.provide` would never build it (provide only
+  // builds a dependency something requires). Merging makes the runner part of
+  // `ServerLive`'s own composition, so `Layer.launch` builds it and supervises
+  // its mailbox-poll fiber for the process lifetime.
+  Layer.merge(OrderRunnerLive),
 );
 
 BunRuntime.runMain(Layer.launch(ServerLive));

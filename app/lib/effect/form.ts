@@ -135,7 +135,7 @@ const handleFormError = (
  *    errors become form/field error reports; redirects propagate via C1.
  */
 export const routeFormAction =
-  <Eff extends Effect.Yieldable<any, any, any, FormServices>>(
+  <Eff extends Effect.Effect<any, any, FormServices>>(
     body: () => Generator<Eff, FormSuccess, never>,
     options?: {
       /**

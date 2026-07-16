@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { Result, Schema } from 'effect';
 
-import { newListItemId } from '../content/schema';
+import { IsoDate, newListItemId } from '../content/schema';
 
 import { RegistrationOrder } from './order';
 import { Cents, CurrencyCode } from './pricing';
@@ -39,10 +39,36 @@ describe('RegistrationOrder', () => {
     }
   });
 
-  test('rejects an off-list status', () => {
+  test('round-trips at each widened status (cancelled, refunded, expired)', () => {
+    // The G5 widen added `cancelled` + `refunded` (atop the original
+    // pending/paid/failed/expired). A `refunded` order ALSO carries the frozen
+    // `refundedAt`; every status round-trips losslessly through the bucket codec.
+    const codec = Schema.fromJsonString(RegistrationOrder);
+    const cases = [
+      { ...validOrder, status: 'cancelled' as const },
+      { ...validOrder, status: 'expired' as const },
+      {
+        ...validOrder,
+        status: 'refunded' as const,
+        paidAt: IsoDate.make('2026-06-18'),
+        refundedAt: IsoDate.make('2026-06-20'),
+      },
+    ];
+    for (const order of cases) {
+      const back = Schema.decodeUnknownResult(codec)(
+        Schema.encodeSync(codec)(order),
+      );
+      expect(Result.isSuccess(back)).toBe(true);
+      if (Result.isSuccess(back)) {
+        expect(back.success).toEqual(order);
+      }
+    }
+  });
+
+  test('rejects an off-list status (still a CLOSED literal after the widen)', () => {
     const result = Schema.decodeUnknownResult(RegistrationOrder)({
       ...validOrder,
-      status: 'refunded',
+      status: 'partially_refunded',
     });
     expect(Result.isFailure(result)).toBe(true);
   });

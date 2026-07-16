@@ -71,7 +71,7 @@ describe('Env config', () => {
 
   it.effect('fails fast in production when a required mail var is missing', () =>
     Effect.gen(function* () {
-      const exit = yield* Env.Service.asEffect().pipe(
+      const exit = yield* Env.Service.pipe(
         provideEnv({ NODE_ENV: 'production', MAIL_HOST: 'only-host' }),
         Effect.exit,
       );
@@ -129,7 +129,7 @@ describe('Env config', () => {
 
   it.effect('fails fast when a configured stripe carries an unsupported currency', () =>
     Effect.gen(function* () {
-      const exit = yield* Env.Service.asEffect().pipe(
+      const exit = yield* Env.Service.pipe(
         provideEnv({
           NODE_ENV: 'development',
           STRIPE_API_KEY: 'sk_test_123',
@@ -244,6 +244,129 @@ describe('Env config', () => {
         BUCKET_SECRET_KEY: 'secret-key',
         BUCKET_NAME: 'gycc-content',
         BUCKET_REGION: 'us-east-1',
+      }),
+    ));
+
+  it.effect('leaves the database absent everywhere when DATABASE_URL is unset', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.database)).toBe(true);
+    }).pipe(provideEnv({ NODE_ENV: 'development' })));
+
+  it.effect('leaves the database absent in production when DATABASE_URL is unset', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(env.isProduction).toBe(true);
+      expect(Option.isNone(env.database)).toBe(true);
+    }).pipe(provideEnv(PROD_ENV)));
+
+  it.effect('resolves the database and redacts the connection URL', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isSome(env.database)).toBe(true);
+      if (Option.isSome(env.database)) {
+        expect(Redacted.value(env.database.value.url)).toBe('/data/order.db');
+      }
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        DATABASE_URL: '/data/order.db',
+      }),
+    ));
+
+  it.effect('treats a present-but-blank DATABASE_URL as absent (env.example placeholder)', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      // Mirrors a freshly-copied `.env.example`: DATABASE_URL is present but
+      // empty. It must collapse to `Option.none()` so the durable Order entity
+      // stays disabled, not a Some(...) of an empty string.
+      expect(Option.isNone(env.database)).toBe(true);
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        DATABASE_URL: '',
+      }),
+    ));
+
+  it.effect('treats a whitespace-only DATABASE_URL as absent', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.database)).toBe(true);
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        DATABASE_URL: '   \t',
+      }),
+    ));
+
+  it.effect("accepts DATABASE_URL=':memory:' in development (single-graph G3 path)", () =>
+    Effect.gen(function* () {
+      // The G3 `layerTest` / cross-runtime single-graph tests rely on the
+      // in-memory sqlite DB. The production guard must NOT regress that: dev/test
+      // keep `':memory:'` as a valid, resolvable connection string.
+      const env = yield* Env.Service;
+      expect(Option.isSome(env.database)).toBe(true);
+      if (Option.isSome(env.database)) {
+        expect(Redacted.value(env.database.value.url)).toBe(':memory:');
+      }
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        DATABASE_URL: ':memory:',
+      }),
+    ));
+
+  it.effect("rejects DATABASE_URL=':memory:' in production (two-runtime coordination guard)", () =>
+    Effect.gen(function* () {
+      // The runner (`ServerLive`) and senders (`AppRuntime`) are separate layer
+      // graphs that coordinate ONLY through the shared sqlite FILE; `':memory:'`
+      // gives each its OWN private DB, silently breaking the route → runner →
+      // webhook loop (docs/order-workflow-plan.md:327). It must fail the env
+      // layer at boot with a typed `ConfigError` (NOT a thrown defect).
+      const exit = yield* Env.Service.pipe(
+        provideEnv({
+          ...PROD_ENV,
+          DATABASE_URL: ':memory:',
+        }),
+        Effect.exit,
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        const typedRejection = exit.cause.reasons.some(
+          (reason) =>
+            reason._tag === 'Fail' &&
+            typeof reason.error === 'object' &&
+            reason.error !== null &&
+            '_tag' in reason.error &&
+            reason.error._tag === 'ConfigError',
+        );
+        expect(typedRejection).toBe(true);
+      }
+    }));
+
+  it.effect("rejects a whitespace/case variant of ':memory:' in production", () =>
+    Effect.gen(function* () {
+      const exit = yield* Env.Service.pipe(
+        provideEnv({
+          ...PROD_ENV,
+          DATABASE_URL: '  :MEMORY:  ',
+        }),
+        Effect.exit,
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+    }));
+
+  it.effect('accepts a sqlite FILE path in production', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isSome(env.database)).toBe(true);
+      if (Option.isSome(env.database)) {
+        expect(Redacted.value(env.database.value.url)).toBe('/data/order.db');
+      }
+    }).pipe(
+      provideEnv({
+        ...PROD_ENV,
+        DATABASE_URL: '/data/order.db',
       }),
     ));
 });

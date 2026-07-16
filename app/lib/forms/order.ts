@@ -53,7 +53,22 @@ export const RegistrationOrder = Schema.Struct({
   // FROZEN — group: party.payer.email (nominated, possibly a non-attendee);
   // perRegistrant: registrants[i].email (Decision 2b.6). Required, never absent.
   receiptEmail: Schema.String,
-  status: Schema.Literals(['pending', 'paid', 'failed', 'expired']),
+  // The order lifecycle (Decision 5 / G5). Widened from the original
+  // `['pending','paid','failed','expired']` to the additive superset
+  // `+ 'cancelled' + 'refunded'` so the durable Order actor's two new terminal
+  // states have a durable bucket home. STILL a CLOSED `Schema.Literals`: a
+  // present-but-unknown token fails decode, and every legacy
+  // `pending`/`paid`/`failed`/`expired` order decodes byte-unchanged (the new
+  // arms are append-only). `failed` (Stripe `async_payment_failed`) and
+  // `cancelled` (operator/abandon) stay DISTINCT — they are not aliases.
+  status: Schema.Literals([
+    'pending',
+    'paid',
+    'failed',
+    'expired',
+    'cancelled',
+    'refunded',
+  ]),
   // group: every party id; perRegistrant: the one id. The webhook flips each
   // named registrant submission's payment alongside the order (C8).
   registrantIds: Schema.Array(ListItemId),
@@ -69,5 +84,13 @@ export const RegistrationOrder = Schema.Struct({
   // order has nothing settled, so it carries no `paidAt`; a read-back of a legacy
   // paid order written before this field existed tolerates its absence.
   paidAt: Schema.optionalKey(IsoDate),
+  // FROZEN the instant a `paid` order first transitions to `refunded` (G5
+  // `markOrderRefunded`), and NEVER re-stamped — the mirror of `paidAt` for the
+  // refund terminal, so a re-flip to `refunded` re-reads this value rather than
+  // the clock and the registrant `refunded` stamp derives its own `refundedAt`
+  // FROM it (`derive-dont-sync`). `optionalKey` (backfill-safe): only a
+  // `refunded` order carries it; every other status — and every legacy order
+  // written before this field existed — tolerates its absence.
+  refundedAt: Schema.optionalKey(IsoDate),
 });
 export type RegistrationOrder = typeof RegistrationOrder.Type;

@@ -49,6 +49,10 @@ export interface BucketConfig {
   readonly region: string;
 }
 
+export interface DatabaseConfig {
+  readonly url: Redacted.Redacted<string>;
+}
+
 const mailConfigRequired = Config.all({
   host: Config.string('MAIL_HOST'),
   port: Config.number('MAIL_PORT'),
@@ -174,6 +178,76 @@ const bucketConfig: Config.Config<Option.Option<BucketConfig>> = Config.all({
   ),
 );
 
+/**
+ * Sentinel sqlite in-memory connection string. SQLite treats `':memory:'` as a
+ * private, per-connection database — impossible to share across two layer graphs.
+ */
+const SQLITE_MEMORY = ':memory:';
+
+const isSqliteMemory = (value: Redacted.Redacted<string>): boolean =>
+  Redacted.value(value).trim().toLowerCase() === SQLITE_MEMORY;
+
+/**
+ * Production guard on the durable Order DB target. The runner (`ServerLive`) and
+ * the senders (`AppRuntime`) are two separate layer graphs that coordinate ONLY
+ * through the shared sqlite FILE; `':memory:'` gives each graph its OWN private
+ * in-memory DB, so a `send` from a route lands in a DB the runner never polls —
+ * the route → runner → webhook loop silently breaks. The plan
+ * (`docs/order-workflow-plan.md:327`) and `.env.example` already declare this
+ * IMPOSSIBLE in production; this turns the documented invariant into a typed
+ * boot failure. A `Schema.SchemaError` (not a thrown defect) flows into
+ * `Config.ConfigError`, mirroring the `STRIPE_CURRENCY` decode above so the env
+ * layer keeps its single `ConfigError` error channel.
+ */
+const ProductionDatabaseUrl = Schema.Redacted(Schema.String).check(
+  Schema.makeFilter<Redacted.Redacted<string>>(
+    (url) =>
+      isSqliteMemory(url)
+        ? "DATABASE_URL must be a sqlite FILE path on a persistent volume in production, never ':memory:' — the runner and request/webhook senders are separate layer graphs that coordinate only through the shared file (docs/order-workflow-plan.md:327)"
+        : undefined,
+    { title: 'DATABASE_URL' },
+  ),
+);
+
+/**
+ * Durable Order workflow database (encore SQL MessageStorage). OPTIONAL
+ * everywhere — when `DATABASE_URL` is unset the durable Order entity is disabled
+ * and the app falls back to the existing bucket-only registration/webhook path.
+ *
+ * Same blank-collapse None-gate as the bucket/stripe/sendgrid configs: read with
+ * a `''` default, trimmed, collapsing to `Option.none()` unless non-blank. We do
+ * NOT use `Config.option` — a present-but-empty `DATABASE_URL=` (the value
+ * shipped in `.env.example`) is a *successful* empty parse, not missing data, so
+ * `Config.option` would wrongly resolve it to `Some(Redacted(''))` and treat the
+ * empty placeholder as a real DB.
+ *
+ * The connection string flows through `Config.redacted` so it is never
+ * accidentally logged (harmless for a sqlite file path; load-bearing for a
+ * future Postgres URL with embedded credentials). In production this MUST be a
+ * sqlite FILE path on a persistent volume, never `':memory:'` — the long-lived
+ * runner and the request/webhook senders are two separate layer graphs that
+ * coordinate ONLY through the shared sqlite file. `:memory:` is read together
+ * with `NODE_ENV` so the production rejection fails the env layer at boot
+ * (development/test keep `':memory:'` for the single-graph G3 layerTest path).
+ */
+const databaseConfig: Config.Config<Option.Option<DatabaseConfig>> = Config.all({
+  url: Config.redacted('DATABASE_URL').pipe(Config.withDefault(Redacted.make(''))),
+  nodeEnv: Config.string('NODE_ENV').pipe(Config.withDefault('development')),
+}).pipe(
+  Config.mapOrFail(({ url, nodeEnv }) => {
+    if (isBlankRedacted(url)) {
+      return Effect.succeed(Option.none<DatabaseConfig>());
+    }
+    if (nodeEnv !== 'production') {
+      return Effect.succeed(Option.some<DatabaseConfig>({ url }));
+    }
+    return Schema.decodeUnknownEffect(ProductionDatabaseUrl)(url).pipe(
+      Effect.map((validated) => Option.some<DatabaseConfig>({ url: validated })),
+      Effect.mapError((error) => new Config.ConfigError(error)),
+    );
+  }),
+);
+
 export class Service extends Context.Service<
   Service,
   {
@@ -182,6 +256,7 @@ export class Service extends Context.Service<
     readonly sendgrid: Option.Option<SendgridConfig>;
     readonly stripe: Option.Option<StripeConfig>;
     readonly bucket: Option.Option<BucketConfig>;
+    readonly database: Option.Option<DatabaseConfig>;
   }
 >()('gycc/lib/env.server/Service') {}
 
@@ -203,6 +278,7 @@ export const layer = Layer.effect(
     const bucket = yield* bucketConfig;
     const sendgrid = yield* sendgridConfig;
     const stripe = yield* stripeConfig;
+    const database = yield* databaseConfig;
 
     if (isProduction) {
       const mail = yield* mailConfigRequired;
@@ -212,11 +288,12 @@ export const layer = Layer.effect(
         sendgrid,
         stripe,
         bucket,
+        database,
       });
     }
 
     const mail = yield* Config.option(mailConfigRequired);
-    return Service.of({ isProduction, mail, sendgrid, stripe, bucket });
+    return Service.of({ isProduction, mail, sendgrid, stripe, bucket, database });
   }),
 );
 

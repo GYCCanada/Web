@@ -1,8 +1,11 @@
-import { Effect, Schema } from 'effect';
+import { Effect, Option, Schema } from 'effect';
 
+import { Env } from '~/lib/env.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction } from '~/lib/effect/route';
 import { Submissions } from '~/lib/forms/submissions.server';
+import { Order } from '~/lib/order/runner.server';
+import { isTerminal } from 'effect-encore';
 import { Payment } from '~/lib/payment.server';
 import { Cents } from '~/lib/forms/pricing';
 
@@ -42,7 +45,26 @@ import { Cents } from '~/lib/forms/pricing';
  *      STAYS pending, **400**. Only a paid completion with an exact amount match
  *      flips the order to `paid`.
  *   6. Mark the order `paid` / `failed` (idempotent — replaying the same event is
- *      a no-op, mirroring the `c8c4abd` idempotency fix) and return **200**.
+ *      a no-op, mirroring the `c8c4abd` idempotency fix). The bucket flip is the
+ *      RECEIPT AUTHORITY and STAYS exactly as before.
+ *   7. (order-workflow G8) ADDITIONALLY drive the durable Order `settle` op
+ *      through the SAME SQL MessageStorage the `ServerLive` runner consumes, so
+ *      the durable lifecycle advances `pending → paid` (a `completed` paid event)
+ *      / resolves to a `SettleFailed` Failure (an `async_payment_failed` event).
+ *      The webhook holds only `metadata.orderId`, and `settle`'s `id` is a pure fn
+ *      of `orderId` (G4 / Decision 4), so it resolves the op WITHOUT
+ *      reconstructing the full payload — `send` then `waitFor({ orderId })`. This
+ *      is GATED on `Env.database` Some: a DB-less deploy has no runner and
+ *      degrades to the bucket-only flip (backward compatible). The settle-drive is
+ *      COMPLEMENTARY to the bucket authority, never a gate on it. Failure handling
+ *      is split (F3): a `settle.send`/persistence fault PROPAGATES — the durable row
+ *      never landed, so the route returns 502 for Stripe to retry. Only the
+ *      POST-send `waitFor` observation (the durable row already persisted; the
+ *      runner/sweep reconciles the lifecycle) is logged + swallowed, since the
+ *      bucket order is already durably paid/failed — so that swallowed wait never
+ *      changes the 200/400/503 the bucket flip earned (Decision 1/7).
+ *      Idempotent: a replayed event re-resolves an already-terminal ExecId to a
+ *      no-op (encore dedup), `paidAt` byte-identical.
  *
  * The route returns plain `Response`s (Stripe reads the STATUS, not an HTML error
  * page): the verify/lookup failures are mapped to their codes via `catchTags` so
@@ -73,6 +95,83 @@ export const action = routeAction(function* () {
   const { request } = yield* ReactRouterContext;
   const payment = yield* Payment.Service;
   const submissions = yield* Submissions.Service;
+  const env = yield* Env.Service;
+
+  // (G8) Drive the durable Order `settle` op through the SAME SQL MessageStorage
+  // the `ServerLive` runner consumes. The webhook holds only `metadata.orderId`,
+  // and `settle`'s `id` is a pure fn of `orderId` (Decision 4), so the op
+  // resolves WITHOUT reconstructing the full payload: `send` the settle, then
+  // `waitFor` a terminal reply keyed off the `{ orderId }`-derived ExecId. Gated
+  // on `Env.database` Some — a DB-less deploy has no runner, so it skips the
+  // drive and degrades to the bucket-only flip (backward compatible). `outcome`
+  // defaults to `'paid'` (the absent `checkout.session.completed` path); the
+  // `async_payment_failed` path passes `'failed'` so the durable reply mirrors
+  // the bucket `failed` flip (Decision 7).
+  //
+  // (F3, --deep MAJOR) The `send` (persistence) and the `waitFor` (bounded
+  // observation) carry DIFFERENT failure semantics and so are NOT collapsed into
+  // one `catchCause`:
+  //
+  //   • `send` FAILING means the durable settle row never LANDED in MessageStorage
+  //     (a SQL/`PersistenceError`/`MailboxError` fault). Swallowing that would 200
+  //     Stripe with the bucket already flipped paid/failed but NO durable settle —
+  //     a lost-settle money hazard with no retry. So a `send` failure PROPAGATES,
+  //     failing the webhook response (non-2xx) so Stripe RETRIES. The retry is a
+  //     safe no-op on the bucket: `markOrderPaid`/`markOrderFailed` re-flip an
+  //     already-terminal order idempotently via `canTransition`'s identity case
+  //     (F1), so a retried `completed`/`async_payment_failed` re-runs only the
+  //     `send` until it lands. The error channel here is the `send` failure set;
+  //     it is mapped to a 502 by the `catchTags` below (Stripe retries on 5xx).
+  //
+  //   • The `waitFor` runs ONLY AFTER `send` has SUCCEEDED — the durable row is in
+  //     storage, the runner WILL reconcile it; the reply merely has not been
+  //     OBSERVED yet. A non-terminal/timeout wait is therefore safe to swallow:
+  //     the bound (`Effect.timeout('5 seconds')`) injects a `TimeoutException`
+  //     (`waitFor` polls FOREVER otherwise — a defected runner/sweep fiber in the
+  //     single-instance topology would hang the request fiber and never return),
+  //     and the post-send `catchCause` collapses it (and any `PersistenceError`
+  //     from the `peek` poll) to a logged no-op. The durable `send` already
+  //     landed; the runner/sweep converges it; the bucket authority is unaffected,
+  //     so the webhook 200s on the status the bucket flip earned.
+  const settleOrder = (
+    orderId: string,
+    outcome: 'paid' | 'failed',
+    sessionId: string,
+  ): Effect.Effect<
+    void,
+    Order.SettleSendError,
+    Order.SenderServices
+  > =>
+    Option.isNone(env.database) ?
+      Effect.void
+    : Order.Entity.settle.send({
+        orderId,
+        outcome,
+        sessionId,
+        paymentIntentId: undefined,
+      }).pipe(
+        // The durable row has LANDED. Wait for the op to reach a terminal reply
+        // (Success for `'paid'`, the durable `SettleFailed` Failure for
+        // `'failed'`) so the webhook observes the runner completed the
+        // continuation — but tolerate a non-terminal/timeout WAIT, since the
+        // `send` already persisted and the runner reconciles it. ONLY this
+        // post-send observation is swallowed; the `send` failure above is NOT.
+        Effect.andThen(
+          Order.Entity.settle.waitFor(
+            { orderId, outcome, sessionId, paymentIntentId: undefined },
+            { filter: (result) => isTerminal(result) },
+          ).pipe(
+            Effect.asVoid,
+            Effect.timeout('5 seconds'),
+            Effect.catchCause((cause) =>
+              Effect.logError(
+                `Order.settle wait timed out for ${orderId} (durable send landed; runner reconciles the durable lifecycle)`,
+                cause,
+              ),
+            ),
+          ),
+        ),
+      );
 
   return yield* Effect.gen(function* () {
     // (1) RAW body, read BEFORE any parse — the HMAC is over these exact bytes.
@@ -109,6 +208,11 @@ export const action = routeAction(function* () {
       // against a frozen amount); flip the order to `failed`. A `NotFound` (an
       // event for an order that has not landed) ⇒ 400 via the `catchTags`.
       yield* submissions.markOrderFailed('registration', orderId);
+      // (G8) ADDITIONALLY resolve the durable `settle` to a Failure (`outcome:
+      // 'failed'` ⇒ a `SettleFailed` reply) — preserving the bucket `failed`
+      // flip with NO regression (Decision 7). Gated + swallowed (the bucket is
+      // the authority).
+      yield* settleOrder(orderId, 'failed', session.value.id);
       return status(200);
     }
 
@@ -121,8 +225,15 @@ export const action = routeAction(function* () {
     const order = yield* submissions.getOrder('registration', orderId);
     if (order.amount !== amount_total) return status(400);
 
-    // (6) Paid + amounts match ⇒ flip to paid (idempotent on replay) and ack 200.
+    // (6) Paid + amounts match ⇒ flip to paid (idempotent on replay) — the
+    // bucket RECEIPT AUTHORITY, unchanged.
     yield* submissions.markOrderPaid('registration', orderId);
+    // (7, G8) ADDITIONALLY drive the durable Order `settle` (`outcome: 'paid'`)
+    // so the durable lifecycle advances `pending → paid` and the runner mirrors
+    // the bucket flip into actor State. Gated on `Env.database` Some + swallowed
+    // (the bucket flip already earned the 200). Idempotent on replay (encore
+    // dedup, `paidAt` byte-identical).
+    yield* settleOrder(orderId, 'paid', session.value.id);
     return status(200);
   }).pipe(
     Effect.catchTags({
@@ -133,6 +244,21 @@ export const action = routeAction(function* () {
       // The on-site path is unconfigured (`Env.stripe` None) ⇒ the endpoint is
       // inert: 503, so Stripe backs off until the gate flips.
       'Payment.Disabled': () => Effect.succeed(status(503)),
+      // (F3, --deep MAJOR) The durable `settle` `send` FAILED to persist — the
+      // SQL mailbox row never landed (a SQL/`PersistenceError`/`MailboxError`
+      // fault, a full mailbox, or a concurrent processing claim). The bucket may
+      // have already flipped paid/failed, but with NO durable settle the runner
+      // has nothing to reconcile, so this MUST NOT 200: a 502 lets Stripe RETRY
+      // until the `send` lands. The retry is a safe no-op on the already-flipped
+      // bucket (the `canTransition` identity case, F1), so it re-drives only the
+      // `send`. These four tags are `Entity.settle.send`'s declared error set
+      // (`Order.SettleSendError`); they reach this `catchTags` ONLY from the
+      // pre-observation `send`, never the swallowed post-send `waitFor`.
+      'effect-encore/actor-mailbox/MailboxError': () =>
+        Effect.succeed(status(502)),
+      PersistenceError: () => Effect.succeed(status(502)),
+      MailboxFull: () => Effect.succeed(status(502)),
+      AlreadyProcessingMessage: () => Effect.succeed(status(502)),
     }),
   );
 });

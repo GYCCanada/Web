@@ -1,9 +1,14 @@
 export * as Submissions from './submissions.server';
 
-import { Clock, Context, DateTime, Effect, Layer, Schema } from 'effect';
+import { Clock, Context, DateTime, Effect, Layer, Option, Schema } from 'effect';
 
 import { Content } from '../content.server';
-import { type FormId, orderKey, submissionKey } from '../content/pages/registry';
+import {
+  type FormId,
+  orderKey,
+  ordersPrefix,
+  submissionKey,
+} from '../content/pages/registry';
 import {
   deterministicListItemId,
   IsoDate,
@@ -12,8 +17,11 @@ import {
 } from '../content/schema';
 import { type NotFound, Storage, type StorageError } from '../storage.server';
 
+import { canTransition } from '../order/transitions';
+
 import type { DecodedForm } from './decode';
 import { RegistrationOrder } from './order';
+import { OrderConflict } from './order-conflict';
 import {
   type PaymentState,
   submissionSchema,
@@ -64,6 +72,30 @@ import {
  * a submission must never look like success.
  */
 
+/**
+ * The outcome of committing a registration resubmit through
+ * `createOrReuseOrder` (order-workflow round-2 --deep H1). A closed union so the
+ * action branches exhaustively:
+ *
+ *   - `created`: a fresh pending order. The action `arm`s it AND stamps each
+ *     registrant `pending` for the first time.
+ *   - `reused`: the live pending order is reused (its replayed session). The
+ *     ORDER itself is NOT overwritten, but the action DOES re-stamp the
+ *     registrants `pending` — a byte-identical idempotent re-stamp that
+ *     self-heals a prior submit that wrote the order but failed mid-stamp-loop
+ *     (round-3 --deep BLOCKER 2; restamp paths registration-action.ts:420-438,
+ *     :538-555). It is NOT re-`arm`ed (the first submit already armed it).
+ *   - `alreadyPaid`: returns the existing success/receipt WITHOUT minting a
+ *     session, WITHOUT overwriting the paid order, and WITHOUT touching the
+ *     registrant stamps (the action skips the stamp loop entirely).
+ *
+ * `OrderConflict` (case d) is a failure, not an outcome.
+ */
+export type OrderCreateOutcome =
+  | { readonly _tag: 'created'; readonly order: RegistrationOrder }
+  | { readonly _tag: 'reused'; readonly order: RegistrationOrder }
+  | { readonly _tag: 'alreadyPaid'; readonly order: RegistrationOrder };
+
 /** Format a UTC millisecond instant as a `YYYY-MM-DD` calendar-date string. */
 const isoDateString = (millis: number): string =>
   DateTime.formatIso(DateTime.makeUnsafe(millis)).slice(0, 10);
@@ -76,20 +108,26 @@ export class Service extends Context.Service<
   {
     /**
      * Persist one decoded form as a durable `Submission` object and return the
-     * stored record. Stamps `submittedAt` with the current calendar date, encodes
-     * the envelope + the definition-derived payload to JSON, and `Storage.put`s it
-     * at `submissions/<form>/<id>.json`. Persistence ONLY — the notification is a
-     * separate step (Branch 7.3); `persist` returning the record before any
-     * notification runs is what makes the record durable across a notify failure.
+     * stored record. Stamps `submittedAt` with the current calendar date for a
+     * genuinely NEW record, encodes the envelope + the definition-derived payload
+     * to JSON, and `Storage.put`s it at `submissions/<form>/<id>.json`. Persistence
+     * ONLY — the notification is a separate step (Branch 7.3); `persist` returning
+     * the record before any notification runs is what makes the record durable
+     * across a notify failure.
      *
      * `idempotencyKey` (optional) makes the write retry-safe: when supplied, the
      * record's `id` is **derived deterministically** from it (`deterministicListItemId`)
      * instead of a fresh random nanoid, so persisting the same logical record twice
      * (e.g. a user retrying a partially-failed multi-registrant registration) writes
      * to the SAME bucket key and overwrites rather than minting a duplicate object.
-     * Omit it for single-record submissions (contact/volunteer) where each submit is
-     * a genuinely new record. The caller owns what makes a record "the same"
-     * (registration scopes by per-request fingerprint + registrant index).
+     * A keyed overwrite that finds a prior record at that key is **byte-identical**:
+     * it preserves BOTH the existing record's `payment` lifecycle AND its original
+     * `submittedAt` (a verbatim resubmit TOMORROW must not re-stamp a fresh clock
+     * date — round-4 --deep MAJOR), so only a genuinely new record takes a fresh
+     * `submittedAt`. Omit the key for single-record submissions (contact/volunteer)
+     * where each submit is a genuinely new record. The caller owns what makes a
+     * record "the same" (registration scopes by per-request fingerprint +
+     * registrant index).
      */
     readonly persist: (
       form: FormId,
@@ -111,6 +149,86 @@ export class Service extends Context.Service<
       form: FormId,
       order: RegistrationOrder,
     ) => Effect.Effect<RegistrationOrder, StorageError>;
+    /**
+     * Resolve the order SLOT a same-payload registration resubmit must land on
+     * (order-workflow round-2 --deep H1). The deterministic `baseOrderId` (the
+     * request fingerprint, possibly `:index`) is stable across a verbatim
+     * resubmit, so a naive `persistOrder` at that key would silently OVERWRITE
+     * whatever order already lives there — including an already-PAID order
+     * (restamping its registrants `pending`, the F1 resurrection class through
+     * the CREATE path) or a non-paid TERMINAL (cancelled/expired/refunded/failed)
+     * the user is legitimately re-registering after.
+     *
+     * This reads the order(s) at `baseOrderId` FIRST and returns the slot the
+     * resubmit should use, WITHOUT writing anything:
+     *
+     *   - the LIVE order at `baseOrderId` is `pending` or `paid` ⇒ that
+     *     generation is still the active one; the caller reuses it (case (b)
+     *     pending reuse / case (a) already-paid). `existing` is `Some(order)`,
+     *     `orderId` is `baseOrderId`.
+     *   - the order at `baseOrderId` is a non-paid TERMINAL (case (c)) ⇒ it is a
+     *     DEAD order the user is re-registering past. A new pending must NOT
+     *     overwrite it, and it cannot reuse the same key, so this walks to the
+     *     NEXT free generation (`baseOrderId#g1`, `#g2`, …) — the lowest
+     *     generation whose slot is absent OR live — and returns THAT as the fresh
+     *     `orderId` (`existing` `None`). Deterministic: a verbatim resubmit
+     *     re-walks the same dead terminals to the same generation, so it
+     *     idempotently lands on the same fresh slot (no runaway generations).
+     *   - no order at `baseOrderId` at all ⇒ a first submission; `orderId` is
+     *     `baseOrderId`, `existing` `None`.
+     *
+     * The caller mints its Checkout session keyed off the RETURNED `orderId` (so
+     * a fresh generation gets a fresh session, and a reuse replays the same one)
+     * and then commits through {@link createOrReuseOrder}.
+     */
+    readonly resolveOrderSlot: (
+      form: FormId,
+      baseOrderId: string,
+    ) => Effect.Effect<
+      { readonly orderId: string; readonly existing: Option.Option<RegistrationOrder> },
+      StorageError
+    >;
+    /**
+     * Commit a registration resubmit against the slot {@link resolveOrderSlot}
+     * resolved, implementing the CONFIRMED resubmit UX (order-workflow round-2
+     * --deep H1). The caller passes the freshly-built `proposed` order (carrying
+     * the resolved `orderId` + the just-minted `sessionId`); this re-reads the
+     * order at `proposed.orderId` to decide:
+     *
+     *   - absent ⇒ write `proposed` as a fresh `pending` order; outcome
+     *     `{ _tag: 'created' }`. The caller stamps registrants `pending` + arms.
+     *   - existing `paid` ⇒ do NOT overwrite the order; outcome
+     *     `{ _tag: 'alreadyPaid', order }` carrying the EXISTING paid order. The
+     *     caller returns the existing success/receipt (case (a)) and skips the
+     *     registrant stamp loop entirely.
+     *   - existing `pending` whose frozen fields MATCH `proposed`
+     *     (amount/currency/receiptEmail/mode/registrantIds) ⇒ idempotent retry;
+     *     do NOT overwrite the order; outcome `{ _tag: 'reused', order }`
+     *     carrying the EXISTING order (case (b)). The caller reuses the replayed
+     *     session AND re-stamps the registrants `pending` (a byte-identical
+     *     idempotent re-stamp that self-heals a prior submit which wrote the
+     *     order but failed mid-stamp-loop — round-3 --deep BLOCKER 2).
+     *   - existing `pending` whose frozen fields CONFLICT ⇒ fail with
+     *     {@link OrderConflict} (case (d)).
+     *   - existing non-paid TERMINAL ⇒ this is unreachable on the happy path
+     *     ({@link resolveOrderSlot} already walked past a dead terminal to a fresh
+     *     generation), but if a terminal somehow lands here it is treated as a
+     *     hard guard violation and FAILS `OrderConflict` rather than overwriting —
+     *     NEVER restamp a terminal order back to `pending`.
+     *
+     * The ORDER write is a single `persistOrder` on the `created` path only; a
+     * `paid`/`reused` outcome performs NO order write at all (the order is reused
+     * in place, byte-identical idempotent resubmit). The registrant `pending`
+     * re-stamp on the `reused` path is a SEPARATE caller step
+     * (registration-action.ts:420-438, :538-555), not part of this method. This is
+     * the CREATE-path analog of the `markOrder*` `canTransition` guards (F1) — the
+     * resubmit can never resurrect a terminal order nor restamp a settled ORDER's
+     * status back to `pending`.
+     */
+    readonly createOrReuseOrder: (
+      form: FormId,
+      proposed: RegistrationOrder,
+    ) => Effect.Effect<OrderCreateOutcome, StorageError | OrderConflict>;
     /**
      * Stamp a `PaymentState` onto an already-persisted registrant `Submission`
      * (`submissions/<form>/<id>.json`) and return the updated record. Re-reads the
@@ -145,6 +263,23 @@ export class Service extends Context.Service<
       orderId: string,
     ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
     /**
+     * List every frozen order of a form (the objects under `ordersPrefix(form)`
+     * = `submissions/<form>/orders/`), decoding each back to a
+     * `RegistrationOrder`. The deadline sweep (order-workflow G9) lists the
+     * pending orders past their `deadline` to `expire` them; this is the read
+     * half (the sweep filters + dispatches). The `orders/` prefix nests UNDER the
+     * form's submission root but the registrant submissions sit one level up
+     * (`submissions/<form>/<id>.json`, NOT under `orders/`), so this returns
+     * orders ONLY — never a registrant record. A stored order ALWAYS decodes (it
+     * was written by `persistOrder` from this same schema), so a decode failure
+     * is bucket corruption and dies (mirroring `getOrder`), never a soft skip
+     * that would silently drop an order from the sweep. `StorageError` on a
+     * bucket-list fault.
+     */
+    readonly listOrders: (
+      form: FormId,
+    ) => Effect.Effect<readonly RegistrationOrder[], StorageError>;
+    /**
      * Flip the order at `submissions/<form>/orders/<orderId>.json` to `paid` AND
      * stamp each registrant submission it names (`registrantIds`) `paid` in
      * lock-step, returning the resulting order (registrar plan C8 :904 — "mark
@@ -177,6 +312,47 @@ export class Service extends Context.Service<
      * registrant is never downgraded either). Same failure channel.
      */
     readonly markOrderFailed: (
+      form: FormId,
+      orderId: string,
+    ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
+    /**
+     * Flip the order to `cancelled` AND stamp each registrant it names
+     * `cancelled` in lock-step, returning the order (the durable Order actor's
+     * operator/abandon `cancel` op, G5/G7). ONLY a `pending` order transitions —
+     * the same never-downgrade-a-terminal guard as {@link markOrderFailed}: a
+     * `paid`/`failed`/`expired`/`refunded` order is left untouched (and its
+     * registrants with it). `cancelled` is DISTINCT from `failed` (operator
+     * abandon vs Stripe `async_payment_failed`). Idempotent in the same shape: a
+     * re-flip of an already-`cancelled` order returns it unchanged and re-stamps
+     * each registrant byte-identically. Same failure channel.
+     */
+    readonly markOrderCancelled: (
+      form: FormId,
+      orderId: string,
+    ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
+    /**
+     * Flip the order to `expired` AND stamp each registrant it names `expired` in
+     * lock-step, returning the order (the deadline-sweep `expire` op, G7). ONLY a
+     * `pending` order transitions — a settled (`paid`) or otherwise-terminal
+     * order is never swept. Idempotent like {@link markOrderCancelled}.
+     */
+    readonly markOrderExpired: (
+      form: FormId,
+      orderId: string,
+    ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
+    /**
+     * Flip the order to `refunded` AND stamp each registrant it names `refunded`
+     * in lock-step, returning the order (the `refund` op, G7 — the only
+     * transition reachable FROM `paid`). ONLY a `paid` order transitions; a
+     * `pending`/`failed`/`expired`/`cancelled` order is left untouched (refunding
+     * an unsettled order is meaningless). The refund's calendar date
+     * (`refundedAt`) is FROZEN onto the order the instant it transitions and
+     * never re-stamped — so a re-flip on a LATER date re-reads it rather than the
+     * clock, and each registrant's `refundedAt` derives FROM the order's frozen
+     * stamp (`derive-dont-sync`), byte-identical on every replay. Same failure
+     * channel.
+     */
+    readonly markOrderRefunded: (
       form: FormId,
       orderId: string,
     ) => Effect.Effect<RegistrationOrder, StorageError | NotFound>;
@@ -215,14 +391,53 @@ export const layer = Layer.effect(
         idempotencyKey === undefined
           ? newListItemId()
           : deterministicListItemId(`${form}:${idempotencyKey}`);
-      // `submittedAt` round-trips through the branded `IsoDate`: a clock-derived
-      // `YYYY-MM-DD` is always a real calendar date, so a decode failure here is a
-      // bug, not a user error — it dies rather than masquerading as a failure.
-      const submittedAt = yield* decodeIsoDate(isoDateString(now)).pipe(
+      // A clock-derived `submittedAt` for a genuinely NEW record. Round-trips
+      // through the branded `IsoDate`: a clock-derived `YYYY-MM-DD` is always a
+      // real calendar date, so a decode failure here is a bug, not a user error —
+      // it dies rather than masquerading as a failure. NOT necessarily the value
+      // that lands: a keyed resubmit that finds a prior record PRESERVES that
+      // record's `submittedAt` (see below), so this fresh stamp is only used when
+      // there is no existing record at this deterministic key.
+      const freshSubmittedAt = yield* decodeIsoDate(isoDateString(now)).pipe(
         Effect.orDie,
       );
 
-      const submission: Submission = { id, form, submittedAt, payload: decoded };
+      // PRESERVE an already-stamped record's `payment` lifecycle AND its original
+      // `submittedAt` on an idempotent overwrite (order-workflow round-2 --deep H1
+      // / round-4 --deep MAJOR). With an `idempotencyKey` a verbatim resubmit
+      // re-derives the SAME id and OVERWRITES the existing record. Two fields must
+      // survive that overwrite for a resubmit to be byte-identical:
+      //
+      //   - `payment`: the order/webhook flow may have already stamped that
+      //     registrant `pending`/`paid`/… (`setRegistrantPayment`). A naive
+      //     overwrite would write a fresh record with NO `payment`, silently
+      //     WIPING the paid stamp.
+      //   - `submittedAt`: it is a CLOCK read, so recomputing it on every persist
+      //     would make a verbatim resubmit TOMORROW produce a DIFFERENT calendar
+      //     date — the registrant envelope would churn day-to-day even though
+      //     nothing logical changed and `payment`/order were preserved. The
+      //     original record's `submittedAt` is when the registration was actually
+      //     made, so it is the value that must persist across same-key resubmits.
+      //
+      // So a keyed persist re-reads any prior record once and carries BOTH fields
+      // forward; only a genuinely new record (no prior at this key, or a keyless
+      // single-record form) takes the fresh clock-stamped `submittedAt`.
+      const existing: Submission | undefined =
+        idempotencyKey === undefined
+          ? undefined
+          : yield* readSubmissionOption(form, id).pipe(
+              Effect.map((record) =>
+                Option.isSome(record) ? record.value : undefined,
+              ),
+            );
+
+      const submittedAt = existing?.submittedAt ?? freshSubmittedAt;
+      const existingPayment = existing?.payment;
+
+      const submission: Submission =
+        existingPayment === undefined
+          ? { id, form, submittedAt, payload: decoded }
+          : { id, form, submittedAt, payload: decoded, payment: existingPayment };
 
       // A decoded `Submission` ALWAYS re-encodes through its derived codec; a
       // failure here is an upstream bug (a `decoded` that never came from
@@ -259,6 +474,19 @@ export const layer = Layer.effect(
         text,
       ).pipe(Effect.orDie);
     });
+
+    // `readSubmission`'s Option flavour: a missing record is a benign absence
+    // (`None`), not a `NotFound` — `persist` uses it to discover whether an
+    // idempotent overwrite has a prior record whose `payment` lifecycle must be
+    // carried forward (H1). A real `StorageError` still propagates.
+    const readSubmissionOption = Effect.fn('Submissions.readSubmissionOption')(
+      function* (form: FormId, id: ListItemId) {
+        return yield* readSubmission(form, id).pipe(
+          Effect.map(Option.some<Submission>),
+          Effect.catchTag('Storage.NotFound', () => Effect.succeedNone),
+        );
+      },
+    );
 
     const setRegistrantPayment = Effect.fn('Submissions.setRegistrantPayment')(
       function* (form: FormId, id: ListItemId, payment: PaymentState) {
@@ -320,10 +548,170 @@ export const layer = Layer.effect(
       )(text).pipe(Effect.orDie);
     });
 
+    // `readOrder`'s Option flavour for the resubmit guard: a missing order is a
+    // benign absence (`None`), not a user-facing `NotFound` — `resolveOrderSlot`
+    // probes generations expecting most to be absent. A real `StorageError` (a
+    // bucket fault) still propagates; only the `NotFound` is folded to `None`.
+    const readOrderOption = Effect.fn('Submissions.readOrderOption')(function* (
+      form: FormId,
+      orderId: string,
+    ) {
+      return yield* readOrder(form, orderId).pipe(
+        Effect.map(Option.some<RegistrationOrder>),
+        Effect.catchTag('Storage.NotFound', () => Effect.succeedNone),
+      );
+    });
+
+    // A non-paid TERMINAL order is a DEAD slot the resubmit must walk past
+    // (cancelled/expired/refunded/failed). `pending` is live (reuse), `paid` is
+    // live-and-settled (return the receipt) — neither is "dead". The transition
+    // table is the source of truth for terminality, but the resubmit's branch is
+    // status-shaped (live-pending / live-paid / dead-terminal), so it reads the
+    // status directly here rather than `canTransition` (which answers a different
+    // question — "may from→to flip").
+    const isDeadTerminal = (status: RegistrationOrder['status']): boolean =>
+      status === 'cancelled' ||
+      status === 'expired' ||
+      status === 'refunded' ||
+      status === 'failed';
+
+    // Resolve the generation a resubmit lands on (H1 case (c)). Walk
+    // `baseOrderId`, `baseOrderId#g1`, `#g2`, … until the slot is absent OR live
+    // (pending/paid): a dead terminal at a generation means the user re-registered
+    // past it, so the next generation is the fresh slot. Deterministic — a
+    // verbatim resubmit re-walks the same dead terminals to the same generation,
+    // so it never runs away minting new generations. The cap is a safety bound
+    // (a real submission re-registering hundreds of times is pathological); it
+    // dies loudly rather than looping unbounded.
+    const generationOrderId = (baseOrderId: string, generation: number): string =>
+      generation === 0 ? baseOrderId : `${baseOrderId}#g${generation}`;
+    const MAX_GENERATIONS = 1000;
+    const resolveOrderSlot = Effect.fn('Submissions.resolveOrderSlot')(
+      function* (form: FormId, baseOrderId: string) {
+        for (let generation = 0; generation < MAX_GENERATIONS; generation += 1) {
+          const orderId = generationOrderId(baseOrderId, generation);
+          const existing = yield* readOrderOption(form, orderId);
+          // Absent ⇒ a fresh slot at this generation.
+          if (Option.isNone(existing)) {
+            return { orderId, existing: Option.none<RegistrationOrder>() };
+          }
+          // Live (pending/paid) ⇒ this generation is the active one; reuse it.
+          if (!isDeadTerminal(existing.value.status)) {
+            return { orderId, existing };
+          }
+          // Dead terminal ⇒ walk to the next generation.
+        }
+        return yield* Effect.die(
+          new Error(
+            `resolveOrderSlot exhausted ${MAX_GENERATIONS} generations for ${baseOrderId}`,
+          ),
+        );
+      },
+    );
+
+    // Compare the frozen fields a resubmit must agree on with a live `pending`
+    // order to be an idempotent retry (H1 case (b) vs (d)). The session id is
+    // DELIBERATELY excluded: a verbatim resubmit replays the SAME Stripe session
+    // (idempotency key), so a matching resubmit re-mints the same `sessionId`, but
+    // the equality that decides reuse-vs-conflict is the MONEY + receipt routing
+    // (amount/currency/receiptEmail/mode) and which registrants the order pays for
+    // — those are what must never be silently overwritten. Returns the first
+    // disagreeing field name, or `undefined` when every frozen field matches.
+    const conflictReason = (
+      existing: RegistrationOrder,
+      proposed: RegistrationOrder,
+    ): string | undefined => {
+      if (existing.mode !== proposed.mode) return 'mode';
+      if (existing.amount !== proposed.amount) return 'amount';
+      if (existing.currency !== proposed.currency) return 'currency';
+      if (existing.receiptEmail !== proposed.receiptEmail) return 'receiptEmail';
+      if (
+        existing.registrantIds.length !== proposed.registrantIds.length ||
+        existing.registrantIds.some((id, i) => id !== proposed.registrantIds[i])
+      ) {
+        return 'registrantIds';
+      }
+      return undefined;
+    };
+
+    const createOrReuseOrder = Effect.fn('Submissions.createOrReuseOrder')(
+      function* (form: FormId, proposed: RegistrationOrder) {
+        const existing = yield* readOrderOption(form, proposed.orderId);
+        // No order at this slot ⇒ write the fresh `pending` order.
+        if (Option.isNone(existing)) {
+          const order = yield* persistOrder(form, proposed);
+          return { _tag: 'created', order } satisfies OrderCreateOutcome;
+        }
+        const current = existing.value;
+        // Already PAID (case a) ⇒ return the existing receipt; NEVER overwrite or
+        // restamp. The action skips the session + the registrant restamp.
+        if (current.status === 'paid') {
+          return { _tag: 'alreadyPaid', order: current } satisfies OrderCreateOutcome;
+        }
+        // A non-paid TERMINAL must never reach here — `resolveOrderSlot` already
+        // walked past it to a fresh generation. If one does (a caller that bypassed
+        // the slot resolver), fail rather than overwrite it back to `pending`.
+        if (isDeadTerminal(current.status)) {
+          return yield* new OrderConflict({
+            orderId: proposed.orderId,
+            reason: `terminal order (${current.status}) cannot be reused`,
+          });
+        }
+        // Live `pending`: idempotent retry iff the frozen fields match (case b);
+        // a fingerprint collision with disagreeing fields fails explicitly (case
+        // d). Either way the existing ORDER is NOT overwritten here. (On the
+        // matching `reused` path the CALLER still re-stamps the registrants
+        // `pending` — a byte-identical self-heal — but that is its own step, not
+        // this method's; see registration-action.ts:420-438, :538-555.)
+        const reason = conflictReason(current, proposed);
+        if (reason !== undefined) {
+          return yield* new OrderConflict({ orderId: proposed.orderId, reason });
+        }
+        return { _tag: 'reused', order: current } satisfies OrderCreateOutcome;
+      },
+    );
+
+    // List every frozen order under `ordersPrefix(form)` and decode each. The
+    // sweep (G9) reads this to find pending orders past their deadline. A stored
+    // order ALWAYS decodes (written by `persistOrder` from this same schema), so
+    // a decode failure is bucket corruption and dies — never a soft skip that
+    // would silently drop an order from the sweep. The `orders/` prefix returns
+    // ORDERS ONLY (registrant submissions sit one level up, not under it).
+    const decodeOrder = Schema.decodeUnknownEffect(
+      Schema.fromJsonString(RegistrationOrder),
+    );
+    const listOrders = Effect.fn('Submissions.listOrders')(function* (
+      form: FormId,
+    ) {
+      const listed = yield* storage.list(ordersPrefix(form));
+      const orders = yield* Effect.forEach(listed, (object) =>
+        Effect.gen(function* () {
+          const stored = yield* storage.get(object.key);
+          const text = yield* Effect.promise(() =>
+            new Response(stored.stream).text(),
+          );
+          return yield* decodeOrder(text).pipe(Effect.orDie);
+        }).pipe(
+          Effect.map(Option.some<RegistrationOrder>),
+          // An order LISTED then `get`-missed is a benign TOCTOU race (it was
+          // deleted between the list and the read) — skip it rather than failing
+          // the whole sweep, keeping the channel `StorageError` (the list/get
+          // bucket fault), never `NotFound`.
+          Effect.catchTag('Storage.NotFound', () => Effect.succeedNone),
+        ),
+      );
+      return orders.flatMap((order) =>
+        Option.isSome(order) ? [order.value] : [],
+      );
+    });
+
     // Read-flip-persist over BOTH the order AND the registrant submissions it names
     // (`registrantIds`), idempotent end-to-end. `guard` decides which current order
-    // statuses may transition: `markOrderPaid` flips from any non-`paid` state;
-    // `markOrderFailed` refuses to downgrade an already-`paid` order. When the guard
+    // statuses may transition: `markOrderPaid` settles ONLY a `pending` order to
+    // `paid` (the G4 `canTransition` table — a late completion on an
+    // `expired`/`cancelled`/`refunded`/`failed` terminal is rejected, never
+    // resurrected); `markOrderFailed` likewise gates on `canTransition` and refuses
+    // to downgrade an already-`paid` order. When the guard
     // forbids the transition AND the order is not already at `target`, NOTHING is
     // touched (a paid order's registrants are never downgraded by a stray failure).
     //
@@ -383,18 +771,26 @@ export const layer = Layer.effect(
       form: FormId,
       orderId: string,
     ) {
-      // Any non-`paid` order (pending/failed/expired) may settle to `paid`: a
-      // confirmed charge is authoritative over an earlier non-terminal state. The
-      // settled-on calendar date (`paidAt`) is FROZEN onto the order the instant it
-      // transitions and never re-stamped, so a webhook replay on a LATER date
-      // re-reads it rather than the clock. Each registrant is stamped `paid` with
-      // the order's frozen mode/amount/currency plus that frozen `paidAt` —
+      // ONLY a `pending` order may settle to `paid` (the G4 transition table —
+      // `canTransition(current, 'paid')`, the SINGLE source of truth in
+      // `order/transitions.ts`; an already-`paid` order re-flips idempotently via
+      // the identity case). A late `checkout.session.completed` racing an
+      // `expired`/`cancelled`/`refunded`/`failed` terminal must NOT resurrect the
+      // order to `paid` (a money/support hazard) — the guard rejects it, leaving
+      // the terminal order AND its registrant stamps untouched. This guard runs at
+      // the BUCKET authority, so the webhook's direct `markOrderPaid` call honors
+      // the table BEFORE any bucket flip, even though the durable `settle` op also
+      // consults the same predicate (no second source of truth, no resurrection).
+      // The settled-on calendar date (`paidAt`) is FROZEN onto the order the
+      // instant it transitions and never re-stamped, so a webhook replay on a LATER
+      // date re-reads it rather than the clock. Each registrant is stamped `paid`
+      // with the order's frozen mode/amount/currency plus that frozen `paidAt` —
       // byte-identical on every replay (the idempotency invariant the webhook owes).
       return yield* flipStatus(
         form,
         orderId,
         'paid',
-        () => true,
+        (current) => canTransition(current, 'paid'),
         // Read the clock ONCE, here, on the real transition only — a replay
         // re-reads the already-`paid` order verbatim and never enters this branch,
         // so `paidAt` cannot drift across deliveries.
@@ -435,15 +831,21 @@ export const layer = Layer.effect(
       form: FormId,
       orderId: string,
     ) {
-      // Never downgrade a `paid` order: a completed session already reconciled it,
-      // so a stray later failure for the same session is ignored (the `guard`).
-      // Each registrant is stamped `failed`, carrying the order link + a short
-      // reason (no amount/paidAt — there is nothing settled).
+      // ONLY a `pending` order may flip to `failed` (the G4 transition table —
+      // `canTransition(current, 'failed')`, the SINGLE source of truth in
+      // `order/transitions.ts`; an already-`failed` order re-flips idempotently via
+      // the identity case). A stray `async_payment_failed` racing an
+      // `expired`/`cancelled`/`refunded`/`paid` terminal must NOT overwrite it —
+      // the guard rejects it, leaving the terminal order AND its registrant stamps
+      // untouched (the documented legal transitions are `pending → failed` plus
+      // identity ONLY; `paid` was always protected, and now every other terminal
+      // is too). Each registrant is stamped `failed`, carrying the order link + a
+      // short reason (no amount/paidAt — there is nothing settled).
       return yield* flipStatus(
         form,
         orderId,
         'failed',
-        (current) => current !== 'paid',
+        (current) => canTransition(current, 'failed'),
         // A failed transition freezes no timestamp — there is nothing settled.
         (order) => Effect.succeed({ ...order, status: 'failed' } satisfies RegistrationOrder),
         (order) =>
@@ -456,13 +858,131 @@ export const layer = Layer.effect(
       );
     });
 
+    const markOrderCancelled = Effect.fn('Submissions.markOrderCancelled')(
+      function* (form: FormId, orderId: string) {
+        // Only a `pending` order may be cancelled — a settled (`paid`) or
+        // otherwise-terminal order is never downgraded (the same guard shape as
+        // `markOrderFailed`). Each registrant is stamped `cancelled`, carrying the
+        // order link + its frozen amount/currency (nothing was collected, so no
+        // `paidAt`).
+        return yield* flipStatus(
+          form,
+          orderId,
+          'cancelled',
+          (current) => current === 'pending',
+          // A cancellation freezes no timestamp — there is nothing settled.
+          (order) =>
+            Effect.succeed({
+              ...order,
+              status: 'cancelled',
+            } satisfies RegistrationOrder),
+          (order) =>
+            Effect.succeed({
+              _tag: 'cancelled',
+              orderId: order.orderId,
+              mode: order.mode,
+              amount: order.amount,
+              currency: order.currency,
+            } satisfies PaymentState),
+        );
+      },
+    );
+
+    const markOrderExpired = Effect.fn('Submissions.markOrderExpired')(
+      function* (form: FormId, orderId: string) {
+        // Only a `pending` order may be swept to `expired` — a settled or
+        // otherwise-terminal order is never swept.
+        return yield* flipStatus(
+          form,
+          orderId,
+          'expired',
+          (current) => current === 'pending',
+          // Expiry freezes no timestamp.
+          (order) =>
+            Effect.succeed({
+              ...order,
+              status: 'expired',
+            } satisfies RegistrationOrder),
+          (order) =>
+            Effect.succeed({
+              _tag: 'expired',
+              orderId: order.orderId,
+              mode: order.mode,
+              amount: order.amount,
+              currency: order.currency,
+            } satisfies PaymentState),
+        );
+      },
+    );
+
+    const markOrderRefunded = Effect.fn('Submissions.markOrderRefunded')(
+      function* (form: FormId, orderId: string) {
+        // ONLY a `paid` order may be refunded — the single transition reachable
+        // FROM `paid`. A `pending`/`failed`/`expired`/`cancelled` order is left
+        // untouched (refunding an unsettled order is meaningless). The refund's
+        // calendar date is FROZEN onto the order the instant it transitions and
+        // never re-stamped; each registrant's `refundedAt` derives FROM it, so a
+        // re-flip on a LATER date rewrites byte-identical records.
+        return yield* flipStatus(
+          form,
+          orderId,
+          'refunded',
+          (current) => current === 'paid',
+          // Read the clock ONCE, on the real transition only — a re-flip re-reads
+          // the already-`refunded` order verbatim and never enters this branch,
+          // so `refundedAt` cannot drift across deliveries.
+          (order) =>
+            Effect.gen(function* () {
+              const now = yield* Clock.currentTimeMillis;
+              const refundedAt = yield* decodeIsoDate(isoDateString(now)).pipe(
+                Effect.orDie,
+              );
+              return {
+                ...order,
+                status: 'refunded',
+                refundedAt,
+              } satisfies RegistrationOrder;
+            }),
+          // Derive the registrant `refundedAt` FROM the order's frozen stamp
+          // (`derive-dont-sync`), never from the clock. The settled order always
+          // carries `refundedAt` (the transition froze it, and an already-
+          // `refunded` order was written with it), so a missing value is bucket
+          // corruption and dies rather than masquerading as an undated refund.
+          (order) =>
+            Effect.gen(function* () {
+              if (order.refundedAt === undefined) {
+                return yield* Effect.die(
+                  new Error(
+                    `refunded order ${order.orderId} has no frozen refundedAt`,
+                  ),
+                );
+              }
+              return {
+                _tag: 'refunded',
+                orderId: order.orderId,
+                mode: order.mode,
+                amount: order.amount,
+                currency: order.currency,
+                refundedAt: order.refundedAt,
+              } satisfies PaymentState;
+            }),
+        );
+      },
+    );
+
     return Service.of({
       persist,
       persistOrder,
+      resolveOrderSlot,
+      createOrReuseOrder,
       setRegistrantPayment,
       getOrder: readOrder,
+      listOrders,
       markOrderPaid,
       markOrderFailed,
+      markOrderCancelled,
+      markOrderExpired,
+      markOrderRefunded,
     });
   }),
 );

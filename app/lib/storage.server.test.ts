@@ -123,7 +123,7 @@ describe('Storage.layer', () => {
   it.effect('fails with StorageUnconfigured when no bucket is configured', () =>
     Effect.gen(function* () {
       const exit = yield* Effect.exit(
-        Storage.Service.asEffect().pipe(
+        Storage.Service.pipe(
           Effect.provide(
             Storage.layer.pipe(
               Layer.provide(envFromBucketless({ NODE_ENV: 'development' })),
@@ -145,7 +145,7 @@ describe('Storage.layer', () => {
   it.effect('constructs a storage instance when the bucket is configured', () =>
     Effect.gen(function* () {
       const exit = yield* Effect.exit(
-        Storage.Service.asEffect().pipe(
+        Storage.Service.pipe(
           Effect.provide(
             Storage.layer.pipe(
               Layer.provide(

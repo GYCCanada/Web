@@ -50,6 +50,12 @@ export default [
   // middleware/loader runs ahead of it, so `request.text()` reads the RAW bytes
   // Stripe signed (HMAC verification fails on any reserialized body).
   route('api/stripe/webhook', 'routes/api.stripe-webhook.ts'),
+  // The manual deadline-sweep trigger (order-workflow G9) is a POST-only
+  // resource route OUTSIDE the `/admin` guard layout (a sibling of the webhook):
+  // it does its OWN cookie check + `Env.database` gate, so it never renders and
+  // never inherits the layout loader. An operator / external cron POSTs it to
+  // run one sweep pass on demand.
+  route('admin/orders/sweep', 'routes/admin/orders.sweep.ts'),
   layout('routes/admin/_layout.tsx', [
     route('admin', 'routes/admin/_index.tsx'),
     route('admin/content', 'routes/admin/content.tsx'),

@@ -16,6 +16,7 @@ import { Sendgrid, SendgridDisabled, SendgridError } from '~/lib/sendgrid.server
 import { Mailer, MailError } from '~/lib/mailer.server';
 import { NotFound, Storage, StorageError } from '~/lib/storage.server';
 import { Toast } from '~/lib/toast.server';
+import { Order } from '~/lib/order/runner.server';
 
 import {
   BadRequestError,
@@ -36,6 +37,12 @@ export type AppServices =
   | Payment.Service
   | Auth.Service
   | Storage.Service
+  // The durable Order workflow's SENDER seam (G6): the registration action's
+  // `arm` send (G7) and the Stripe webhook's `settle` resolve (G8) dispatch
+  // against these from the request graph. `Env.database`-gated at the build
+  // boundary (`Order.appSenderLayer`) — DB-less the inert in-memory instance is
+  // never reached by a (likewise-gated) sender.
+  | Order.SenderServices
   | Toast;
 export type AppError =
   | Response
@@ -99,6 +106,19 @@ export const makeAppLayer = (
   // exercised end-to-end with NO network. Defaulted so every existing caller is
   // unchanged.
   paymentLayer: Layer.Layer<Payment.Service, never, Env.Service> = Payment.layer,
+  // The Order SENDER seam — `Env.database`-gated at its build boundary, so a
+  // DB-less runtime composes the inert in-memory instance (never reached by a
+  // gated sender) and a DB runtime composes the real sender over the SAME shared
+  // sqlite FILE + `ShardingConfigLive` the `ServerLive` runner uses. Defaulted so
+  // every production/test caller is unchanged; a webhook test passes a sender
+  // built over a FAULTY `MessageStorage` (its `saveRequest` fails) to exercise the
+  // F3 `settle.send` persistence-failure → retryable-5xx path end-to-end through
+  // the real request runtime.
+  senderLayer: Layer.Layer<
+    Order.SenderServices,
+    never,
+    Env.Service
+  > = Order.appSenderLayer,
 ) => {
   const baseLayer = Layer.mergeAll(
     Mailer.layer,
@@ -111,6 +131,7 @@ export const makeAppLayer = (
     DraftEditor.layer,
     Submissions.layer,
     paymentLayer,
+    senderLayer,
   ).pipe(Layer.provideMerge(baseLayer), Layer.provideMerge(Env.layer));
 };
 

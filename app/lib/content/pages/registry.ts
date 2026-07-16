@@ -142,6 +142,18 @@ export const submissionKey = (form: FormId, id: ListItemId): string =>
 export const orderKey = (form: FormId, orderId: string): string =>
   `submissions/${form}/orders/${orderId}.json`;
 
+/**
+ * The bucket-key PREFIX every `RegistrationOrder` of a form lives under
+ * (`submissions/<form>/orders/`). The deadline sweep (order-workflow G9) lists
+ * this prefix to enumerate the form's orders without touching the registrant
+ * submissions, which sit one level UP at `submissions/<form>/<id>.json` (NOT
+ * under `orders/`) — so listing this prefix returns orders ONLY, never a
+ * registrant record. Derived from the same closed `FormId` as `orderKey` so the
+ * listing root and the per-order key can never drift apart.
+ */
+export const ordersPrefix = (form: FormId): string =>
+  `submissions/${form}/orders/`;
+
 // ---------------------------------------------------------------------------
 // Object specs (schema + default per id)
 // ---------------------------------------------------------------------------
