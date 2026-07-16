@@ -1,6 +1,8 @@
 import { Effect, Schema } from 'effect';
 import { nanoid } from 'nanoid';
 
+import { DraftText, IdListArray } from './editable-schema';
+
 /**
  * The CMS content model (CMS plan §"Content schema", decisions D2 / D5).
  *
@@ -234,25 +236,6 @@ export const newListItemId = (): ListItemId => ListItemId.make(nanoid());
  * the strict `SiteContent` and the draft variant, so the invariant holds at save
  * and at publish.
  */
-const uniqueListItemIds = Schema.makeFilter<ReadonlyArray<{ readonly id: string }>>(
-  (items) => {
-    const seen = new Set<string>();
-    for (const item of items) {
-      if (seen.has(item.id)) {
-        return `list items must have unique ids; duplicate "${item.id}"`;
-      }
-      seen.add(item.id);
-    }
-    return undefined;
-  },
-  { title: 'uniqueListItemIds' },
-);
-
-/** A `Schema.Array` of id-bearing list items carrying the unique-id invariant. */
-const IdListArray = <S extends Schema.Codec<{ readonly id: string }, unknown>>(
-  item: S,
-) => Schema.Array(item).check(uniqueListItemIds);
-
 /**
  * An ISO-8601 calendar date (`YYYY-MM-DD`). The conference data is day-granular,
  * so the document stores plain dates; the `Content` boundary (C3) widens each to
@@ -683,11 +666,6 @@ export type SiteContent = typeof SiteContent.Type;
  *     draft never tolerates a *malformed* value — only an *absent* / not-yet-typed
  *     one (`make-impossible-states-unrepresentable` still holds for what is set).
  */
-const DraftText = Schema.Struct({
-  en: Schema.optionalKey(Schema.String),
-  fr: Schema.optionalKey(Schema.String),
-});
-
 /** A draft image reference: a present `key` is still a strict `AssetKey`; `alt` may be unfilled. */
 const DraftImageRef = Schema.Struct({
   key: Schema.optionalKey(AssetKey),

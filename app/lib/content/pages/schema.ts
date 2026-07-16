@@ -1,6 +1,7 @@
 import { Effect, Schema } from 'effect';
 
 import { AssetKey, ExternalHttpsUrl, ImageRef, ListItemId, Text } from '../schema';
+import { DraftText, IdListArray } from '../editable-schema';
 
 /**
  * The per-Page + per-Form content schemas (ADR 0008, settled #5; registration-launch
@@ -105,36 +106,6 @@ export type RichText = typeof RichText.Type;
 export const richTextOf = (text: Text): RichText => [
   RichTextNode.cases.text.make({ value: text }),
 ];
-
-// ---------------------------------------------------------------------------
-// IdListArray — re-stated locally (matches the SiteContent list discipline)
-// ---------------------------------------------------------------------------
-
-/**
- * The unique-`id` invariant shared by every editable list: two items sharing an
- * id would make an id-keyed remove/reorder ambiguous (ADR 0006), so a duplicate is
- * rejected at the boundary. Mirrors `schema.ts`'s `IdListArray` so page lists carry
- * the same identity guarantee as conference / team lists.
- */
-const uniqueListItemIds = Schema.makeFilter<
-  ReadonlyArray<{ readonly id: string }>
->(
-  (items) => {
-    const seen = new Set<string>();
-    for (const item of items) {
-      if (seen.has(item.id)) {
-        return `list items must have unique ids; duplicate "${item.id}"`;
-      }
-      seen.add(item.id);
-    }
-    return undefined;
-  },
-  { title: 'uniqueListItemIds' },
-);
-
-const IdListArray = <S extends Schema.Codec<{ readonly id: string }, unknown>>(
-  item: S,
-) => Schema.Array(item).check(uniqueListItemIds);
 
 // ---------------------------------------------------------------------------
 // EnabledFlag — the decode-safe per-page visibility boolean (Feature C)
@@ -349,11 +320,6 @@ export type TeamPage = typeof TeamPage.Type;
  * them with `draftSchema === schema` and `DraftEditor` never forks
  * (`make-impossible-states-unrepresentable`: there is no laxer state to represent).
  */
-const DraftText = Schema.Struct({
-  en: Schema.optionalKey(Schema.String),
-  fr: Schema.optionalKey(Schema.String),
-});
-
 export const DraftAboutPage = Schema.Struct({
   enabled: EnabledFlag,
   title: Text,
@@ -470,4 +436,3 @@ export const DraftHomePage = Schema.Struct({
   }),
 });
 export type DraftHomePage = typeof DraftHomePage.Type;
-
