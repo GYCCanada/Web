@@ -1,6 +1,6 @@
 # Per-page content objects + per-form objects
 
-**Status:** accepted
+**Status:** partially superseded by ADR 0010
 **Supersedes:** the single-document read path established in `docs/cms-plan.md` (C2/C3),
 where all editable content lived in one `content/site.json`.
 
@@ -23,6 +23,9 @@ Schema *types* across them:
 - `content/pages/<page>.json` — one object per Page.
 - `forms/<form>.json` — one object per Form definition.
 - `submissions/<form>/<id>.json` — one object per Submission.
+
+ADR 0010 supersedes the form-definition and Submission entries above. Per-page and site
+content objects remain accepted.
 
 The `Content` service is refactored to read a **set** of objects, each with its own decode
 boundary, fallback-to-bundled-default, and independent cache-bust. A missing or empty page

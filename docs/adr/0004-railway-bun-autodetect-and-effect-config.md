@@ -4,7 +4,7 @@ Date: 2026-06-09
 
 ## Status
 
-Accepted
+Partially superseded by ADR 0009
 
 ## Context
 
@@ -28,6 +28,8 @@ Environment variables are validated today by a Zod discriminated union over `pro
    with an Effect `Config`-based service: `Config.string` for plain vars, `Config.redacted`
    for secrets (`MAIL_PASS`, `MAILCHIMP_API_KEY`). This is typed, lazy, validated, and
    satisfies the no-`process.env` rule. Matches paulo-suzanne's `Config.redacted(...)` usage.
+
+ADR 0009 supersedes decision 1 and its deployment consequences. Decision 2 remains accepted.
 
 ## Consequences
 

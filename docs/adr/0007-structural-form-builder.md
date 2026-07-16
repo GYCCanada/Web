@@ -1,6 +1,6 @@
 # Structural form-builder with equivalence-harness migration
 
-**Status:** accepted
+**Status:** partially superseded by ADR 0010
 
 ## Context
 
@@ -32,6 +32,9 @@ notification, seeding a possible future first-party registrar. For 2026 the **li
 registration channel is RegFox** (the Conference's `registrationUrl`); the on-site form is
 built and proven but not load-bearing for the launch, so a mid-flight builder cannot block
 Friday.
+
+ADR 0010 supersedes the persistence decision in the preceding paragraph. The structural
+form-builder decision and its equivalence-harness migration remain accepted.
 
 ## Consequences
 
