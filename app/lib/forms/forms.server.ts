@@ -23,11 +23,14 @@ import { formatSchemaResult } from '../effect/form-schema';
 
 import { decodeForm, definitionToSchema } from './decode';
 import { FORM_IDS, FormDefinition, FormId } from './definition';
+import * as SubmissionCommand from './submission-command';
 
-export const FormDefinitionVersionId = Schema.String.check(
-  Schema.isPattern(/^sha256:[0-9a-f]{64}$/),
-).pipe(Schema.brand('FormDefinitionVersionId'));
-export type FormDefinitionVersionId = typeof FormDefinitionVersionId.Type;
+export const FormDefinitionVersionId =
+  SubmissionCommand.FormDefinitionVersionId;
+export type FormDefinitionVersionId =
+  SubmissionCommand.FormDefinitionVersionId;
+export const IdempotencyToken = SubmissionCommand.IdempotencyToken;
+export type IdempotencyToken = SubmissionCommand.IdempotencyToken;
 
 const nanoidSchema = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9_-]{21}$/),
@@ -40,11 +43,6 @@ export const SubmissionGroupId = nanoidSchema.pipe(
   Schema.brand('SubmissionGroupId'),
 );
 export type SubmissionGroupId = typeof SubmissionGroupId.Type;
-
-export const IdempotencyToken = Schema.NonEmptyString.check(
-  Schema.isMaxLength(200),
-).pipe(Schema.brand('IdempotencyToken'));
-export type IdempotencyToken = typeof IdempotencyToken.Type;
 
 export type NonEmptyReadonlyArray<A> = readonly [A, ...ReadonlyArray<A>];
 

@@ -9,7 +9,7 @@ import { Content } from '~/lib/content.server';
 import { getEnabledPageOr404 } from '~/lib/content/page-guard.server';
 import { pageDraftKey } from '~/lib/content/pages/registry';
 import { DraftTeamPage } from '~/lib/content/pages/schema';
-import { makeAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
+import { makeTestAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { NotFoundError } from '~/lib/effect/errors';
 import { Storage } from '~/lib/storage.server';
@@ -43,7 +43,7 @@ const adminConfig = ConfigProvider.layer(
 
 /** Build the app layer (in-memory storage) with the admin config provided. */
 const makeLayer = () =>
-  Layer.provide(makeAppLayer(layerTest({})), adminConfig);
+  Layer.provide(makeTestAppLayer(layerTest({})), adminConfig);
 
 /** Build a request runtime + router context over the admin-enabled app layer. */
 const makeContext = () => {

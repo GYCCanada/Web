@@ -19,7 +19,7 @@ import {
 import { pageObjectKey } from '../app/lib/content/pages/registry';
 import { GivePage, TeamPage } from '../app/lib/content/pages/schema';
 import {
-  makeAppLayer,
+  makeTestAppLayer,
   makeRequestRuntimeFromLayer,
 } from '../app/lib/effect/runtime';
 import { layerTest } from '../app/lib/storage.test-helper';
@@ -42,7 +42,7 @@ const seed = async ({ give, team }: Seed) => {
   );
   const context = new RouterContextProvider();
   context.runtime = makeRequestRuntimeFromLayer(
-    makeAppLayer(
+    makeTestAppLayer(
       layerTest({
         [pageObjectKey('give')]: { body: giveJson },
         [pageObjectKey('team')]: { body: teamJson },

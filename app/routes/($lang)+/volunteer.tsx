@@ -7,12 +7,16 @@ import {
   useLoaderData,
 } from "react-router";
 
-import { Content } from "~/lib/content.server";
 import { readPageView } from "~/lib/content/pages/pages.server";
 import { FormProvider, useForm } from "~/lib/conform";
 import { definitionToSchema, type DecodedForm } from "~/lib/forms/decode";
 import { FormDefinition } from "~/lib/forms/definition";
+import { Forms } from "~/lib/forms/forms.server";
 import { FormFields } from "~/lib/forms/render";
+import {
+  newSubmissionCommandFields,
+  SubmissionCommandInputs,
+} from "~/lib/forms/submission-command";
 import { formAction } from "~/lib/forms/action";
 import { formValidationError } from "~/lib/effect/errors";
 import { routeHandler } from "~/lib/effect/route";
@@ -44,12 +48,14 @@ export const meta: MetaFunction = ({ params }) => {
 export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
-  const content = yield* Content.Service;
+  const forms = yield* Forms.Service;
   // 404 when the volunteer page is disabled (Feature C); else project + load form.
   const page = yield* readPageView("volunteer", locale);
+  const published = yield* forms.current("volunteer");
   return {
     page,
-    definition: yield* content.getForm("volunteer"),
+    definition: published.definition,
+    command: newSubmissionCommandFields(published.version),
   };
 });
 
@@ -131,7 +137,7 @@ export const action = formAction({
 
 export default function Index() {
   const translate = useTranslate();
-  const { page, definition: encodedDefinition } =
+  const { page, definition: encodedDefinition, command } =
     useLoaderData<typeof loader>();
 
   // The loader JSON crossed a boundary; re-decode it through `FormDefinition` so
@@ -174,6 +180,7 @@ export default function Index() {
 
       <FormProvider context={f.context}>
         <Form className="flex flex-col gap-4" method="POST" {...f.props}>
+          <SubmissionCommandInputs {...command} />
           <FormFields definition={definition} formId={f.id} />
 
           <div>

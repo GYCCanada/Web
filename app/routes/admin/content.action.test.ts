@@ -6,7 +6,7 @@ import { Auth } from '~/lib/auth.server';
 import { SITE_CONTENT_KEY } from '~/lib/content.server';
 import { defaultContent } from '~/lib/content/defaults';
 import { SiteContent } from '~/lib/content/schema';
-import { makeAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
+import { makeTestAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { Storage } from '~/lib/storage.server';
 import { layerTest } from '~/lib/storage.test-helper';
@@ -46,7 +46,7 @@ const seedSite = (): Promise<string> =>
 /** Build the app layer (in-memory storage seeded with `site.json`) + admin config. */
 const makeLayer = (seed: string) =>
   Layer.provide(
-    makeAppLayer(layerTest({ [SITE_CONTENT_KEY]: { body: seed } })),
+    makeTestAppLayer(layerTest({ [SITE_CONTENT_KEY]: { body: seed } })),
     adminConfig,
   );
 

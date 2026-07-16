@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { Effect, Result, Schema } from 'effect';
 
 import { Content } from '../content.server';
@@ -14,10 +12,12 @@ import { ReactRouterContext } from '../effect/router-context';
 import { Mailer } from '../mailer.server';
 import { Toast } from '../toast.server';
 
-import { definitionToSchema } from './decode';
 import type { SuccessToast } from './action';
-import type { Submission } from './submission';
-import { Submissions } from './submissions.server';
+import { Forms } from './forms.server';
+import {
+  FORM_VERSION_FIELD,
+  IDEMPOTENCY_TOKEN_FIELD,
+} from './submission-command';
 
 /**
  * The registration server action (registration-launch Branch 7.3 — registration's
@@ -68,7 +68,7 @@ import { Submissions } from './submissions.server';
  */
 export interface RegistrationActionConfig<E> {
   readonly notify: (
-    submissions: ReadonlyArray<Submission>,
+    submissions: ReadonlyArray<Forms.Submission<'registration'>>,
   ) => Effect.Effect<
     void,
     E,
@@ -88,55 +88,57 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
   routeFormAction(function* () {
     const { url } = yield* ReactRouterContext;
     const submission = yield* SubmissionContext;
-    const content = yield* Content.Service;
-    const submissions = yield* Submissions.Service;
+    const forms = yield* Forms.Service;
     const toast = yield* Toast;
 
-    const definition = yield* content.getForm('registration');
-
-    // The registrant-array shell is registration's own concern (registration-spec
-    // §"Scope boundary"): the engine owns ONE registrant's graph, the route owns
-    // the `{ registrants: [...] }` envelope. Decoding the shell with the
-    // per-registrant codec keeps error paths at `registrants[n].<field>` — the
-    // conform field names the live form renders.
-    const registrantsSchema = Schema.Struct({
-      registrants: Schema.Array(definitionToSchema(definition)),
+    const commandSchema = Schema.Struct({
+      [FORM_VERSION_FIELD]: Forms.FormDefinitionVersionId,
+      [IDEMPOTENCY_TOKEN_FIELD]: Forms.IdempotencyToken,
+      registrants: Schema.NonEmptyArray(Schema.Unknown),
     });
 
-    const decoded = parseSchema(registrantsSchema, submission.payload);
+    const decoded = parseSchema(commandSchema, submission.payload);
     if (Result.isFailure(decoded)) {
       return yield* formValidationError(formatSchemaResult(decoded) ?? {});
     }
 
-    // Persist each registrant FIRST — one durable `submissions/registration/<id>.json`
-    // object apiece, written + returned before any notification runs, so a `notify`
-    // failure provably cannot lose a record (settled #8). A `StorageError` aborts the
-    // submission (losing a registrant must never look like success).
-    //
-    // Idempotency (the deep review's escalated partial-write): the loop is sequential
-    // and a `StorageError` on registrant K aborts after 0..K-1 are already durable. A
-    // user retry would otherwise re-mint fresh ids and DUPLICATE the records that did
-    // land. Scoping each registrant's id to `<request fingerprint>:<index>` makes the
-    // retry overwrite the same K objects instead: the fingerprint is a stable hash of
-    // THIS submission's payload (identical on a verbatim retry, different for a new
-    // submission even with identical data), and the index pins each registrant to its
-    // position. So retrying a group of 4 that failed at #3 re-writes #1/#2 in place and
-    // completes #3/#4 — no duplicates — while a genuinely new submission gets new ids.
-    const requestFingerprint = createHash('sha256')
-      .update(JSON.stringify(submission.payload))
-      .digest('hex');
-    const stored: Array<Submission> = [];
-    for (const [index, registrant] of decoded.success.registrants.entries()) {
-      stored.push(
-        yield* submissions.persist(
-          'registration',
-          registrant,
-          `${requestFingerprint}:${index}`,
-        ),
+    const stored = yield* forms
+      .submit({
+        form: 'registration',
+        expectedVersion: decoded.success[FORM_VERSION_FIELD],
+        idempotencyToken: decoded.success[IDEMPOTENCY_TOKEN_FIELD],
+        payloads: decoded.success.registrants,
+      })
+      .pipe(
+        Effect.catchTag('Forms.SubmissionRejected', (error) => {
+          const formErrors = error.issues.flatMap((issue) => issue.formErrors);
+          const fieldErrors = Object.fromEntries(
+            error.issues.flatMap((issue) =>
+              Object.entries(issue.fieldErrors).map(([field, messages]) => [
+                `registrants[${issue.index}].${field}`,
+                messages,
+              ]),
+            ),
+          );
+          return formValidationError({ formErrors, fieldErrors });
+        }),
+        Effect.catchTags({
+          'Forms.DefinitionAdvanced': () =>
+            formValidationError({
+              formErrors: ['registration.form.error'],
+            }),
+          'Forms.IdempotencyConflict': () =>
+            formValidationError({
+              formErrors: ['registration.form.error'],
+            }),
+          'Forms.FormNotPublished': () =>
+            formValidationError({
+              formErrors: ['registration.form.error'],
+            }),
+        }),
       );
-    }
 
-    yield* config.notify(stored);
+    yield* config.notify(stored.submissions);
 
     yield* toast.redirect(url.pathname, {
       title: config.success.title,

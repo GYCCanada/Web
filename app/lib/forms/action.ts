@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect';
+import { Effect, Schema } from 'effect';
 
 import { Content } from '../content.server';
 import type { FormId, PageId } from '../content/pages/registry';
@@ -8,15 +8,16 @@ import {
   routeFormAction,
   SubmissionContext,
 } from '../effect/form';
-import { formatSchemaResult } from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
 import type { TranslationKey } from '../localization/translations';
 import { Mailer } from '../mailer.server';
 import { Toast } from '../toast.server';
 
-import { decodeForm } from './decode';
-import type { Submission } from './submission';
-import { Submissions } from './submissions.server';
+import { Forms } from './forms.server';
+import {
+  FORM_VERSION_FIELD,
+  IDEMPOTENCY_TOKEN_FIELD,
+} from './submission-command';
 
 /**
  * The generic form action skeleton (ADR 0007; registration-launch Branch 6.2,
@@ -92,7 +93,7 @@ export interface FormActionConfig<E> {
    */
   readonly page: PageId;
   readonly notify: (
-    submission: Submission,
+    submission: Forms.Submission,
   ) => Effect.Effect<
     void,
     E,
@@ -126,24 +127,61 @@ export const formAction = <E>(config: FormActionConfig<E>) =>
     function* () {
       const { url } = yield* ReactRouterContext;
       const submission = yield* SubmissionContext;
-      const content = yield* Content.Service;
-      const submissions = yield* Submissions.Service;
+      const forms = yield* Forms.Service;
       const toast = yield* Toast;
 
-      const definition = yield* content.getForm(config.form);
+      const {
+        [FORM_VERSION_FIELD]: rawVersion,
+        [IDEMPOTENCY_TOKEN_FIELD]: rawToken,
+        ...payload
+      } = submission.payload;
+      const expectedVersion = yield* Schema.decodeUnknownEffect(
+        Forms.FormDefinitionVersionId,
+      )(rawVersion).pipe(
+        Effect.mapError(() =>
+          formValidationError({ formErrors: [`${config.form}.form.error`] }),
+        ),
+      );
+      const idempotencyToken = yield* Schema.decodeUnknownEffect(
+        Forms.IdempotencyToken,
+      )(rawToken).pipe(
+        Effect.mapError(() =>
+          formValidationError({ formErrors: [`${config.form}.form.error`] }),
+        ),
+      );
 
-      const decoded = decodeForm(definition, submission.payload);
-      if (Result.isFailure(decoded)) {
-        return yield* formValidationError(formatSchemaResult(decoded) ?? {});
-      }
+      const stored = yield* forms
+        .submit({
+          form: config.form,
+          expectedVersion,
+          idempotencyToken,
+          payloads: [payload],
+        })
+        .pipe(
+          Effect.catchTag('Forms.SubmissionRejected', (error) => {
+            const issue = error.issues[0];
+            return formValidationError({
+              formErrors: issue?.formErrors,
+              fieldErrors: issue?.fieldErrors,
+            });
+          }),
+          Effect.catchTags({
+            'Forms.DefinitionAdvanced': () =>
+              formValidationError({
+                formErrors: [`${config.form}.form.error`],
+              }),
+            'Forms.IdempotencyConflict': () =>
+              formValidationError({
+                formErrors: [`${config.form}.form.error`],
+              }),
+            'Forms.FormNotPublished': () =>
+              formValidationError({
+                formErrors: [`${config.form}.form.error`],
+              }),
+          }),
+        );
 
-      // Persist FIRST: the durable `submissions/<form>/<id>.json` object is
-      // written and returned before any notification runs, so a `notify` failure
-      // provably cannot lose the record (settled #8). A `StorageError` here aborts
-      // the submission (losing a record must never look like success).
-      const stored = yield* submissions.persist(config.form, decoded.success);
-
-      yield* config.notify(stored);
+      yield* config.notify(stored.submissions[0]);
 
       yield* toast.redirect(url.pathname, {
         title: config.success.title,

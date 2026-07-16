@@ -4,8 +4,9 @@ import { data, redirect } from 'react-router';
 import { AdminDisabled, Auth, BadPassword, Unauthorized } from '~/lib/auth.server';
 import { Content } from '~/lib/content.server';
 import { DraftEditor } from '~/lib/content/draft-editor.server';
-import { Submissions } from '~/lib/forms/submissions.server';
+import { Database } from '~/lib/database.server';
 import { Env } from '~/lib/env.server';
+import { Forms } from '~/lib/forms/forms.server';
 import { Sendgrid, SendgridDisabled, SendgridError } from '~/lib/sendgrid.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
 import { NotFound, Storage, StorageError } from '~/lib/storage.server';
@@ -26,7 +27,7 @@ export type AppServices =
   | Sendgrid.Service
   | Content.Service
   | DraftEditor.Service
-  | Submissions.Service
+  | Forms.Service
   | Auth.Service
   | Storage.Service
   | Toast;
@@ -83,6 +84,7 @@ export type AppError =
  */
 export const makeAppLayer = (
   storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
+  databaseLayer: typeof Database.layer | typeof Database.layerTest,
 ) => {
   const baseLayer = Layer.mergeAll(
     Mailer.layer,
@@ -91,16 +93,24 @@ export const makeAppLayer = (
     Content.layer,
     Auth.layer,
   ).pipe(Layer.provideMerge(storageLayer));
-  return Layer.mergeAll(DraftEditor.layer, Submissions.layer).pipe(
+  const formsLayer = Forms.layer.pipe(Layer.provide(databaseLayer));
+  return Layer.mergeAll(DraftEditor.layer, formsLayer).pipe(
     Layer.provideMerge(baseLayer),
     Layer.provideMerge(Env.layer),
   );
 };
 
+/** Build the complete app over isolated in-memory storage and PostgreSQL. */
+export const makeTestAppLayer = (
+  storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
+) => makeAppLayer(storageLayer, Database.layerTest);
+
 /** The fully-composed app layer (its error channel is `Env.layer`'s `ConfigError`). */
 export type AppLayer = ReturnType<typeof makeAppLayer>;
 
-const AppRuntime = ManagedRuntime.make(makeAppLayer(Storage.layerOptional));
+const AppRuntime = ManagedRuntime.make(
+  makeAppLayer(Storage.layerOptional, Database.layer),
+);
 
 const isResponse = (v: unknown): v is Response =>
   typeof v === 'object' && v !== null && v instanceof Response;

@@ -4,22 +4,24 @@ import { RouterContextProvider } from 'react-router';
 
 import { Schema } from 'effect';
 
-import { Content } from '../content.server';
-import {
-  defaultContactForm,
-  defaultContactPage,
-} from '../content/pages/defaults';
-import { formObjectKey, pageObjectKey } from '../content/pages/registry';
+import { defaultContactPage } from '../content/pages/defaults';
+import { pageObjectKey } from '../content/pages/registry';
 import { ContactPage } from '../content/pages/schema';
 import { formValidationError } from '../effect/errors';
-import { makeAppLayer, makeRequestRuntimeFromLayer } from '../effect/runtime';
-import { ReactRouterContext, type RouteArgs } from '../effect/router-context';
-import { Storage } from '../storage.server';
+import {
+  makeRequestRuntimeFromLayer,
+  makeTestAppLayer,
+} from '../effect/runtime';
+import type { RouteArgs } from '../effect/router-context';
 import { layerTest } from '../storage.test-helper';
 
 import { formAction } from './action';
-import { FormDefinition } from './definition';
-import type { Submission } from './submission';
+import { Forms } from './forms.server';
+import {
+  FORM_VERSION_FIELD,
+  IDEMPOTENCY_TOKEN_FIELD,
+  newSubmissionCommandFields,
+} from './submission-command';
 
 /**
  * Branch 6.2 — the generic action skeleton; Branch 7.3 — persist-then-notify.
@@ -48,8 +50,22 @@ import type { Submission } from './submission';
  * the `Mailer` are the same layers the live server provides.
  */
 
-const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
-  const body = new URLSearchParams(fields);
+const makeFormArgs = async (
+  fields: Record<string, string>,
+): Promise<RouteArgs> => {
+  const appLayer = makeTestAppLayer(layerTest({}));
+  const runtime = ManagedRuntime.make(appLayer);
+  const published = await runtime.runPromise(
+    Effect.gen(function* () {
+      return yield* (yield* Forms.Service).current('contact');
+    }),
+  );
+  const command = newSubmissionCommandFields(published.version);
+  const body = new URLSearchParams({
+    ...fields,
+    [FORM_VERSION_FIELD]: command.definitionVersion,
+    [IDEMPOTENCY_TOKEN_FIELD]: command.idempotencyToken,
+  });
   const url = 'http://localhost/contact';
   const request = new Request(url, {
     method: 'POST',
@@ -57,7 +73,7 @@ const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
   });
   const context = new RouterContextProvider();
-  context.runtime = makeRequestRuntimeFromLayer(makeAppLayer(layerTest({})));
+  context.runtime = makeRequestRuntimeFromLayer(appLayer);
   return {
     request,
     url: new URL(url),
@@ -69,7 +85,7 @@ const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
 
 describe('formAction', () => {
   it('persists, runs notify with the stored record, then redirects with the success toast', async () => {
-    let notified: Submission | undefined;
+    let notified: Forms.Submission | undefined;
     const action = formAction({
       form: 'contact',
       page: 'contact',
@@ -86,7 +102,7 @@ describe('formAction', () => {
     let thrown: unknown;
     try {
       await action(
-        makeFormArgs({
+        await makeFormArgs({
           method: 'email',
           name: 'Ada',
           email: 'ada@example.com',
@@ -127,7 +143,7 @@ describe('formAction', () => {
   // `parseSubmission` (no `stripEmptyValues`), so a present `''` is kept, exactly
   // as the browser sends it.
   it('the rendered method=phone payload (email field absent) decodes to success', async () => {
-    let notified: Submission | undefined;
+    let notified: Forms.Submission | undefined;
     const action = formAction({
       form: 'contact',
       page: 'contact',
@@ -144,7 +160,7 @@ describe('formAction', () => {
     let thrown: unknown;
     try {
       await action(
-        makeFormArgs({
+        await makeFormArgs({
           method: 'phone',
           name: 'Ada',
           phone: '123-456-7890',
@@ -180,7 +196,7 @@ describe('formAction', () => {
     // `phone` (the bug the renderer fix prevents). `parseSubmission` keeps the
     // present `''`, and the `optional: true` phone codec rejects a present blank.
     const result = await action(
-      makeFormArgs({
+      await makeFormArgs({
         method: 'email',
         name: 'Ada',
         email: 'ada@example.com',
@@ -208,7 +224,7 @@ describe('formAction', () => {
     });
 
     const result = await action(
-      makeFormArgs({
+      await makeFormArgs({
         method: 'email',
         name: 'Ada',
         email: 'ada@example.com',
@@ -218,89 +234,6 @@ describe('formAction', () => {
 
     expect(result.status).toBe('error');
     expect(result.result.error?.formErrors).toEqual(['contact.form.error']);
-  });
-
-  // settled #8 — persist-FIRST, notify-second: a notify failure provably cannot
-  // lose the record, because `Submissions.persist` ran and returned its durable
-  // object BEFORE `notify`. We build ONE app layer over a single in-memory bucket,
-  // run the action (whose notify fails) through it, then read that SAME bucket back
-  // through the same runtime and find the persisted `submissions/contact/<id>.json`.
-  it('a notify failure still leaves the persisted record on the bucket (persist-first)', async () => {
-    const storage = layerTest({});
-    const appLayer = makeAppLayer(storage);
-    const runtime = ManagedRuntime.make(appLayer);
-
-    const args = makeFormArgs({
-      method: 'email',
-      name: 'Persisted Ada',
-      email: 'ada@example.com',
-      message: 'hi',
-    });
-    // Run against the SAME runtime (so the readback sees the same in-memory
-    // bucket), providing `ReactRouterContext` exactly as the production runtime
-    // does.
-    args.context.runtime = {
-      run: (routeArgs, effect) =>
-        runtime.runPromise(
-          effect.pipe(Effect.provideService(ReactRouterContext, routeArgs)),
-        ),
-    };
-
-    const action = formAction({
-      form: 'contact',
-      page: 'contact',
-      notify: () =>
-        Effect.fail(formValidationError({ formErrors: ['contact.form.error'] })),
-      success: {
-        title: 'contact.form.success.title',
-        description: 'contact.form.success.description',
-      },
-    });
-
-    const result = await action(args);
-    expect(result.status).toBe('error');
-
-    // The record is on the bucket despite the notify failure.
-    const listed = await runtime.runPromise(
-      Effect.gen(function* () {
-        const s = yield* Storage.Service;
-        return yield* s.list('submissions/contact/');
-      }),
-    );
-    expect(listed.length).toBe(1);
-    expect(listed[0]?.key).toMatch(/^submissions\/contact\/.+\.json$/);
-  });
-
-  // Single-Storage-instance proof: `makeAppLayer` shares ONE `Storage` between
-  // `Content` and `Submissions`. A CMS-edited `forms/contact.json` seeded into the
-  // injected bucket must be visible to `Content.getForm` (the read `Submissions.
-  // persist` makes), proving Content reads through the SAME injected bucket the
-  // persist path writes to — NOT a separate baked-in `Storage.layerOptional`. If
-  // Content read through a second instance, it would fall back to the bundled
-  // default title and this assertion would fail.
-  it('Content.getForm reads the CMS-edited form from the SAME injected bucket the persist path writes to', async () => {
-    const editedTitle = 'CMS-edited contact form';
-    const edited = FormDefinition.make({
-      ...defaultContactForm,
-      title: { ...defaultContactForm.title, en: editedTitle },
-    });
-    const encodeForm = Schema.encodeUnknownEffect(
-      Schema.fromJsonString(FormDefinition),
-    );
-    const json = await Effect.runPromise(encodeForm(edited));
-
-    const storage = layerTest({ [formObjectKey('contact')]: { body: json } });
-    const runtime = ManagedRuntime.make(makeAppLayer(storage));
-
-    // Resolved through the full app runtime — the same `Content.Service` the
-    // persist path calls `getForm` on. It reads the seeded, CMS-edited object.
-    const form = await runtime.runPromise(
-      Effect.gen(function* () {
-        const content = yield* Content.Service;
-        return yield* content.getForm('contact');
-      }),
-    );
-    expect(form.title.en).toBe(editedTitle);
   });
 
   // Run a contact `formAction` whose owning page is seeded DISABLED, against the
@@ -339,7 +272,9 @@ describe('formAction', () => {
     });
     const context = new RouterContextProvider();
     context.runtime = makeRequestRuntimeFromLayer(
-      makeAppLayer(layerTest({ [pageObjectKey('contact')]: { body: pageJson } })),
+      makeTestAppLayer(
+        layerTest({ [pageObjectKey('contact')]: { body: pageJson } }),
+      ),
     );
 
     let thrown: unknown;
@@ -401,7 +336,7 @@ describe('formAction', () => {
     });
 
     const result = await action(
-      makeFormArgs({ name: 'Ada', website: 'https://spam.example' }),
+      await makeFormArgs({ name: 'Ada', website: 'https://spam.example' }),
     );
 
     expect(notifyRan).toBe(false);

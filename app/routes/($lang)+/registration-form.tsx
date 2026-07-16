@@ -7,6 +7,10 @@ import dayjs from 'dayjs';
 import { FormProvider, useForm, useFormData } from '~/lib/conform';
 import { definitionToSchema } from '~/lib/forms/decode';
 import { FormDefinition } from '~/lib/forms/definition';
+import {
+  type SubmissionCommandFields,
+  SubmissionCommandInputs,
+} from '~/lib/forms/submission-command';
 import { useTranslate } from '~/lib/localization/context';
 import { Button } from '~/ui/button';
 import { Checkbox, Checkboxes, CheckboxGroup } from '~/ui/checkbox';
@@ -185,11 +189,13 @@ export const makeDefaultRegistrant = () => ({
 export function RegistrationForm({
   year,
   definition: encodedDefinition,
+  command,
   initialRegistrants,
   actionData,
 }: {
   year: number;
   definition: typeof FormDefinition.Encoded;
+  command: SubmissionCommandFields;
   /**
    * The form's seed registrants — defaults to one blank attendee shell
    * (`makeDefaultRegistrant()`). Overridable so a test (or a future
@@ -271,6 +277,7 @@ export function RegistrationForm({
           className="flex flex-col gap-4"
           {...form.props}
         >
+          <SubmissionCommandInputs {...command} />
           {registrants.map((registrant, index) => {
             const type = liveValues[index]?.type as 'attendee' | 'exhibitor';
 

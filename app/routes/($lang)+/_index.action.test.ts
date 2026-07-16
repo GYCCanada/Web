@@ -5,7 +5,7 @@ import { RouterContextProvider } from 'react-router';
 import { defaultHomePage } from '~/lib/content/pages/defaults';
 import { pageObjectKey } from '~/lib/content/pages/registry';
 import { HomePage } from '~/lib/content/pages/schema';
-import { makeAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
+import { makeTestAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { layerTest } from '~/lib/storage.test-helper';
 
@@ -28,7 +28,7 @@ const seedDisabledHome = async (): Promise<RouteArgs['context']> => {
   );
   const context = new RouterContextProvider();
   context.runtime = makeRequestRuntimeFromLayer(
-    makeAppLayer(layerTest({ [pageObjectKey('home')]: { body: json } })),
+    makeTestAppLayer(layerTest({ [pageObjectKey('home')]: { body: json } })),
   );
   return context;
 };

@@ -1,8 +1,8 @@
 import { Effect } from 'effect';
 
 import { formValidationError } from '~/lib/effect/errors';
+import { Forms } from '~/lib/forms/forms.server';
 import { registrationAction } from '~/lib/forms/registration-action';
-import type { Submission } from '~/lib/forms/submission';
 import { Mailer } from '~/lib/mailer.server';
 
 /**
@@ -21,13 +21,18 @@ import { Mailer } from '~/lib/mailer.server';
  */
 
 /** The string value of one decoded registrant field, or `''` when absent. */
-const str = (payload: Submission['payload'], name: string): string => {
+const str = (
+  payload: Forms.Submission<'registration'>['payload'],
+  name: string,
+): string => {
   const value = payload[name];
   return typeof value === 'string' ? value : '';
 };
 
 /** One line per persisted registrant: their name, email, type, and record id. */
-const registrantLine = (submission: Submission): string => {
+const registrantLine = (
+  submission: Forms.Submission<'registration'>,
+): string => {
   const name = str(submission.payload, 'name');
   const email = str(submission.payload, 'email');
   const type = str(submission.payload, 'type');
