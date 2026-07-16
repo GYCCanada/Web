@@ -42,6 +42,7 @@ describe('Env config', () => {
       expect(Option.isNone(env.mail)).toBe(true);
       expect(Option.isNone(env.sendgrid)).toBe(true);
       expect(Option.isNone(env.bucket)).toBe(true);
+      expect(Option.isNone(env.stripe)).toBe(true);
     }).pipe(provideEnv({ NODE_ENV: 'development' })));
 
   it.effect('requires mail in production and keeps sendgrid optional', () =>
@@ -77,6 +78,34 @@ describe('Env config', () => {
       expect(Exit.isFailure(exit)).toBe(true);
     }));
 
+  it.effect('enables Stripe only when every first-party registration secret is present', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isSome(env.stripe)).toBe(true);
+      if (Option.isSome(env.stripe)) {
+        expect(Redacted.value(env.stripe.value.apiKey)).toBe('sk_test_secret');
+        expect(Redacted.value(env.stripe.value.webhookSecret)).toBe('whsec_secret');
+        expect(env.stripe.value.publicOrigin).toBe('https://gyc.ca');
+      }
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        STRIPE_API_KEY: 'sk_test_secret',
+        STRIPE_WEBHOOK_SECRET: 'whsec_secret',
+        PUBLIC_ORIGIN: 'https://gyc.ca/',
+      }),
+    ));
+
+  it.effect('collapses partial Stripe configuration to unavailable', () =>
+    Effect.gen(function* () {
+      const env = yield* Env.Service;
+      expect(Option.isNone(env.stripe)).toBe(true);
+    }).pipe(
+      provideEnv({
+        NODE_ENV: 'development',
+        STRIPE_API_KEY: 'sk_test_secret',
+      }),
+    ));
   it.effect('leaves the bucket absent in production when its vars are unset', () =>
     Effect.gen(function* () {
       const env = yield* Env.Service;

@@ -41,6 +41,12 @@ export interface BucketConfig {
   readonly region: string;
 }
 
+export interface StripeConfig {
+  readonly apiKey: Redacted.Redacted<string>;
+  readonly webhookSecret: Redacted.Redacted<string>;
+  readonly publicOrigin: string;
+}
+
 const mailConfigRequired = Config.all({
   host: Config.string('MAIL_HOST'),
   port: Config.number('MAIL_PORT'),
@@ -128,6 +134,27 @@ const bucketConfig: Config.Config<Option.Option<BucketConfig>> = Config.all({
   ),
 );
 
+const stripeConfig: Config.Config<Option.Option<StripeConfig>> = Config.all({
+  apiKey: Config.redacted('STRIPE_API_KEY').pipe(
+    Config.withDefault(Redacted.make('')),
+  ),
+  webhookSecret: Config.redacted('STRIPE_WEBHOOK_SECRET').pipe(
+    Config.withDefault(Redacted.make('')),
+  ),
+  publicOrigin: Config.string('PUBLIC_ORIGIN').pipe(
+    Config.map((value) => value.trim().replace(/\/$/, '')),
+    Config.withDefault(''),
+  ),
+}).pipe(
+  Config.map((group) =>
+    !isBlankRedacted(group.apiKey) &&
+    !isBlankRedacted(group.webhookSecret) &&
+    group.publicOrigin.length > 0
+      ? Option.some<StripeConfig>(group)
+      : Option.none(),
+  ),
+);
+
 export class Service extends Context.Service<
   Service,
   {
@@ -135,6 +162,7 @@ export class Service extends Context.Service<
     readonly mail: Option.Option<MailConfig>;
     readonly sendgrid: Option.Option<SendgridConfig>;
     readonly bucket: Option.Option<BucketConfig>;
+    readonly stripe: Option.Option<StripeConfig>;
   }
 >()('gycc/lib/env.server/Service') {}
 
@@ -155,6 +183,7 @@ export const layer = Layer.effect(
 
     const bucket = yield* bucketConfig;
     const sendgrid = yield* sendgridConfig;
+    const stripe = yield* stripeConfig;
 
     if (isProduction) {
       const mail = yield* mailConfigRequired;
@@ -163,11 +192,12 @@ export const layer = Layer.effect(
         mail: Option.some(mail),
         sendgrid,
         bucket,
+        stripe,
       });
     }
 
     const mail = yield* Config.option(mailConfigRequired);
-    return Service.of({ isProduction, mail, sendgrid, bucket });
+    return Service.of({ isProduction, mail, sendgrid, bucket, stripe });
   }),
 );
 
