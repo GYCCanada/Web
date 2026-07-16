@@ -138,6 +138,59 @@ const renderedNames = (
 };
 
 describe('registration render-level field-name + default-value parity', () => {
+  test('renders CMS-authored billing controls from the commerce shell', () => {
+    const commerce = Schema.decodeUnknownSync(FormDefinition)({
+      ...encodedRegistrationForm,
+      pricing: {
+        currency: 'cad',
+        base: 5000,
+        registrationClosesAt: '2026-08-01T04:00:00.000Z',
+        rules: [],
+        windows: [],
+      },
+      party: {
+        billingMode: {
+          label: { en: 'How would you like to pay?', fr: 'Mode de paiement' },
+          requiredMessage: 'registration.form.type.required',
+          options: {
+            group: { en: 'Pay for the group', fr: 'Payer le groupe' },
+            perRegistrant: { en: 'Each registrant pays', fr: 'Paiement individuel' },
+          },
+        },
+        payer: {
+          label: { en: 'Group payer', fr: 'Payeur du groupe' },
+          nameField: {
+            label: { en: 'Payer name', fr: 'Nom du payeur' },
+            requiredMessage: 'registration.form.name.required',
+          },
+          emailField: {
+            label: { en: 'Payer email', fr: 'Courriel du payeur' },
+            requiredMessage: 'registration.form.email.required',
+            invalidMessage: 'registration.form.email.error',
+          },
+        },
+      },
+    });
+    const Stub = createRoutesStub([
+      {
+        path: ':lang?',
+        Component: () => (
+          <LocalizationProvider translation={root.en}>
+            <RegistrationForm
+              year={2026}
+              definition={Schema.encodeSync(FormDefinition)(commerce)}
+              command={command}
+            />
+          </LocalizationProvider>
+        ),
+      },
+    ]);
+    const html = renderToString(<Stub initialEntries={['/']} />);
+    expect(html).toContain('How would you like to pay?');
+    expect(html).toContain('Pay for the group');
+    expect(html).toContain('Each registrant pays');
+  });
+
   // RENDER parity: the LIVE form is rendered and its emitted submit-names are
   // asserted against the definition's graph — not an inlined hand-copied object.
   // This is the only path registration exercises in prod (settled #9), so the

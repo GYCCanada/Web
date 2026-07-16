@@ -44,6 +44,7 @@ describe('Forms', () => {
         expectedCurrentVersion: Option.some(initial.version),
         definition: edited,
       });
+      const pinnedInitial = yield* forms.published('contact', initial.version);
       const conflict = yield* forms
         .publish({
           form: 'contact',
@@ -54,6 +55,7 @@ describe('Forms', () => {
 
       expect(published.version).not.toBe(initial.version);
       expect(published.definition.title.en).toBe('Write to us');
+      expect(pinnedInitial.definition.title).toEqual(initial.definition.title);
       expect(conflict._tag).toBe('Forms.PublishConflict');
       if (Forms.PublishConflict.is(conflict)) {
         expect(conflict.actual).toEqual(Option.some(published.version));

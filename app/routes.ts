@@ -22,6 +22,7 @@ import {
  * `ADMIN_PASSWORD` is configured.
  */
 export default [
+  route('api/stripe/webhook', 'routes/api.stripe-webhook.ts'),
   route(':lang?', 'routes/($lang)+/_layout.tsx', [
     index('routes/($lang)+/_index.tsx'),
     route('2024', 'routes/($lang)+/2024/_index.tsx'),
@@ -36,6 +37,7 @@ export default [
     route('contact', 'routes/($lang)+/contact.tsx'),
     route('faq', 'routes/($lang)+/faq.tsx'),
     route('give', 'routes/($lang)+/give.tsx'),
+    route('registration/status', 'routes/($lang)+/registration.status.tsx'),
     route('team', 'routes/($lang)+/team/_index.tsx'),
     route('volunteer', 'routes/($lang)+/volunteer.tsx'),
   ]),
@@ -49,6 +51,7 @@ export default [
     route('admin', 'routes/admin/_index.tsx'),
     route('admin/content', 'routes/admin/content.tsx'),
     route('admin/forms/:form', 'routes/admin/forms.$form.tsx'),
+    route('admin/registration', 'routes/admin/registration.tsx'),
     route('admin/pages/:page', 'routes/admin/pages.$page.tsx'),
   ]),
 ] satisfies RouteConfig;

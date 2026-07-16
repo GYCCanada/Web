@@ -152,13 +152,16 @@ export const registrationShellDecoder = (
     return (payload) => decoder(payload);
   }
 
-  const group = Schema.Struct({
-    party: Schema.Struct({
-      _tag: Schema.tag('group'),
-      payer: payerCodec(party.payer as NonNullable<PartySection['payer']>),
-    }),
-    registrants: groupRegistrants(groupRegistrant),
-  }).check(nonEmptyParty as never);
+  const group =
+    party.payer === undefined
+      ? undefined
+      : Schema.Struct({
+          party: Schema.Struct({
+            _tag: Schema.tag('group'),
+            payer: payerCodec(party.payer),
+          }),
+          registrants: groupRegistrants(groupRegistrant),
+        }).check(nonEmptyParty as never);
 
   const perRegistrant = Schema.Struct({
     party: Schema.Struct({
@@ -175,10 +178,17 @@ export const registrationShellDecoder = (
     );
 
   if (allowed.length === 1 && allowed[0] === 'group') {
+    if (group === undefined) {
+      throw new Error('Validated group billing mode requires payer fields');
+    }
     const decoder = SchemaParser.decodeUnknownResult(group);
     return (payload) => decoder(prepareMode(defaultMode, payload));
   }
   if (allowed.length === 1 && allowed[0] === 'perRegistrant') {
+    const decoder = SchemaParser.decodeUnknownResult(perRegistrant);
+    return (payload) => decoder(prepareMode(defaultMode, payload));
+  }
+  if (group === undefined) {
     const decoder = SchemaParser.decodeUnknownResult(perRegistrant);
     return (payload) => decoder(prepareMode(defaultMode, payload));
   }

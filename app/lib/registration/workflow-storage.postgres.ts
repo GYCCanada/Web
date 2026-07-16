@@ -204,6 +204,7 @@ test(
       yield* sql`DELETE FROM submission_batches`;
       yield* sql`DELETE FROM registration_channels`;
       yield* sql`DELETE FROM form_definition_drafts`;
+      yield* sql`UPDATE forms SET current_version_id = NULL`;
       yield* sql`DELETE FROM form_definition_versions`;
       yield* sql`DELETE FROM forms`;
 
@@ -369,6 +370,7 @@ test(
       yield* sql`DELETE FROM submissions`;
       yield* sql`DELETE FROM submission_batches`;
       yield* sql`DELETE FROM registration_channels`;
+      yield* sql`UPDATE forms SET current_version_id = NULL`;
       yield* sql`DELETE FROM form_definition_versions`;
       yield* sql`DELETE FROM forms`;
 

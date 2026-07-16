@@ -242,6 +242,10 @@ export class Service extends Context.Service<
     readonly current: <F extends FormId>(
       form: F,
     ) => Effect.Effect<PublishedForm<F>, FormNotPublished | FormPersistenceError>;
+    readonly published: <F extends FormId>(
+      form: F,
+      version: FormDefinitionVersionId,
+    ) => Effect.Effect<PublishedForm<F>, FormNotPublished | FormPersistenceError>;
     readonly publish: <F extends FormId>(
       command: PublishCommand<F>,
     ) => Effect.Effect<
@@ -304,6 +308,29 @@ export const layer = Layer.effect(
     ) {
       return yield* currentUnmapped(form).pipe(
         Effect.mapError(persistenceError('read current Form definition')),
+      );
+    });
+
+    const published = Effect.fn('Forms.published')(function* <F extends FormId>(
+      form: F,
+      version: FormDefinitionVersionId,
+    ) {
+      return yield* Effect.gen(function* () {
+        const rows = yield* sql<PublishedRow>`
+          SELECT
+            form_id AS "form",
+            version_id AS "version",
+            definition::text AS "definitionJson",
+            published_at::text AS "publishedAt"
+          FROM form_definition_versions
+          WHERE form_id = ${form}
+            AND version_id = ${version}
+        `;
+        const row = Option.fromNullishOr(rows[0]);
+        if (Option.isNone(row)) return yield* new FormNotPublished({ form });
+        return yield* decodePublished(row.value, form);
+      }).pipe(
+        Effect.mapError(persistenceError('read pinned Form definition')),
       );
     });
 
@@ -794,7 +821,7 @@ export const layer = Layer.effect(
       yield* auditCurrentNotification(form);
     }
 
-    return Service.of({ current, publish, submit });
+    return Service.of({ current, published, publish, submit });
   }),
 );
 
