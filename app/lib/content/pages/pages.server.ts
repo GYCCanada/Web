@@ -7,7 +7,12 @@ import {
   normalizeFaqAnswers,
   type Json,
 } from '../admin-form';
-import { DraftEditor, pageScope, type LoadedSource } from '../draft-editor.server';
+import {
+  DraftEditor,
+  type IssueError,
+  pageScope,
+  type LoadedSource,
+} from '../draft-editor.server';
 import { type NotFoundError, notFound } from '../../effect/errors';
 import type { Locale } from '../../localization/localization';
 import { projectPage, type PageViewById } from './project';
@@ -40,7 +45,7 @@ export interface PageAuthoringDocument<P extends PageId> {
 /** Open one Page at its lax draft boundary for the admin authoring adapter. */
 export const openPageAuthoring = <P extends PageId>(
   page: P,
-): Effect.Effect<PageAuthoringDocument<P>, never, DraftEditor.Service> =>
+): Effect.Effect<PageAuthoringDocument<P>, IssueError, DraftEditor.Service> =>
   Effect.gen(function* () {
     const editor = yield* DraftEditor.Service;
     const { content, source } = yield* editor.load(pageScope(page));

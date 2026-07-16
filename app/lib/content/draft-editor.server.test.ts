@@ -184,6 +184,22 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
     ),
   );
 
+  it.effect('blocks authoring instead of replacing a malformed published object', () =>
+    Effect.gen(function* () {
+      const editor = yield* DraftEditor.Service;
+      const loaded = yield* editor.load(siteScope).pipe(Effect.flip);
+      const edited = yield* editor
+        .editDocument(siteScope, { translations: {} })
+        .pipe(Effect.flip);
+
+      expect(loaded.status).toBe(409);
+      expect(loaded.message).toContain('is malformed');
+      expect(edited.status).toBe(409);
+    }).pipe(
+      provideEditor(adminStorage({ [SITE_CONTENT_KEY]: '{not valid json' })),
+    ),
+  );
+
   it.effect('uses a draft with no published document as a valid edit source', () =>
     Effect.gen(function* () {
       const draftDoc = draftWithBoard('Draft With No Published');

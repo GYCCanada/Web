@@ -230,7 +230,9 @@ const parseJson = Schema.decodeUnknownEffect(
  *
  * `fromBucket` reads a draft (or published — also a valid draft) document FROM
  * the bucket: parse → (site only) id-backfill → decode-draft, so a site document
- * published before list-item ids existed still decodes. `decodeDraft` decodes an
+   * published before list-item ids existed still decodes. Authoring treats only
+   * an absent object as defaults; malformed stored data blocks mutations.
+   * `decodeDraft` decodes an
  * already-merged/edited candidate at the single draft boundary — NO backfill, so
  * a genuinely missing id is rejected rather than masked. `decodePublish` is the
  * STRICT decode `publish` promotes through. `encodeDraft` yields the encoded
@@ -243,9 +245,8 @@ interface ScopeCodec {
   readonly default: unknown;
   /**
    * Read a draft (or published) document FROM the bucket: parse → (site only)
-   * id-backfill → decode-draft. Fallible (the caller, `readDocument`, catches
-   * every failure and logs it → `Option.none`, so a bad object never breaks the
-   * editor open).
+   * id-backfill → decode-draft. Fallible: the strict authoring reader converts
+   * only absence to `Option.none` and surfaces malformed stored data.
    */
   readonly fromBucket: (
     json: string,
@@ -392,12 +393,12 @@ export class Service extends Context.Service<
      * bucket `lastModified`, not by mere draft *presence*, so a stale draft
      * written before the last publish still loses. A tie goes to the draft so a
      * list-op saved in the same second as the published object (common on
-     * second-granular S3/MinIO) reopens with the edit. Never fails (a bad draft
-     * is logged and ignored), so the editor always opens.
+     * second-granular S3/MinIO) reopens with the edit. Missing objects select
+     * defaults; malformed or unavailable objects fail closed.
      */
     readonly load: <S extends ContentScope>(
       scope: S,
-    ) => Effect.Effect<Loaded<S>>;
+    ) => Effect.Effect<Loaded<S>, IssueError>;
     /**
      * The whole encode→merge→decode→re-encode→store-draft pipeline as ONE call:
      * `override` (the route's parsed form override) is deep-merged onto the
@@ -455,31 +456,72 @@ export const layer = Layer.effect(
     const content = yield* Content.Service;
 
     /**
-     * Read + decode the document at `key` through the scope's `fromBucket` codec,
-     * or `Option.none()` when it is absent / unreadable / malformed (logged,
-     * never thrown — a bad draft must not break the editor open).
+     * Read + decode the document at `key` through the scope's `fromBucket` codec.
+     * Only `Storage.NotFound` becomes `Option.none`; operational and schema
+     * failures block authoring so defaults cannot overwrite unreadable data.
      */
     const readDocument = (
       codec: ScopeCodec,
       key: string,
-    ): Effect.Effect<Option.Option<unknown>> =>
+    ): Effect.Effect<Option.Option<unknown>, IssueError> =>
       Effect.gen(function* () {
-        const object = yield* storage.get(key);
-        const json = yield* Effect.promise(() =>
-          new Response(object.stream).text(),
-        );
-        return Option.some(yield* codec.fromBucket(json));
-      }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning(`DraftEditor: could not read ${key}`, cause).pipe(
-            Effect.as(Option.none<unknown>()),
+        const object = yield* storage.get(key).pipe(
+          Effect.map(Option.some),
+          Effect.catchTag('Storage.NotFound', () =>
+            Effect.succeed(Option.none()),
           ),
+          Effect.mapError(
+            (cause) =>
+              new IssueError({
+                message: `Authoring is unavailable because ${key} could not be read: ${String(cause)}`,
+                issues: [],
+                status: 502,
+              }),
+          ),
+        );
+        if (Option.isNone(object)) return Option.none();
+        const json = yield* Effect.tryPromise({
+          try: () => new Response(object.value.stream).text(),
+          catch: (cause) =>
+            new IssueError({
+              message: `Authoring is unavailable because ${key} could not be read: ${String(cause)}`,
+              issues: [],
+              status: 502,
+            }),
+        });
+        const decoded = yield* codec.fromBucket(json).pipe(
+          Effect.mapError(
+            (error) =>
+              new IssueError({
+                message: `Authoring is blocked because ${key} is malformed. Repair or explicitly replace the stored object before editing.`,
+                issues: issueMessages(error.issue),
+                status: 409,
+              }),
+          ),
+        );
+        return Option.some(decoded);
+      });
+
+    const readHead = (
+      key: string,
+    ): Effect.Effect<Option.Option<ObjectHead>, IssueError> =>
+      storage.head(key).pipe(
+        Effect.mapError(
+          (cause) =>
+            new IssueError({
+              message: `Authoring is unavailable because ${key} metadata could not be read: ${String(cause)}`,
+              issues: [],
+              status: 502,
+            }),
         ),
       );
 
     const loadInternal = (
       scope: ContentScope,
-    ): Effect.Effect<{ content: unknown; source: LoadedSource }> =>
+    ): Effect.Effect<
+      { content: unknown; source: LoadedSource },
+      IssueError
+    > =>
       Effect.gen(function* () {
         const codec = resolveScope(scope);
         const { draftKey, publishedKey } = codec.keys;
@@ -490,12 +532,8 @@ export const layer = Layer.effect(
           if (Option.isNone(published)) {
             return { content: draft.value, source: 'draft' as const };
           }
-          const draftHead = yield* storage
-            .head(draftKey)
-            .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
-          const publishedHead = yield* storage
-            .head(publishedKey)
-            .pipe(Effect.orElseSucceed(() => Option.none<ObjectHead>()));
+          const draftHead = yield* readHead(draftKey);
+          const publishedHead = yield* readHead(publishedKey);
           const draftIsAtLeastAsNew =
             Option.isSome(draftHead) &&
             Option.isSome(publishedHead) &&
@@ -570,7 +608,7 @@ export const layer = Layer.effect(
     const encodedCurrent = (
       codec: ScopeCodec,
       scope: ContentScope,
-    ): Effect.Effect<Json> =>
+    ): Effect.Effect<Json, IssueError> =>
       Effect.gen(function* () {
         const { content: current } = yield* loadInternal(scope);
         return yield* codec.encodeObject(current).pipe(Effect.orDie);
