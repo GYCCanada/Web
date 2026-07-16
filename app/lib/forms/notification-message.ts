@@ -1,7 +1,11 @@
-import type {
-  FormDefinition,
-  FormId,
-  NotificationProjection,
+import { Schema } from 'effect';
+
+import {
+  type FieldKind,
+  type FormDefinition,
+  type FormId,
+  type NotificationProjection,
+  NotificationProjection as NotificationProjectionSchema,
 } from './definition';
 import type { Submission, SubmissionBatch } from './forms.server';
 
@@ -13,16 +17,16 @@ export interface NotificationMessage {
 const defaultProjection = (form: FormId): NotificationProjection => {
   switch (form) {
     case 'contact':
-      return {
+      return Schema.decodeUnknownSync(NotificationProjectionSchema)({
         _tag: 'contact',
         name: 'name',
         method: 'method',
         email: 'email',
         phone: 'phone',
         message: 'message',
-      } as NotificationProjection;
+      });
     case 'volunteer':
-      return {
+      return Schema.decodeUnknownSync(NotificationProjectionSchema)({
         _tag: 'volunteer',
         name: 'name',
         method: 'method',
@@ -32,14 +36,34 @@ const defaultProjection = (form: FormId): NotificationProjection => {
         background: 'background',
         age: 'age',
         location: 'location',
-      } as NotificationProjection;
+      });
     case 'registration':
-      return {
+      return Schema.decodeUnknownSync(NotificationProjectionSchema)({
         _tag: 'registration',
         name: 'name',
         email: 'email',
         type: 'type',
-      } as NotificationProjection;
+      });
+  }
+};
+
+const TEXT_KINDS: ReadonlySet<FieldKind['_tag']> = new Set([
+  'requiredText',
+  'optionalText',
+]);
+
+const assertFieldKinds = (
+  fields: ReadonlyMap<string, FieldKind>,
+  role: string,
+  name: string,
+  kinds: ReadonlySet<FieldKind['_tag']>,
+  issues: string[],
+): void => {
+  const field = fields.get(name);
+  if (field !== undefined && !kinds.has(field._tag)) {
+    issues.push(
+      `notification.${role} must reference ${[...kinds].join(' or ')}, not ${field._tag}`,
+    );
   }
 };
 
@@ -52,6 +76,9 @@ export const normalizeNotificationProjection = (
   readonly issues: readonly string[];
 } => {
   const notification = definition.notification ?? defaultProjection(form);
+  const fields = new Map(
+    definition.fields.map((field) => [String(field.name), field] as const),
+  );
   const available = new Set(
     definition.fields.map((field) => String(field.name)),
   );
@@ -68,6 +95,75 @@ export const normalizeNotificationProjection = (
         `notification.${role} references missing top-level field "${String(field)}"`,
       );
     }
+  }
+  const roles = Object.entries(notification).filter(([role]) => role !== '_tag');
+  const targets = roles.map(([, field]) => String(field));
+  if (new Set(targets).size !== targets.length) {
+    issues.push('notification roles must reference distinct semantic fields');
+  }
+
+  switch (notification._tag) {
+    case 'contact':
+    case 'volunteer': {
+      assertFieldKinds(fields, 'name', notification.name, TEXT_KINDS, issues);
+      assertFieldKinds(
+        fields,
+        'email',
+        notification.email,
+        new Set(['email']),
+        issues,
+      );
+      assertFieldKinds(fields, 'phone', notification.phone, TEXT_KINDS, issues);
+      const method = fields.get(notification.method);
+      if (method !== undefined) {
+        if (method._tag !== 'literal') {
+          issues.push('notification.method must reference a literal field');
+        } else {
+          const values = new Set(
+            method.options.map((option) => String(option.value)),
+          );
+          for (const required of ['email', 'phone', 'both']) {
+            if (!values.has(required)) {
+              issues.push(
+                `notification.method field must include the "${required}" option`,
+              );
+            }
+          }
+        }
+      }
+      if (notification._tag === 'contact') {
+        assertFieldKinds(
+          fields,
+          'message',
+          notification.message,
+          TEXT_KINDS,
+          issues,
+        );
+      } else {
+        for (const role of ['why', 'background', 'age', 'location'] as const) {
+          assertFieldKinds(fields, role, notification[role], TEXT_KINDS, issues);
+        }
+      }
+      break;
+    }
+    case 'registration':
+      assertFieldKinds(fields, 'name', notification.name, TEXT_KINDS, issues);
+      assertFieldKinds(
+        fields,
+        'email',
+        notification.email,
+        new Set(['email']),
+        issues,
+      );
+      if (
+        definition.variant === undefined ||
+        notification.type !== definition.variant.discriminator
+      ) {
+        issues.push(
+          'notification.type must reference the registration variant discriminator',
+        );
+      }
+      break;
   }
   return {
     definition: { ...definition, notification },

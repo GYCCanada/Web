@@ -88,6 +88,38 @@ describe('Forms', () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect('rejects semantically incompatible notification roles', () =>
+    Effect.gen(function* () {
+      const forms = yield* Forms.Service;
+      const initial = yield* forms.current('contact');
+      const rejected = yield* forms
+        .publish({
+          form: 'contact',
+          expectedCurrentVersion: Option.some(initial.version),
+          definition: {
+            ...initial.definition,
+            notification: {
+              ...initial.definition.notification,
+              name: 'email',
+              email: 'name',
+              method: 'message',
+            },
+          },
+        })
+        .pipe(Effect.flip);
+
+      expect(rejected._tag).toBe('Forms.DefinitionRejected');
+      if (Forms.DefinitionRejected.is(rejected)) {
+        const issues = rejected.issues.join('\n');
+        expect(issues).toContain('notification.name must reference');
+        expect(issues).toContain('notification.email must reference email');
+        expect(issues).toContain(
+          'notification.method must reference a literal field',
+        );
+      }
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect('validates a whole batch before consuming its idempotency token', () =>
     Effect.gen(function* () {
       const forms = yield* Forms.Service;

@@ -28,7 +28,10 @@ import {
   submissionCommandHash,
 } from './form-version';
 import { adminEmailDeliveryKey } from './notification-intent';
-import { notificationMessage } from './notification-message';
+import {
+  normalizeNotificationProjection,
+  notificationMessage,
+} from './notification-message';
 import * as SubmissionCommand from './submission-command';
 
 export const FormDefinitionVersionId =
@@ -725,6 +728,45 @@ export const layer = Layer.effect(
       );
     });
 
+    const auditCurrentNotification = Effect.fn(
+      'Forms.auditCurrentNotification',
+    )(function* (form: FormId) {
+      const currentDefinition = yield* currentUnmapped(form);
+      const normalized = normalizeNotificationProjection(
+        form,
+        currentDefinition.definition,
+      );
+      if (normalized.issues.length > 0) {
+        return yield* new FormPersistenceError({
+          operation: `audit current ${form} notification projection: ${normalized.issues.join('; ')}`,
+        });
+      }
+      if (currentDefinition.definition.notification === undefined) {
+        yield* publish({
+          form,
+          expectedCurrentVersion: Option.some(currentDefinition.version),
+          definition: normalized.definition,
+        }).pipe(
+          // Concurrent replicas may race this one-time version migration. The
+          // loser re-audits the winner's current pointer below.
+          Effect.catchTag('Forms.PublishConflict', () => Effect.void),
+        );
+        const migrated = yield* currentUnmapped(form);
+        const migratedAudit = normalizeNotificationProjection(
+          form,
+          migrated.definition,
+        );
+        if (
+          migrated.definition.notification === undefined ||
+          migratedAudit.issues.length > 0
+        ) {
+          return yield* new FormPersistenceError({
+            operation: `verify current ${form} notification projection migration: ${migratedAudit.issues.join('; ')}`,
+          });
+        }
+      }
+    });
+
     for (const form of FORM_IDS) {
       yield* sql`
         INSERT INTO forms (form_id)
@@ -748,6 +790,7 @@ export const layer = Layer.effect(
           Effect.catchTag('Forms.PublishConflict', () => Effect.void),
         );
       }
+      yield* auditCurrentNotification(form);
     }
 
     return Service.of({ current, publish, submit });

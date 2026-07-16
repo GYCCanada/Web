@@ -107,6 +107,9 @@ export const drainFormNotifications = (): Promise<number> =>
     }),
   );
 
+/** Finalize the process-scoped application runtime during server shutdown. */
+export const disposeAppRuntime = (): Promise<void> => AppRuntime.dispose();
+
 const isResponse = (v: unknown): v is Response =>
   typeof v === 'object' && v !== null && v instanceof Response;
 

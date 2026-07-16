@@ -11,6 +11,7 @@ import type { ServerBuild } from 'react-router';
 import { Env } from './app/lib/env.server.ts';
 import {
   checkAppReady,
+  disposeAppRuntime,
   drainFormNotifications,
   makeRequestRuntime,
   type RequestRuntime,
@@ -249,6 +250,7 @@ const RoutesLive = isDev ? DevRoutes : ProdRoutes;
 // so startup does not validate a disposable second adapter.
 const StartupCheck = Layer.effectDiscard(
   Effect.gen(function* () {
+    yield* Effect.addFinalizer(() => Effect.promise(disposeAppRuntime));
     yield* Env.Service;
     yield* Effect.promise(checkAppReady);
     yield* Effect.forkScoped(
