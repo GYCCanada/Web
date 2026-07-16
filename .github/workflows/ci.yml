@@ -111,6 +111,7 @@ jobs:
             -e MAIL_HOST=smtp.example.com -e MAIL_PORT=587 \
             -e MAIL_USER=ci -e MAIL_PASS=ci \
             -e MAIL_FROM=ci@example.com -e MAIL_TO=ci@example.com \
+            -e TOAST_COOKIE_SECRET=ci-toast-secret \
             "${{ env.IMAGE }}:${{ steps.meta.outputs.version }}"
           for _ in $(seq 1 30); do
             curl -sf -o /dev/null http://localhost:3000/healthz && break

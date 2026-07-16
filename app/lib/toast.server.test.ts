@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'bun:test';
-import { Effect } from 'effect';
+import { ConfigProvider, Effect, Layer } from 'effect';
+import { createCookieSessionStorage } from 'react-router';
 
-import { Toast, toastKey, toastSessionStorage, type ToastInput } from './toast.server';
+import {
+  makeToastLayer,
+  Toast,
+  toastCookieName,
+  toastKey,
+  type ToastInput,
+} from './toast.server';
+
+const TEST_SECRET = 'toast-test-secret';
+const testLayer = makeToastLayer({ secret: TEST_SECRET, secure: false });
+const toastSessionStorage = createCookieSessionStorage({
+  cookie: {
+    name: toastCookieName,
+    secrets: [TEST_SECRET],
+  },
+});
 
 /**
  * Build a request whose cookie carries `payload` flashed under {@link toastKey},
@@ -20,7 +36,7 @@ const getToast = (request: Request) =>
   Effect.gen(function* () {
     const toast = yield* Toast;
     return yield* toast.get(request);
-  }).pipe(Effect.provide(Toast.layer), Effect.runPromise);
+  }).pipe(Effect.provide(testLayer), Effect.runPromise);
 
 describe('Toast.get', () => {
   it('applies decode defaults for a partial payload (missing id + type)', async () => {
@@ -74,5 +90,32 @@ describe('Toast.get', () => {
 
     expect(toast).toBeNull();
     expect(headers).toBeNull();
+  });
+
+  it('rejects a cookie signed with the removed repository-known secret', async () => {
+    const oldStorage = createCookieSessionStorage({
+      cookie: { name: toastCookieName, secrets: ['secret-key'] },
+    });
+    const session = await oldStorage.getSession();
+    session.flash(toastKey, { description: 'forged' });
+    const cookie = await oldStorage.commitSession(session);
+
+    const { toast } = await getToast(
+      new Request('http://localhost/', { headers: { cookie } }),
+    );
+    expect(toast).toBeNull();
+  });
+
+  it('requires TOAST_COOKIE_SECRET when constructing production layer', async () => {
+    const config = ConfigProvider.layer(
+      ConfigProvider.fromEnv({ env: { NODE_ENV: 'production' } }),
+    );
+    const exit = await Effect.runPromise(
+      Effect.scoped(Layer.build(Toast.layer)).pipe(
+        Effect.provide(config),
+        Effect.exit,
+      ),
+    );
+    expect(exit._tag).toBe('Failure');
   });
 });
