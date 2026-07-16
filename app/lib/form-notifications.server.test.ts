@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'effect-bun-test';
 import { Effect, Layer } from 'effect';
+import { SqlClient } from 'effect/unstable/sql/SqlClient';
 
 import { makeTestAppLayer } from './effect/runtime';
 import { defaultContactForm } from './forms/defaults';
@@ -42,6 +43,18 @@ describe('Form notification outbox', () => {
         payloads: [validContact],
       });
       expect(sent).toHaveLength(0);
+
+      // Delayed dispatch consumes the payload captured with the commit, not a
+      // later reconstruction from mutable code or definition state.
+      const sql = yield* SqlClient;
+      const payload = yield* sql<{ subject: string; content: string }>`
+        SELECT subject, content
+        FROM notification_deliveries
+        WHERE batch_id = ${stored.id}
+      `;
+      expect(payload[0]?.subject).toBe(
+        '[!] Contact Inquiry from Ada Lovelace',
+      );
 
       expect(yield* notifications.drain).toBe(1);
       expect(yield* notifications.drain).toBe(0);

@@ -24,19 +24,16 @@ import {
 
 /** Web adapter for an atomic, non-empty registration Submission batch. */
 
-/**
- * Configure the registration action. `notify` runs the registration-specific
- * notification over committed registrant records through the durable delivery
- * ledger and fails (with any `AppError`, e.g. a mailer failure mapped to a
- * form-level key) to abort the redirect; `success` is the post-submit toast copy.
- */
+/** Configure the registration route's success metadata. Notification projection
+ * belongs to the immutable definition and dispatch belongs to
+ * `FormNotifications`, not route configuration. */
 export interface RegistrationActionConfig {
   readonly success: SuccessToast;
 }
 
 /**
  * Build the registration route `action`. The three `{2024,2025,2026}/form` route
- * modules export `export const action = registrationAction({ notify, success })`
+ * modules export `export const action = registrationAction({ success })`
  * — no inline pipeline, exactly like a `formAction` caller. On the happy path the
  * terminal `toast.redirect` fails with a `RedirectError` the wrapper forwards, so
  * the {@link FormSuccess} return is unreachable on success.
@@ -104,6 +101,8 @@ export const registrationAction = (config: RegistrationActionConfig) =>
         'Mailer.Error': () =>
           formValidationError({ formErrors: ['registration.form.error'] }),
         'NotificationDelivery.PersistenceError': () =>
+          formValidationError({ formErrors: ['registration.form.error'] }),
+        'NotificationDelivery.Timeout': () =>
           formValidationError({ formErrors: ['registration.form.error'] }),
       }),
     );

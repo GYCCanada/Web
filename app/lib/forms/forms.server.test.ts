@@ -61,6 +61,33 @@ describe('Forms', () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect('rejects notification roles that do not resolve to stored fields', () =>
+    Effect.gen(function* () {
+      const forms = yield* Forms.Service;
+      const initial = yield* forms.current('contact');
+      const rejected = yield* forms
+        .publish({
+          form: 'contact',
+          expectedCurrentVersion: Option.some(initial.version),
+          definition: {
+            ...initial.definition,
+            notification: {
+              ...initial.definition.notification,
+              name: 'renamedWithoutChangingTheField',
+            },
+          },
+        })
+        .pipe(Effect.flip);
+
+      expect(rejected._tag).toBe('Forms.DefinitionRejected');
+      if (Forms.DefinitionRejected.is(rejected)) {
+        expect(rejected.issues.join('\n')).toContain(
+          'notification.name references missing top-level field',
+        );
+      }
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect('validates a whole batch before consuming its idempotency token', () =>
     Effect.gen(function* () {
       const forms = yield* Forms.Service;
@@ -90,10 +117,25 @@ describe('Forms', () => {
       expect(beforeCommit[0]?.count).toBe('0');
       expect(accepted.replayed).toBe(false);
       expect(accepted.submissions).toHaveLength(2);
-      const intents = yield* sql<{ batchId: string }>`
-        SELECT batch_id AS "batchId" FROM notification_deliveries
+      const intents = yield* sql<{
+        batchId: string;
+        subject: string;
+        content: string;
+      }>`
+        SELECT
+          batch_id AS "batchId",
+          subject,
+          content
+        FROM notification_deliveries
       `;
-      expect(intents).toEqual([{ batchId: accepted.id }]);
+      expect(intents).toEqual([
+        {
+          batchId: accepted.id,
+          subject: '[!] Contact Inquiry from Ada Lovelace',
+          content:
+            'Name: Ada Lovelace\nEmail: ada@example.com\nMessage: Hello from the relational store.',
+        },
+      ]);
     }).pipe(Effect.provide(testLayer)),
   );
 

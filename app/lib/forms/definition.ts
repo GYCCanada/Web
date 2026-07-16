@@ -505,6 +505,41 @@ export const CrossFieldRule = Schema.TaggedUnion({
 export type CrossFieldRule = typeof CrossFieldRule.Type;
 
 // ---------------------------------------------------------------------------
+// Notification projection
+// ---------------------------------------------------------------------------
+
+/**
+ * Semantic field roles used to render the durable admin notification. Keeping
+ * these references in the immutable definition lets an editor rename fields
+ * without silently disconnecting the notification projector.
+ */
+export const NotificationProjection = Schema.TaggedUnion({
+  contact: {
+    name: FieldName,
+    method: FieldName,
+    email: FieldName,
+    phone: FieldName,
+    message: FieldName,
+  },
+  volunteer: {
+    name: FieldName,
+    method: FieldName,
+    email: FieldName,
+    phone: FieldName,
+    why: FieldName,
+    background: FieldName,
+    age: FieldName,
+    location: FieldName,
+  },
+  registration: {
+    name: FieldName,
+    email: FieldName,
+    type: FieldName,
+  },
+});
+export type NotificationProjection = typeof NotificationProjection.Type;
+
+// ---------------------------------------------------------------------------
 // FormDefinition
 // ---------------------------------------------------------------------------
 
@@ -522,5 +557,8 @@ export const FormDefinition = Schema.Struct({
   fields: FieldList,
   variant: Schema.optionalKey(FormVariantSet),
   rules: Schema.optionalKey(Schema.Array(CrossFieldRule)),
+  // Optional only so historical stored definitions remain decodable. Every new
+  // publish is normalized to an explicit, validated projection.
+  notification: Schema.optionalKey(NotificationProjection),
 });
 export type FormDefinition = typeof FormDefinition.Type;

@@ -141,10 +141,36 @@ const notificationOutbox = Effect.gen(function* () {
   `;
 });
 
+const durableNotificationPayloads = Effect.gen(function* () {
+  const sql = yield* SqlClient;
+  yield* sql`
+    ALTER TABLE notification_deliveries
+      ADD COLUMN subject text,
+      ADD COLUMN content text,
+      ADD COLUMN claim_token text
+  `;
+  // Rows created by the preceding release predate rendered payload storage.
+  // Preserve their durable intent with an actionable fallback rather than
+  // dropping already-committed notifications during the migration.
+  yield* sql`
+    UPDATE notification_deliveries
+    SET
+      subject = '[!] Form submission ' || batch_id,
+      content = 'A durable Form submission was committed. Batch: ' || batch_id
+    WHERE subject IS NULL OR content IS NULL
+  `;
+  yield* sql`
+    ALTER TABLE notification_deliveries
+      ALTER COLUMN subject SET NOT NULL,
+      ALTER COLUMN content SET NOT NULL
+  `;
+});
+
 export const loader = Migrator.fromRecord({
   '0001_form_records': formRecords,
   '0002_submission_tokens': submissionTokens,
   '0003_normalize_submission_aggregate': normalizeSubmissionAggregate,
   '0004_notification_deliveries': notificationDeliveries,
   '0005_notification_outbox': notificationOutbox,
+  '0006_durable_notification_payloads': durableNotificationPayloads,
 });

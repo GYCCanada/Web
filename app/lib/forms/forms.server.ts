@@ -28,6 +28,7 @@ import {
   submissionCommandHash,
 } from './form-version';
 import { adminEmailDeliveryKey } from './notification-intent';
+import { notificationMessage } from './notification-message';
 import * as SubmissionCommand from './submission-command';
 
 export const FormDefinitionVersionId =
@@ -254,9 +255,6 @@ export class Service extends Context.Service<
       | IdempotencyConflict
       | FormPersistenceError
     >;
-    readonly getBatch: (
-      id: SubmissionGroupId,
-    ) => Effect.Effect<SubmissionBatch, FormPersistenceError>;
   }
 >()('@gycc/app/forms/Forms') {}
 
@@ -481,14 +479,19 @@ export const layer = Layer.effect(
       replayed: boolean,
     ) {
       const committed = yield* loadCommitted(batch, form, definition, replayed);
+      const message = notificationMessage(definition, committed);
       yield* sql`
         INSERT INTO notification_deliveries (
           delivery_key,
           batch_id,
+          subject,
+          content,
           status
         ) VALUES (
           ${adminEmailDeliveryKey(committed.id)},
           ${committed.id},
+          ${message.subject},
+          ${message.content},
           'failed'
         )
         ON CONFLICT (delivery_key) DO NOTHING
@@ -535,51 +538,6 @@ export const layer = Layer.effect(
           payloadJson,
         ),
       };
-    });
-
-    const getBatchUnmapped = Effect.fn('Forms.getBatch.unmapped')(function* (
-      id: SubmissionGroupId,
-    ) {
-      const rows = yield* sql<BatchRow & { readonly form: string }>`
-        SELECT
-          batch_id AS "batchId",
-          form_id AS form,
-          definition_version_id AS "definitionVersionId",
-          idempotency_token AS "idempotencyToken",
-          command_hash AS "commandHash",
-          submitted_at::text AS "submittedAt"
-        FROM submission_batches
-        WHERE batch_id = ${id}
-      `;
-      const row = Option.fromNullishOr(rows[0]);
-      if (Option.isNone(row)) {
-        return yield* new FormPersistenceError({ operation: 'read Submission batch' });
-      }
-      const form = yield* Schema.decodeUnknownEffect(FormId)(row.value.form);
-      const versions = yield* sql<PublishedRow>`
-        SELECT
-          form_id AS form,
-          version_id AS version,
-          definition::text AS "definitionJson",
-          published_at::text AS "publishedAt"
-        FROM form_definition_versions
-        WHERE form_id = ${form}
-          AND version_id = ${row.value.definitionVersionId}
-      `;
-      const version = Option.fromNullishOr(versions[0]);
-      if (Option.isNone(version)) {
-        return yield* new FormPersistenceError({ operation: 'read Submission definition' });
-      }
-      const published = yield* decodePublished(version.value, form);
-      return yield* loadCommitted(row.value, form, published.definition, true);
-    });
-
-    const getBatch = Effect.fn('Forms.getBatch')(function* (
-      id: SubmissionGroupId,
-    ) {
-      return yield* getBatchUnmapped(id).pipe(
-        Effect.mapError(persistenceError('read Submission batch')),
-      );
     });
 
     const submitUnmapped = Effect.fn('Forms.submit.unmapped')(function* <
@@ -792,7 +750,7 @@ export const layer = Layer.effect(
       }
     }
 
-    return Service.of({ current, publish, submit, getBatch });
+    return Service.of({ current, publish, submit });
   }),
 );
 

@@ -5,6 +5,7 @@ import {
   FormDefinitionVersionId,
   type FormDefinitionVersionId as FormDefinitionVersionIdType,
 } from './submission-command';
+import { normalizeNotificationProjection } from './notification-message';
 
 const decodeDefinition = Schema.decodeUnknownEffect(FormDefinition);
 const encodeDefinitionJson = Schema.encodeUnknownEffect(
@@ -24,7 +25,17 @@ export const sha256 = Effect.fn('FormVersion.sha256')(function* (value: string) 
 export const prepareDefinitionVersion = Effect.fn(
   'FormVersion.prepareDefinitionVersion',
 )(function* (form: FormId, input: unknown) {
-  const definition = yield* decodeDefinition(input);
+  const decoded = yield* decodeDefinition(input);
+  const normalized = normalizeNotificationProjection(form, decoded);
+  if (normalized.issues.length > 0) {
+    const validProjection = Schema.String.check(
+      Schema.makeFilter<string>(() => normalized.issues.join('; '), {
+        title: 'FormDefinition.notification',
+      }),
+    );
+    yield* Schema.decodeUnknownEffect(validProjection)(form);
+  }
+  const definition = normalized.definition;
   const definitionJson = yield* encodeDefinitionJson(definition).pipe(
     Effect.orDie,
   );

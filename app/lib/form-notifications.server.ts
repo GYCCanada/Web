@@ -2,12 +2,12 @@ export * as FormNotifications from './form-notifications.server';
 
 import { Context, Effect, Layer, Schema } from 'effect';
 
-import { Forms, type SubmissionBatch } from './forms/forms.server';
+import type { SubmissionBatch } from './forms/forms.server';
 import { adminEmailDeliveryKey } from './forms/notification-intent';
-import { notificationMessage } from './forms/notification-message';
 import { Mailer, type MailError } from './mailer.server';
 import {
   NotificationDelivery,
+  type DeliveryTimeout,
   type DeliveryResult,
   type PersistenceError,
 } from './notification-delivery.server';
@@ -22,18 +22,17 @@ export class Service extends Context.Service<
   {
     readonly dispatch: (
       batch: SubmissionBatch,
-    ) => Effect.Effect<DeliveryResult<void>, MailError | PersistenceError>;
-    readonly drain: Effect.Effect<
-      number,
-      PersistenceError | DispatchError
+    ) => Effect.Effect<
+      DeliveryResult<void>,
+      MailError | PersistenceError | DeliveryTimeout
     >;
+    readonly drain: Effect.Effect<number, PersistenceError | DispatchError>;
   }
 >()('gycc/lib/form-notifications.server/Service') {}
 
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const forms = yield* Forms.Service;
     const deliveries = yield* NotificationDelivery.Service;
     const mailer = yield* Mailer.Service;
 
@@ -41,10 +40,14 @@ export const layer = Layer.effect(
       batch: SubmissionBatch,
     ) {
       const key = adminEmailDeliveryKey(batch.id);
-      const message = notificationMessage(batch);
+      const intent = yield* deliveries.intent(key);
       return yield* deliveries.deliver(
-        key,
-        mailer.send({ ...message, idempotencyKey: key }),
+        intent,
+        mailer.send({
+          subject: intent.subject,
+          content: intent.content,
+          idempotencyKey: key,
+        }),
       );
     });
 
@@ -52,22 +55,32 @@ export const layer = Layer.effect(
       const pending = yield* deliveries.pending();
       const results = yield* Effect.forEach(
         pending,
-        (id) =>
-          forms.getBatch(id).pipe(
-            Effect.flatMap(dispatch),
-            Effect.as(true),
-            Effect.catch((error) =>
-              Effect.logError('Form notification dispatch failed', error).pipe(
-                Effect.as(false),
+        (intent) =>
+          deliveries
+            .deliver(
+              intent,
+              mailer.send({
+                subject: intent.subject,
+                content: intent.content,
+                idempotencyKey: intent.key,
+              }),
+            )
+            .pipe(
+              Effect.as(true),
+              Effect.catch((error) =>
+                Effect.logError(
+                  'Form notification dispatch failed',
+                  error,
+                ).pipe(Effect.as(false)),
               ),
             ),
-          ),
         { concurrency: 4 },
       );
       return results.filter(Boolean).length;
     }).pipe(
       Effect.mapError(
-        () => new DispatchError({ operation: 'drain Form notification outbox' }),
+        () =>
+          new DispatchError({ operation: 'drain Form notification outbox' }),
       ),
     );
 

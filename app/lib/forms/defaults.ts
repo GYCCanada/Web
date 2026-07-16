@@ -16,6 +16,14 @@ export const defaultContactForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
 )({
   title: { en: 'Contact', fr: 'Contact' },
+  notification: {
+    _tag: 'contact',
+    name: 'name',
+    method: 'method',
+    email: 'email',
+    phone: 'phone',
+    message: 'message',
+  },
   fields: [
     {
       _tag: 'requiredText',
@@ -128,6 +136,17 @@ export const defaultVolunteerForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
 )({
   title: { en: 'Volunteer', fr: 'Bénévolat' },
+  notification: {
+    _tag: 'volunteer',
+    name: 'name',
+    method: 'method',
+    email: 'email',
+    phone: 'phone',
+    why: 'why',
+    background: 'background',
+    age: 'age',
+    location: 'location',
+  },
   fields: [
     {
       _tag: 'requiredText',
@@ -281,6 +300,12 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
   FormDefinition,
 )({
   title: { en: 'Registration', fr: 'Inscription' },
+  notification: {
+    _tag: 'registration',
+    name: 'name',
+    email: 'email',
+    type: 'type',
+  },
   fields: [
     {
       _tag: 'requiredText',
@@ -555,4 +580,3 @@ export const defaultRegistrationForm: FormDefinition = Schema.decodeUnknownSync(
     ],
   },
 });
-

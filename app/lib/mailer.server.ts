@@ -7,7 +7,9 @@ import { Env } from './env.server';
 
 export class MailError extends Schema.TaggedErrorClass<MailError>()(
   'Mailer.Error',
-  { cause: Schema.optional(Schema.Defect()) },
+  {
+    cause: Schema.optional(Schema.Defect()),
+  },
 ) {}
 
 /**
@@ -53,6 +55,9 @@ export const layer = Layer.effect(
         user: mail.user,
         pass: Redacted.value(mail.pass),
       },
+      connectionTimeout: 30_000,
+      greetingTimeout: 30_000,
+      socketTimeout: 120_000,
     });
 
     const send = Effect.fn('Mailer.send')(

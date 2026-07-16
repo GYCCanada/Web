@@ -29,11 +29,9 @@ export interface SuccessToast {
   readonly description: TranslationKey;
 }
 
-/**
- * `notify` receives the committed relational Submission through the durable
- * delivery ledger. A failed delivery may retry; a delivered batch never sends
- * again when its submission command is replayed.
- */
+/** Route-owned form, page gate, and success metadata. Notification semantics
+ * live in the immutable Form definition; dispatch is owned by
+ * `FormNotifications` and its durable outbox. */
 export interface FormActionConfig {
   readonly form: FormId;
   /**
@@ -50,7 +48,7 @@ export interface FormActionConfig {
 /**
  * Build the route `action` for one form. Wraps the generic body in
  * `routeFormAction` (the same wrapper the hand-tuned forms use), so a migrated
- * route is `export const action = formAction({ form, notify, success })` — no
+ * route is `export const action = formAction({ form, page, success })` — no
  * inline pipeline. The body yields a {@link FormSuccess} only to satisfy the
  * wrapper's body type; on the happy path the terminal `toast.redirect` fails with
  * a `RedirectError` the wrapper forwards to the runtime, so the return is
@@ -127,6 +125,8 @@ export const formAction = (config: FormActionConfig) =>
           'Mailer.Error': () =>
             formValidationError({ formErrors: [`${config.form}.form.error`] }),
           'NotificationDelivery.PersistenceError': () =>
+            formValidationError({ formErrors: [`${config.form}.form.error`] }),
+          'NotificationDelivery.Timeout': () =>
             formValidationError({ formErrors: [`${config.form}.form.error`] }),
         }),
       );
