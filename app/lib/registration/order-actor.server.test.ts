@@ -82,7 +82,7 @@ describe('Registration Order actor', () => {
     }).pipe(Effect.provide(test.layer));
   });
 
-  it.effect('records Checkout transport failure instead of losing the durable operation', () => {
+  it.effect('leaves Checkout pending when transport fails so the durable operation retries', () => {
     const client: Client = {
       createCheckout: () => Effect.fail('Stripe unavailable'),
       refund: () => Effect.die('unused'),
@@ -94,9 +94,10 @@ describe('Registration Order actor', () => {
     );
     return Effect.gen(function* () {
       const processor = yield* OrderActor.Processor;
-      yield* processor.createCheckout(orderId);
-      expect(test.state().status).toBe('failed');
-      expect(test.events[0]?.event._tag).toBe('CheckoutCreationFailed');
+      const exit = yield* Effect.exit(processor.createCheckout(orderId));
+      expect(exit._tag).toBe('Failure');
+      expect(test.state().status).toBe('preparing_checkout');
+      expect(test.events).toEqual([]);
     }).pipe(Effect.provide(test.layer));
   });
 
@@ -153,7 +154,7 @@ describe('Registration Order actor', () => {
     }).pipe(Effect.provide(test.layer));
   });
 
-  it.effect('records a refund transport failure for operator review', () => {
+  it.effect('leaves a refund pending on transport failure so the same attempt retries', () => {
     const client: Client = {
       createCheckout: () => Effect.die('unused'),
       refund: () => Effect.fail('Stripe unavailable'),
@@ -170,11 +171,43 @@ describe('Registration Order actor', () => {
     );
     return Effect.gen(function* () {
       const processor = yield* OrderActor.Processor;
-      yield* processor.refund(orderId, 100);
-      expect(test.state().status).toBe('refund_failed');
+      const exit = yield* Effect.exit(processor.refund(orderId, 100));
+      expect(exit._tag).toBe('Failure');
+      expect(test.state().status).toBe('refund_pending');
       expect(test.events.map((command) => command.event._tag)).toEqual([
         'RefundRequested',
-        'RefundFailed',
+      ]);
+    }).pipe(Effect.provide(test.layer));
+  });
+
+  it.effect('resumes a refund already persisted as pending after a worker crash', () => {
+    const refundCalls: unknown[] = [];
+    const client: Client = {
+      createCheckout: () => Effect.die('unused'),
+      refund: (input, options) => {
+        refundCalls.push({ input, options });
+        return Effect.succeed({ id: 're_resumed', status: 'succeeded' });
+      },
+      constructEvent: () => Effect.die('unused'),
+    };
+    const test = harness(
+      {
+        status: 'refund_pending',
+        amount: Cents.make(5_000),
+        confirmedAt: 1,
+        refundStartedAt: 100,
+        stripePaymentIntentId: 'pi_actor',
+      },
+      client,
+    );
+    return Effect.gen(function* () {
+      const processor = yield* OrderActor.Processor;
+      yield* processor.refund(orderId, 100);
+      expect(refundCalls).toHaveLength(1);
+      expect(test.state().status).toBe('refunded');
+      expect(test.events.map((command) => command.event._tag)).toEqual([
+        'RefundRequested',
+        'RefundSucceeded',
       ]);
     }).pipe(Effect.provide(test.layer));
   });

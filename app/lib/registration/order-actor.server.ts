@@ -1,6 +1,6 @@
 export * as OrderActor from './order-actor.server';
 
-import { Clock, Context, Effect, Layer, Result, Schema } from 'effect';
+import { Clock, Context, Effect, Layer, Schema } from 'effect';
 import { Actor } from 'effect-encore';
 
 import {
@@ -169,31 +169,28 @@ export const processorLayer = Layer.effect(
 
     const createCheckout = Effect.fn('OrderProcessor.createCheckout')(
       function* (orderId: OrderId) {
-        const checkout = yield* repository.checkout(orderId).pipe(
-          Effect.orDie,
-        );
+        const checkout = yield* repository.checkout(orderId).pipe(Effect.result);
+        if (checkout._tag === 'Failure') {
+          if (checkout.failure instanceof OrderRepository.OrderNotFound) return;
+          return yield* Effect.die(checkout.failure);
+        }
         const now = yield* Clock.currentTimeMillis;
-        const result = yield* stripe
+        const created = yield* stripe
           .createCheckout({
-            ...checkout,
+            ...checkout.success,
             now,
           })
-          .pipe(Effect.result);
+          .pipe(Effect.orDie);
         yield* repository
           .apply(
-            Result.isSuccess(result)
-              ? {
-                  orderId,
-                  event: {
-                    _tag: 'CheckoutCreated',
-                    sessionId: result.success.sessionId,
-                    checkoutUrl: result.success.url,
-                  },
-                }
-              : {
-                  orderId,
-                  event: { _tag: 'CheckoutCreationFailed' },
-                },
+            {
+              orderId,
+              event: {
+                _tag: 'CheckoutCreated',
+                sessionId: created.sessionId,
+                checkoutUrl: created.url,
+              },
+            },
           )
           .pipe(Effect.asVoid, Effect.orDie);
       },
@@ -235,7 +232,6 @@ export const processorLayer = Layer.effect(
           .pipe(Effect.orDie);
         if (
           requested._tag !== 'Applied' ||
-          !requested.transition.changed ||
           requested.transition.state.status !== 'refund_pending'
         ) {
           return;
@@ -243,32 +239,29 @@ export const processorLayer = Layer.effect(
 
         const paymentIntentId =
           requested.transition.state.stripePaymentIntentId;
-        const refunded =
-          paymentIntentId === undefined
-            ? Result.fail(new Error('Order has no Stripe PaymentIntent'))
-            : yield* stripe
-                .refund({
-                  orderId,
-                  paymentIntentId,
-                  idempotencyKey: `registration:refund:${orderId}`,
-                })
-                .pipe(Effect.result);
         const completedAt = yield* Clock.currentTimeMillis;
-        if (Result.isFailure(refunded)) {
+        if (paymentIntentId === undefined) {
           yield* repository
             .apply({
               orderId,
               event: {
                 _tag: 'RefundFailed',
                 at: completedAt,
-                detail: 'Stripe did not accept the full refund',
+                detail: 'Order has no Stripe PaymentIntent',
               },
             })
             .pipe(Effect.asVoid, Effect.orDie);
           return;
         }
+        const refunded = yield* stripe
+          .refund({
+            orderId,
+            paymentIntentId,
+            idempotencyKey: `registration:refund:${orderId}`,
+          })
+          .pipe(Effect.orDie);
 
-        if (refunded.success.status === 'succeeded') {
+        if (refunded.status === 'succeeded') {
           yield* repository
             .apply({
               orderId,
@@ -276,9 +269,9 @@ export const processorLayer = Layer.effect(
             })
             .pipe(Effect.asVoid, Effect.orDie);
         } else if (
-          refunded.success.status === 'failed' ||
-          refunded.success.status === 'canceled' ||
-          refunded.success.status === 'cancelled'
+          refunded.status === 'failed' ||
+          refunded.status === 'canceled' ||
+          refunded.status === 'cancelled'
         ) {
           yield* repository
             .apply({
@@ -286,7 +279,7 @@ export const processorLayer = Layer.effect(
               event: {
                 _tag: 'RefundFailed',
                 at: completedAt,
-                detail: `Stripe refund entered ${refunded.success.status} status`,
+                detail: `Stripe refund entered ${refunded.status} status`,
               },
             })
             .pipe(Effect.asVoid, Effect.orDie);
