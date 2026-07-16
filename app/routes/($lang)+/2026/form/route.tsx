@@ -1,22 +1,24 @@
-import { type MetaFunction, useActionData, useLoaderData } from 'react-router';
+import { type MetaFunction, redirect, useActionData, useLoaderData } from 'react-router';
+import { Effect, Result, Schema } from 'effect';
 
+import { Auth } from '~/lib/auth.server';
 import { Content } from '~/lib/content.server';
+import { ConferenceSlug } from '~/lib/content/schema';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeHandler } from '~/lib/effect/route';
+import { FormDefinition } from '~/lib/forms/definition';
 import { Forms } from '~/lib/forms/forms.server';
 import {
   newSubmissionCommandFields,
   resolveSubmissionCommandFields,
 } from '~/lib/forms/submission-command';
 import { getLocale } from '~/lib/localization/localization';
+import { registrationIntakeAction } from '~/lib/registration/intake-action.server';
+import { Registrar } from '~/lib/registration/registrar.server';
 
-import { action } from '../../registration-route';
 import { RegistrationForm } from '../../registration-form';
 
-// The registration server action (net-new in Branch 7.3) is shared across all
-// three year shells — RegFox carries the live channel (settled #9), so the
-// on-site persist-then-notify path is one configured action, not three forks.
-export { action };
+export const action = registrationIntakeAction;
 
 export const meta: MetaFunction<typeof loader> = ({ params }) => {
   const locale = getLocale(params);
@@ -40,23 +42,39 @@ export const meta: MetaFunction<typeof loader> = ({ params }) => {
 };
 
 export const loader = routeHandler(function* () {
-  const { params } = yield* ReactRouterContext;
+  const { params, request } = yield* ReactRouterContext;
   const locale = getLocale(params);
   const content = yield* Content.Service;
   const forms = yield* Forms.Service;
+  const channel = yield* (yield* Registrar.Service).get(ConferenceSlug.make('/2026'));
+  const publicChannel = Registrar.projectPublicChannel(channel, locale);
+  if (publicChannel.intake === 'external') {
+    return yield* Effect.fail(redirect(publicChannel.url));
+  }
+  if (publicChannel.intake === 'unavailable') {
+    return yield* Effect.fail(new Response('Not Found', { status: 404 }));
+  }
+  if (publicChannel.intake === 'preview') {
+    const auth = yield* Auth.Service;
+    const authenticated = yield* auth
+      .checkCookie(request.headers.get('cookie'))
+      .pipe(Effect.result);
+    if (Result.isFailure(authenticated)) {
+      return yield* Effect.fail(new Response('Not Found', { status: 404 }));
+    }
+  }
   const conference = yield* content.getCurrentConference(locale);
-  // The current immutable relational definition drives validation and copy; an
-  // admin publication changes both with no code deploy.
-  const published = yield* forms.current('registration');
+  const published = yield* forms.published('registration', publicChannel.formVersion);
   return {
     conference,
-    definition: published.definition,
+    definition: yield* Schema.encodeEffect(FormDefinition)(published.definition),
     command: newSubmissionCommandFields(published.version),
+    preview: publicChannel.intake === 'preview',
   };
 });
 
 export default function Registration2026() {
-  const { definition, command } = useLoaderData<typeof loader>();
+  const { definition, command, preview } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   return (
     <RegistrationForm
@@ -64,6 +82,7 @@ export default function Registration2026() {
       definition={definition}
       command={resolveSubmissionCommandFields(command, actionData?.command)}
       actionData={actionData?.result}
+      preview={preview}
     />
   );
 }

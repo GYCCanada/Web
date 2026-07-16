@@ -73,6 +73,15 @@ const fullDefinitionJson = {
       invalidMessage: 'registration.form.website.required',
     },
     {
+      _tag: 'number',
+      name: 'tickets',
+      label: text('Tickets', 'Billets'),
+      min: 1,
+      max: 10,
+      requiredMessage: 'registration.form.gender.required',
+      invalidMessage: 'registration.form.merch.required',
+    },
+    {
       _tag: 'literal',
       name: 'gender',
       label: text('Gender', 'Genre'),
@@ -221,13 +230,14 @@ describe('FieldKind is a CLOSED set (no arbitrary field type)', () => {
     ).toBe(true);
   });
 
-  test('the eight kinds decode at the FieldKind boundary', () => {
+  test('the nine kinds decode at the FieldKind boundary', () => {
     const decodeField = Schema.decodeUnknownResult(FieldKind);
     const kinds = [
       'requiredText',
       'optionalText',
       'email',
       'url',
+      'number',
       'literal',
       'checkboxBoolean',
       'arrayOfLiteral',
@@ -504,4 +514,247 @@ describe('structural invariants', () => {
       }),
     ).toBe(true);
   });
+});
+
+describe('commerce definition integrity', () => {
+  const literal = {
+    _tag: 'literal',
+    name: 'ticketType',
+    label: text('Ticket type', 'Type de billet'),
+    requiredMessage: 'registration.form.gender.required',
+    options: [
+      { value: 'adult', label: text('Adult', 'Adulte') },
+      { value: 'student', label: text('Student', 'Étudiant') },
+    ],
+  } as const;
+  const toggle = {
+    _tag: 'checkboxBoolean',
+    name: 'banquet',
+    label: text('Banquet', 'Banquet'),
+    requiredMessage: 'registration.form.tos.required',
+  } as const;
+  const quantity = {
+    _tag: 'number',
+    name: 'guests',
+    label: text('Guests', 'Invités'),
+    min: 0,
+    max: 5,
+    requiredMessage: 'registration.form.gender.required',
+    invalidMessage: 'registration.form.merch.required',
+  } as const;
+  const base = {
+    title: text('Registration', 'Inscription'),
+    fields: [literal, toggle, quantity],
+  } as const;
+  const pricing = (rules: ReadonlyArray<unknown>, windows?: ReadonlyArray<unknown>) => ({
+    currency: 'cad',
+    base: 5_000,
+    registrationClosesAt: '2027-01-01T05:00:00.000Z',
+    rules,
+    ...(windows === undefined ? {} : { windows }),
+  });
+
+  test('number is accepted while an unknown kind remains rejected', () => {
+    expect(succeeds(base)).toBe(true);
+    expect(
+      fails({
+        ...base,
+        fields: [{ ...quantity, _tag: 'currencyInput' }],
+      }),
+    ).toBe(true);
+  });
+
+  test('pricing rejects an unknown field, a kind mismatch, and an off-list option', () => {
+    expect(
+      fails({
+        ...base,
+        pricing: pricing([{ _tag: 'toggle', field: 'missing', amount: 500 }]),
+      }),
+    ).toBe(true);
+    expect(
+      fails({
+        ...base,
+        pricing: pricing([{ _tag: 'quantity', field: 'banquet', unit: 500 }]),
+      }),
+    ).toBe(true);
+    expect(
+      fails({
+        ...base,
+        pricing: pricing([
+          {
+            _tag: 'choice',
+            field: 'ticketType',
+            prices: [{ option: 'senior', amount: 500 }],
+          },
+        ]),
+      }),
+    ).toBe(true);
+  });
+
+  test('exact UTC windows round-trip; inverted and overlapping windows are rejected', () => {
+    const windows = [
+      {
+        id: 'abcdefghijklmnopqrstu',
+        startsAt: '2026-09-01T04:00:00.000Z',
+        endsAt: '2026-10-01T04:00:00.000Z',
+        delta: -1_000,
+      },
+      {
+        id: 'vwxyzABCDEFGHIJKLMNOP',
+        startsAt: '2026-10-01T04:00:00.000Z',
+        endsAt: '2026-11-01T04:00:00.000Z',
+        delta: 500,
+      },
+    ] as const;
+    const value = { ...base, pricing: pricing([], windows) };
+    const decoded = Schema.decodeUnknownSync(FormDefinition)(value);
+    const encoded = Schema.encodeUnknownSync(FormDefinition)(decoded);
+    expect(encoded.pricing?.windows).toEqual(windows);
+
+    expect(
+      fails({
+        ...base,
+        pricing: pricing([], [
+          { ...windows[0], endsAt: windows[0].startsAt },
+        ]),
+      }),
+    ).toBe(true);
+    expect(
+      fails({
+        ...base,
+        pricing: pricing([], [
+          windows[0],
+          {
+            ...windows[1],
+            startsAt: '2026-09-15T04:00:00.000Z',
+          },
+        ]),
+      }),
+    ).toBe(true);
+  });
+
+  const activeRule = (predicate: unknown, target = 'guests') => ({
+    _tag: 'activeWhenEquals',
+    predicate,
+    target,
+  });
+
+  test('activation rejects dangling, wrong-kind, off-list, and cyclic references', () => {
+    expect(
+      fails({
+        ...base,
+        rules: [
+          activeRule({ _tag: 'checkboxChecked', when: 'missing' }),
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      fails({
+        ...base,
+        rules: [activeRule({ _tag: 'checkboxChecked', when: 'ticketType' })],
+      }),
+    ).toBe(true);
+    expect(
+      fails({
+        ...base,
+        rules: [
+          activeRule({
+            _tag: 'literalEquals',
+            when: 'ticketType',
+            equals: ['senior'],
+          }),
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      fails({
+        ...base,
+        fields: [
+          literal,
+          {
+            ...literal,
+            name: 'mealType',
+          },
+        ],
+        rules: [
+          activeRule(
+            {
+              _tag: 'literalEquals',
+              when: 'ticketType',
+              equals: ['adult'],
+            },
+            'mealType',
+          ),
+          activeRule(
+            {
+              _tag: 'literalEquals',
+              when: 'mealType',
+              equals: ['student'],
+            },
+            'ticketType',
+          ),
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  const billingMode = (options: unknown) => ({
+    label: text('Payment', 'Paiement'),
+    requiredMessage: 'registration.form.email.required',
+    options,
+  });
+  const payer = {
+    label: text('Payer', 'Payeur'),
+    nameField: {
+      label: text('Name', 'Nom'),
+      requiredMessage: 'registration.form.name.required',
+    },
+    emailField: {
+      label: text('Email', 'Courriel'),
+      requiredMessage: 'registration.form.email.required',
+      invalidMessage: 'registration.form.email.error',
+    },
+  };
+
+  test('party enforces group if and only if payer is authored', () => {
+    const group = { group: text('One payment', 'Un paiement') };
+    const individual = {
+      perRegistrant: text('Each pays', 'Chacun paie'),
+    };
+    expect(
+      succeeds({ ...base, party: { billingMode: billingMode(group), payer } }),
+    ).toBe(true);
+    expect(
+      fails({ ...base, party: { billingMode: billingMode(group) } }),
+    ).toBe(true);
+    expect(
+      succeeds({ ...base, party: { billingMode: billingMode(individual) } }),
+    ).toBe(true);
+    expect(
+      fails({
+        ...base,
+        party: { billingMode: billingMode(individual), payer },
+      }),
+    ).toBe(true);
+  });
+
+  it.effect('legacy commerce-free definitions and notification projections round-trip', () =>
+    Effect.gen(function* () {
+      const legacy = {
+        ...base,
+        notification: {
+          _tag: 'registration',
+          name: 'ticketType',
+          email: 'ticketType',
+          type: 'ticketType',
+        },
+      } as const;
+      const decoded = yield* Schema.decodeUnknownEffect(FormDefinition)(legacy);
+      const restored = yield* roundTrips(FormDefinition, decoded);
+      expect(restored).toEqual(decoded);
+      expect(restored.pricing).toBeUndefined();
+      expect(restored.party).toBeUndefined();
+      expect(restored.notification).toEqual(decoded.notification);
+    }),
+  );
 });

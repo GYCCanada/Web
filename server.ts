@@ -1,5 +1,5 @@
 import { BunHttpServer, BunRuntime } from '@effect/platform-bun';
-import { Data, Effect, Layer } from 'effect';
+import { Data, Effect, Layer, Schedule } from 'effect';
 import {
   HttpRouter,
   HttpServerRequest,
@@ -13,6 +13,7 @@ import {
   checkAppReady,
   disposeAppRuntime,
   drainFormNotifications,
+  expireRegistrationOrders,
   makeRequestRuntime,
   type RequestRuntime,
 } from './app/lib/effect/runtime.ts';
@@ -253,15 +254,19 @@ const StartupCheck = Layer.effectDiscard(
     yield* Effect.addFinalizer(() => Effect.promise(disposeAppRuntime));
     yield* Env.Service;
     yield* Effect.promise(checkAppReady);
-    yield* Effect.forkScoped(
-      Effect.forever(
-        Effect.promise(drainFormNotifications).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logError('Form notification worker failed', cause),
-          ),
-          Effect.delay('30 seconds'),
-        ),
+    yield* Effect.promise(drainFormNotifications).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError('Form notification worker pass failed', cause),
       ),
+      Effect.repeat(Schedule.spaced('30 seconds')),
+      Effect.forkScoped,
+    );
+    yield* Effect.promise(expireRegistrationOrders).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError('Registration Order expiry worker pass failed', cause),
+      ),
+      Effect.repeat(Schedule.spaced('30 seconds')),
+      Effect.forkScoped,
     );
   }),
 ).pipe(Layer.provide(Env.layer));

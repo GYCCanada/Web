@@ -43,6 +43,18 @@ export default function AdminIndex() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
+          Registration channel
+        </h2>
+        <Link
+          to="/admin/registration"
+          className="inline-flex min-h-11 items-center rounded-md bg-red-700 px-4 text-sm font-medium text-white transition-colors hover:bg-red-800"
+        >
+          Manage registration launch
+        </Link>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
           Forms
         </h2>
         <ul className="grid gap-2 sm:grid-cols-2">

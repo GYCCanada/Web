@@ -29,13 +29,13 @@ emitted `TranslationKey` sets. The oracle is removed once registration is fully 
 
 ADR 0010 supersedes the original bucket-Submission decision: Submissions now persist as
 transactional relational aggregates tied to immutable Form versions, with email as an
-idempotent post-commit notification. For 2026 the **live
-registration channel is RegFox** (the Conference's `registrationUrl`); the on-site form is
-built and proven but not load-bearing for the launch, so a mid-flight builder cannot block
-Friday.
+idempotent post-commit notification. ADR 0011 supersedes the original RegFox-only channel
+decision: the CMS-owned Registration channel now selects `external`, `preview`, `open`, or
+`draining` operation against a pinned Form version.
 
-ADR 0010 supersedes the persistence decision in the preceding paragraph. The structural
-form-builder decision and its equivalence-harness migration remain accepted.
+ADR 0010 supersedes the persistence decision in the preceding paragraph, and ADR 0011
+supersedes its channel decision. The structural form-builder decision and its
+equivalence-harness migration remain accepted.
 
 ## Consequences
 

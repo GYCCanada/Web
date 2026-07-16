@@ -9,7 +9,7 @@ import {
 
 import { readPageView } from "~/lib/content/pages/pages.server";
 import { FormProvider, useForm } from "~/lib/conform";
-import { definitionToSchema } from "~/lib/forms/decode";
+import { compileForm } from "~/lib/forms/compiled-form";
 import { FormDefinition } from "~/lib/forms/definition";
 import { Forms } from "~/lib/forms/forms.server";
 import { FormFields } from "~/lib/forms/render";
@@ -81,9 +81,10 @@ export default function Index() {
     () => Schema.decodeUnknownSync(FormDefinition)(encodedDefinition),
     [encodedDefinition],
   );
+  const compiled = React.useMemo(() => compileForm(definition), [definition]);
   const clientSchema = React.useMemo(
-    () => Schema.toStandardSchemaV1(definitionToSchema(definition)),
-    [definition],
+    () => Schema.toStandardSchemaV1(compiled.codec),
+    [compiled],
   );
 
   const actionData = useActionData<typeof action>();
@@ -117,7 +118,7 @@ export default function Index() {
       <FormProvider context={f.context}>
         <Form className="flex flex-col gap-4" method="POST" {...f.props}>
           <SubmissionCommandInputs {...submissionCommand} />
-          <FormFields definition={definition} formId={f.id} />
+          <FormFields definition={compiled.renderModel} formId={f.id} />
 
           <div>
             <Button type="submit" variant="accent">

@@ -1,4 +1,6 @@
-import { Cause, Effect, Exit, Layer, ManagedRuntime } from 'effect';
+import { Cause, Clock, Effect, Exit, Layer, ManagedRuntime } from 'effect';
+import { SingleRunner } from 'effect/unstable/cluster';
+import * as ShardingConfig from 'effect/unstable/cluster/ShardingConfig';
 import { data, redirect } from 'react-router';
 
 import { AdminDisabled, Auth, BadPassword, Unauthorized } from '~/lib/auth.server';
@@ -12,6 +14,12 @@ import { FormNotifications } from '~/lib/form-notifications.server';
 import { Sendgrid, SendgridDisabled, SendgridError } from '~/lib/sendgrid.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
 import { NotificationDelivery } from '~/lib/notification-delivery.server';
+import { OrderActor } from '~/lib/registration/order-actor.server';
+import { OrderRepository } from '~/lib/registration/order-repository.server';
+import { RegistrationIntake } from '~/lib/registration/intake.server';
+import { Registrar } from '~/lib/registration/registrar.server';
+import { RegistrationOrders } from '~/lib/registration/order-service.server';
+import { StripeGateway } from '~/lib/registration/stripe-gateway.server';
 import { NotFound, Storage, StorageError } from '~/lib/storage.server';
 import { Toast } from '~/lib/toast.server';
 
@@ -33,6 +41,11 @@ export type AppServices =
   | Forms.Service
   | FormNotifications.Service
   | NotificationDelivery.Service
+  | Registrar.Service
+  | RegistrationIntake.Service
+  | RegistrationOrders.Service
+  | StripeGateway.Service
+  | OrderActor.Sender
   | Auth.Service
   | Storage.Service
   | Toast;
@@ -57,6 +70,7 @@ export const makeAppLayer = (
   storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
   databaseLayer: typeof Database.layer | typeof DatabaseTest.layer,
   mailerLayer: Layer.Layer<Mailer.Service, never, Env.Service> = Mailer.layer,
+  runnerStorage: 'sql' | 'memory' = 'sql',
 ) => {
   const baseLayer = Layer.mergeAll(
     mailerLayer,
@@ -65,15 +79,59 @@ export const makeAppLayer = (
     Content.layer,
     Auth.layer,
   ).pipe(Layer.provideMerge(storageLayer));
-  const relationalLayer = Layer.mergeAll(
+  const relationalCore = Layer.mergeAll(
     Forms.layer,
     NotificationDelivery.layer,
+    OrderRepository.layer,
   ).pipe(Layer.provideMerge(databaseLayer));
+  const stripeLayer = StripeGateway.layer.pipe(
+    Layer.provideMerge(Env.layer),
+  );
+  const orderSender =
+    runnerStorage === 'memory'
+      ? OrderActor.senderLayer.pipe(
+          Layer.provideMerge(
+            OrderActor.testHandlers.pipe(
+              Layer.provideMerge(Layer.merge(relationalCore, stripeLayer)),
+              Layer.provideMerge(ShardingConfig.layerDefaults),
+            ),
+          ),
+        )
+      : OrderActor.senderLayer.pipe(
+          Layer.provideMerge(
+            OrderActor.handlers.pipe(
+              Layer.provideMerge(Layer.merge(relationalCore, stripeLayer)),
+              Layer.provideMerge(
+                SingleRunner.layer({
+                  runnerStorage: 'sql',
+                  shardingConfig: {
+                    entityMessagePollInterval: '250 millis',
+                    entityReplyPollInterval: '250 millis',
+                    refreshAssignmentsInterval: '1 second',
+                  },
+                }).pipe(Layer.provideMerge(databaseLayer)),
+              ),
+            ),
+          ),
+        );
+  const registrationLayer = Layer.mergeAll(
+    Registrar.layer.pipe(Layer.provideMerge(Registrar.infrastructureLayer)),
+    RegistrationIntake.layer,
+    RegistrationOrders.layer,
+  ).pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(relationalCore, orderSender, stripeLayer),
+    ),
+  );
   const notificationLayer = FormNotifications.layer.pipe(
-    Layer.provideMerge(relationalLayer),
+    Layer.provideMerge(relationalCore),
     Layer.provideMerge(baseLayer),
   );
-  return Layer.mergeAll(DraftEditor.layer, notificationLayer).pipe(
+  return Layer.mergeAll(
+    DraftEditor.layer,
+    notificationLayer,
+    registrationLayer,
+  ).pipe(
     Layer.provideMerge(baseLayer),
     Layer.provideMerge(Env.layer),
   );
@@ -99,6 +157,16 @@ export const drainFormNotifications = (): Promise<number> =>
   AppRuntime.runPromise(
     Effect.gen(function* () {
       return yield* (yield* FormNotifications.Service).drain;
+    }),
+  );
+
+/** Durably enqueue expiry for every Registration Order whose quote is due. */
+export const expireRegistrationOrders = (): Promise<number> =>
+  AppRuntime.runPromise(
+    Effect.gen(function* () {
+      return yield* (yield* RegistrationOrders.Service).expireDue(
+        yield* Clock.currentTimeMillis,
+      );
     }),
   );
 

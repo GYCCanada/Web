@@ -432,11 +432,7 @@ lives in Michigan with his wife and daughter where he works as a pastor.
       },
       dates: { start: "2026-08-05", end: "2026-08-09" },
       // Pricing not set yet — omit `registration` (decodes to `Option.none()`).
-      // The return conference carries ONLY its RegFox `registrationUrl` (the live
-      // 2026 channel, settled #9) — schedule / map / hotels / speakers are still
-      // TBD, so those optional fields are omitted and `hotels` is empty. This sets
-      // up Branch 4's skip proof: /2026 renders hero + Register button + FAQ only.
-      registrationUrl: "https://gyccanada.regfox.com/gyc-canada-2026-speak",
+      // The relational Registration channel is the sole 2026 registrar authority.
       learnMoreEnabled: false,
       travel: { ...disabledTravelSection },
       parking: { ...disabledParkingSection },

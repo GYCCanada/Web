@@ -10,4 +10,4 @@ import { makeAppLayer } from './runtime';
 export const makeTestAppLayer = (
   storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
   mailerLayer: Layer.Layer<Mailer.Service, never, Env.Service> = Mailer.layer,
-) => makeAppLayer(storageLayer, DatabaseTest.layer, mailerLayer);
+) => makeAppLayer(storageLayer, DatabaseTest.layer, mailerLayer, 'memory');

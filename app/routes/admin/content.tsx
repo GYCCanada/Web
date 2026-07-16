@@ -423,11 +423,13 @@ export default function AdminContentEditor() {
                 <legend className="text-sm font-medium text-neutral-800">
                   Links
                 </legend>
-                <Text
-                  label="Registration URL (RegFox)"
-                  name={`${conf}.registrationUrl`}
-                  defaultValue={conference.registrationUrl ?? ''}
-                />
+                {conference.slug === '/2026' ? null : (
+                  <Text
+                    label="Historical registration URL"
+                    name={`${conf}.registrationUrl`}
+                    defaultValue={conference.registrationUrl ?? ''}
+                  />
+                )}
                 <Text
                   label="Schedule URL"
                   name={`${conf}.scheduleUrl`}

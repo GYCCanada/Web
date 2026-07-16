@@ -56,6 +56,27 @@ the committed record, not the record itself. Repeated equal payloads are distinc
 they carry the same explicit idempotency token. _Avoid_: treating a Submission as a transient
 email payload or deriving user intent from its content hash.
 
+### Registration
+
+One accepted group of one or more Registrants for a Conference, validated against an exact
+Registration Form definition version. A Registration may be partially confirmed when its
+Registrants have separate payment responsibilities. _Avoid_: using Submission and
+Registration interchangeably; Submissions preserve submitted answers, while a Registration
+tracks attendance confirmation.
+
+### Registrant
+
+A person included in a Registration. A Registrant becomes confirmed when the Order covering
+their payment responsibility completes, and becomes cancelled when that Order is fully
+refunded. _Avoid_: Payer; a Payer may not be attending.
+
+### Order
+
+A durable payment responsibility for either a whole Registration or one Registrant, carrying
+the server-frozen quote and its payment lifecycle. Every Order uses Stripe Checkout,
+including a zero-dollar Order; a completed Stripe payment is honored even if local expiry
+processing raced ahead of its webhook. _Avoid_: copying Order state onto Submission payloads.
+
 ### Conference
 
 A single annual gathering, identified by its **year** and addressed by a year **slug**
@@ -113,21 +134,45 @@ A Conference may have an empty `speakers`/`seminars` list when speakers are **TB
 
 ### Registration channel
 
-How attendees actually register for a Conference. Two exist: the **external registrar**
-(RegFox, reached via the Conference's optional `registrationUrl` Register button) and the
-**on-site form** (the form-builder–driven registration form whose Submissions commit to the
-relational Submission store before notification, seeding a possible future first-party
-registrar). For 2026 the live
-channel is **RegFox**; the on-site form is built and proven but not load-bearing until/
-unless the first-party registrar is finished before signups open. A Conference names its
-live channel by whether `registrationUrl` is set. _Avoid_: assuming the on-site form is
-the registration channel — it is the registrar's seed, not (yet) the live path.
+How attendees register for a Conference. A Conference has exactly one channel lifecycle:
+**closed** (no registration), **external** (a third-party registrar such as RegFox),
+**preview** (administrators may render and quote the first-party registrar without creating
+a Registration or payment responsibility), **open** (the first-party registrar accepts
+public registrations), or **draining** (new registrations are closed while existing
+payments and Orders finish). For 2026 the channel is **external** through RegFox. _Avoid_:
+independent external-URL and enabled flags; they can describe contradictory live channels.
+Once a channel has been open, it must drain every non-terminal Order before becoming closed
+or external; draining never implies an automatic external fallback.
+
+### Billing mode
+
+How a Registration group's price becomes payment responsibility. **Group** creates one
+payment responsibility for the whole group; **per-registrant** creates one for each
+Registrant. A published Form definition may offer either or both. _Avoid_: deriving billing
+mode from group size.
+
+### Payer
+
+The person responsible for a Group billing-mode payment. A Payer may be nominated without
+being a Registrant. _Avoid_: assuming the first Registrant is always the Payer.
+
+### Registration refund
+
+An operator-authorized return of an Order's complete captured amount. Partial and automatic
+refunds are not part of the first-party registrar's initial policy. _Avoid_: treating a
+cancelled Registration as an implicit refund.
 
 ### Registration window
 
-A Conference may define three pricing windows — **early**, **regular**, **late** — each a
-`[start, end]` date pair. Windows are optional: a Conference with undecided pricing
-(e.g. 2026 at present) simply omits `registration`.
+A Conference may define pricing windows such as **early**, **regular**, and **late**. Each
+window is a half-open interval of exact instants authored in the Conference time zone and
+normalized to UTC, so every Registrant receives the same server-calculated price. Windows
+are optional when pricing is undecided.
+
+### Conference time zone
+
+The IANA time zone in which a Conference's local schedule and Registration-window cutoffs
+are authored. _Avoid_: browser-local or server-local time for pricing decisions.
 
 ## Decisions
 

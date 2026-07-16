@@ -21,7 +21,7 @@ import {
 } from './defaults';
 import { ValidationIssue, validationIssues } from '../validation-issue';
 
-import { decodeForm, definitionToSchema } from './decode';
+import { compileForm } from './compiled-form';
 import { FORM_IDS, FormDefinition, FormId } from './definition';
 import {
   prepareDefinitionVersion,
@@ -242,6 +242,10 @@ export class Service extends Context.Service<
     readonly current: <F extends FormId>(
       form: F,
     ) => Effect.Effect<PublishedForm<F>, FormNotPublished | FormPersistenceError>;
+    readonly published: <F extends FormId>(
+      form: F,
+      version: FormDefinitionVersionId,
+    ) => Effect.Effect<PublishedForm<F>, FormNotPublished | FormPersistenceError>;
     readonly publish: <F extends FormId>(
       command: PublishCommand<F>,
     ) => Effect.Effect<
@@ -304,6 +308,29 @@ export const layer = Layer.effect(
     ) {
       return yield* currentUnmapped(form).pipe(
         Effect.mapError(persistenceError('read current Form definition')),
+      );
+    });
+
+    const published = Effect.fn('Forms.published')(function* <F extends FormId>(
+      form: F,
+      version: FormDefinitionVersionId,
+    ) {
+      return yield* Effect.gen(function* () {
+        const rows = yield* sql<PublishedRow>`
+          SELECT
+            form_id AS "form",
+            version_id AS "version",
+            definition::text AS "definitionJson",
+            published_at::text AS "publishedAt"
+          FROM form_definition_versions
+          WHERE form_id = ${form}
+            AND version_id = ${version}
+        `;
+        const row = Option.fromNullishOr(rows[0]);
+        if (Option.isNone(row)) return yield* new FormNotPublished({ form });
+        return yield* decodePublished(row.value, form);
+      }).pipe(
+        Effect.mapError(persistenceError('read pinned Form definition')),
       );
     });
 
@@ -439,7 +466,7 @@ export const layer = Layer.effect(
       const submittedAt = yield* decodeTimestamp(batch.submittedAt);
       const definitionVersion = yield* decodeVersion(batch.definitionVersionId);
       const idempotencyToken = IdempotencyToken.make(batch.idempotencyToken);
-      const payloadSchema = Schema.fromJsonString(definitionToSchema(definition));
+      const payloadSchema = Schema.fromJsonString(compileForm(definition).codec);
       const submissions = yield* Effect.forEach(rows, (row) =>
         Schema.decodeUnknownEffect(payloadSchema)(row.payloadJson).pipe(
           Effect.map((payload) => ({
@@ -509,10 +536,11 @@ export const layer = Layer.effect(
       definition: FormDefinition,
       definitionVersion: FormDefinitionVersionId,
     ) {
+      const compiled = compileForm(definition);
       const decoded: Array<Readonly<Record<string, unknown>>> = [];
       const rejected: Array<SubmissionIssue> = [];
       for (const [index, payload] of command.payloads.entries()) {
-        const result = decodeForm(definition, payload);
+        const result = compiled.decode(payload);
         if (Result.isSuccess(result)) {
           decoded.push(result.success);
         } else {
@@ -530,7 +558,7 @@ export const layer = Layer.effect(
         });
       }
 
-      const payloadSchema = Schema.fromJsonString(definitionToSchema(definition));
+      const payloadSchema = Schema.fromJsonString(compiled.codec);
       const payloadJson = yield* Effect.forEach(decoded, (payload) =>
         Schema.encodeUnknownEffect(payloadSchema)(payload),
       ).pipe(Effect.orDie);
@@ -793,7 +821,7 @@ export const layer = Layer.effect(
       yield* auditCurrentNotification(form);
     }
 
-    return Service.of({ current, publish, submit });
+    return Service.of({ current, published, publish, submit });
   }),
 );
 

@@ -1,6 +1,7 @@
 import { Result, Schema, SchemaGetter, SchemaParser } from 'effect';
 import type { Issue } from 'effect/SchemaIssue';
 
+import { activationIndex, isActiveByName } from './activation';
 import type {
   CrossFieldRule,
   FieldKind,
@@ -69,7 +70,7 @@ type Encoded = Record<string, unknown>;
 // ---------------------------------------------------------------------------
 
 /** Required free-text: empty, absent, and non-string all emit `message`. */
-const requiredString = (message: MessageKey) =>
+export const requiredString = (message: MessageKey) =>
   Schema.String.annotate({ message })
     .check(Schema.isMinLength(1, { message }))
     .annotateKey({ messageMissingKey: message });
@@ -111,7 +112,10 @@ const presentEmptyAllowedText = (message: MessageKey) =>
   Schema.String.annotate({ message }).annotateKey({ messageMissingKey: message });
 
 /** Required email: empty/absent emit `requiredMessage`, malformed emits `invalidMessage`. */
-const email = (requiredMessage: MessageKey, invalidMessage: MessageKey) =>
+export const email = (
+  requiredMessage: MessageKey,
+  invalidMessage: MessageKey,
+) =>
   Schema.String.annotate({ message: invalidMessage })
     .check(
       Schema.isMinLength(1, { message: requiredMessage }),
@@ -156,6 +160,31 @@ const stringToBoolean = (message: MessageKey) =>
     )
     .annotate({ message });
 
+const numberFromString = (
+  requiredMessage: MessageKey,
+  invalidMessage: MessageKey,
+  min: number | undefined,
+  max: number | undefined,
+) =>
+  Schema.String.annotate({ message: invalidMessage })
+    .check(Schema.isMinLength(1, { message: requiredMessage }))
+    .pipe(
+      Schema.decodeTo(
+        Schema.Number.check(
+          Schema.isInt({ message: invalidMessage }),
+          Schema.isGreaterThanOrEqualTo(min ?? 0, { message: invalidMessage }),
+          ...(max === undefined
+            ? []
+            : [Schema.isLessThanOrEqualTo(max, { message: invalidMessage })]),
+        ),
+        {
+          decode: SchemaGetter.transform((value) => Number(value)),
+          encode: SchemaGetter.transform((value) => String(value)),
+        },
+      ),
+    )
+    .annotateKey({ messageMissingKey: requiredMessage });
+
 /** Required multi-select over a closed option set: an off-list element emits `message`. */
 const arrayOfLiteral = (
   options: ReadonlyArray<{ readonly value: string }>,
@@ -196,6 +225,13 @@ const fieldToRequiredSchema = (
       return stringToBoolean(field.requiredMessage).annotateKey({
         messageMissingKey: field.requiredMessage,
       });
+    case 'number':
+      return numberFromString(
+        field.requiredMessage,
+        field.invalidMessage,
+        field.min,
+        field.max,
+      );
     case 'arrayOfLiteral':
       return arrayOfLiteral(field.options, field.requiredMessage);
     case 'nestedGroup':
@@ -211,6 +247,7 @@ const fieldToRequiredSchema = (
  */
 const fieldToStructEntry = (
   field: FieldKind,
+  activationTargets: ReadonlySet<string>,
 ): readonly [string, Schema.Top] => {
   if (field._tag === 'optionalText') {
     return [
@@ -239,7 +276,8 @@ const fieldToStructEntry = (
   if (
     (field._tag === 'requiredText' ||
       field._tag === 'email' ||
-      field._tag === 'url') &&
+      field._tag === 'url' ||
+      field._tag === 'number') &&
     field.optional === true
   ) {
     const invalidTypeMessage =
@@ -251,16 +289,23 @@ const fieldToStructEntry = (
       ).annotate({ message: invalidTypeMessage }),
     ];
   }
-  return [field.name, fieldToRequiredSchema(field)];
+  const schema = fieldToRequiredSchema(field);
+  return [
+    field.name,
+    activationTargets.has(field.name)
+      ? Schema.optional(schema as Schema.Codec<unknown, unknown>)
+      : schema,
+  ];
 };
 
 /** Build the `Schema.Struct` field map for a list of fields. */
 const buildStructFields = (
   fields: ReadonlyArray<FieldKind>,
+  activationTargets: ReadonlySet<string> = new Set(),
 ): Record<string, Schema.Top> => {
   const entries: Record<string, Schema.Top> = {};
   for (const field of fields) {
-    const [name, schema] = fieldToStructEntry(field);
+    const [name, schema] = fieldToStructEntry(field, activationTargets);
     entries[name] = schema;
   }
   return entries;
@@ -278,6 +323,7 @@ const buildStructFields = (
  */
 const buildVariantOptionalFields = (
   variant: FormVariantSet,
+  activationTargets: ReadonlySet<string>,
 ): Record<string, Schema.Top> => {
   const entries: Record<string, Schema.Top> = {};
   // The discriminator itself is always required (its absent/off-list value
@@ -289,7 +335,7 @@ const buildVariantOptionalFields = (
     .annotateKey({ messageMissingKey: variant.requiredMessage });
   for (const branch of variant.variants) {
     for (const field of branch.fields) {
-      const [name, schema] = fieldToStructEntry(field);
+      const [name, schema] = fieldToStructEntry(field, activationTargets);
       // Already optional (optionalText / optional checkbox) → keep as-is; an
       // inherently-required leaf is wrapped so the off-variant doesn't demand it.
       entries[name] = Schema.optional(schema as Schema.Codec<unknown, unknown>);
@@ -303,6 +349,8 @@ type PresenceIssue = {
   readonly path: ReadonlyArray<PropertyKey>;
   readonly issue: string;
 };
+
+type ActiveRule = Extract<CrossFieldRule, { _tag: 'activeWhenEquals' }>;
 
 /**
  * The required `MessageKey` a presence-requirable LEAF emits when absent. A
@@ -388,12 +436,14 @@ const isPresenceRequirableLeaf = (
 const variantPresenceIssues = (
   variant: FormVariantSet,
   value: Record<string, unknown>,
+  active: ReadonlyMap<string, ActiveRule>,
 ): ReadonlyArray<PresenceIssue> => {
   const selected = value[variant.discriminator];
   const branch = variant.variants.find((v) => v.value === selected);
   if (!branch) return [];
   const issues: Array<PresenceIssue> = [];
   for (const field of branch.fields) {
+    if (!isActiveByName(field.name, active, value)) continue;
     if (field._tag === 'nestedGroup') {
       // An `optional: true` group (registration's minors-only `parent`, the
       // opt-in `volunteer`) is legitimately absent — the variant never demands
@@ -437,7 +487,7 @@ const variantPresenceIssues = (
  * an empty-permitting `optionalText` target.
  */
 const rulePresenceIssue = (
-  rule: CrossFieldRule,
+  rule: Extract<CrossFieldRule, { _tag: 'requiredWhenEquals' }>,
   value: Record<string, unknown>,
 ): PresenceIssue | undefined => {
   const trigger = value[rule.when];
@@ -448,6 +498,41 @@ const rulePresenceIssue = (
   return triggered && unsatisfied
     ? { path: [rule.target], issue: rule.message }
     : undefined;
+};
+
+const fieldsByName = (
+  definition: FormDefinition,
+): ReadonlyMap<string, FieldKind> => {
+  const fields = new Map<string, FieldKind>();
+  for (const field of definition.fields) fields.set(field.name, field);
+  for (const branch of definition.variant?.variants ?? []) {
+    for (const field of branch.fields) fields.set(field.name, field);
+  }
+  return fields;
+};
+
+const activationIssue = (
+  rule: ActiveRule,
+  field: FieldKind,
+  value: Record<string, unknown>,
+  active: ReadonlyMap<string, ActiveRule>,
+): PresenceIssue | undefined => {
+  const enabled = isActiveByName(rule.target, active, value);
+  const target = value[rule.target];
+  if (!enabled && target !== undefined) {
+    if (field._tag === 'nestedGroup') return groupPresenceIssue(field);
+    return {
+      path: [field.name],
+      issue:
+        'invalidMessage' in field
+          ? field.invalidMessage
+          : field.requiredMessage,
+    };
+  }
+  if (enabled && target === undefined && isPresenceRequirableLeaf(field)) {
+    return { path: [field.name], issue: requiredMessageOf(field) };
+  }
+  return undefined;
 };
 
 /**
@@ -465,11 +550,21 @@ const makePresenceFilter = (definition: FormDefinition) =>
   Schema.makeFilter(
     (value: Record<string, unknown>) => {
       const issues: Array<PresenceIssue> = [];
+      const active = activationIndex(definition);
       if (definition.variant) {
-        issues.push(...variantPresenceIssues(definition.variant, value));
+        issues.push(...variantPresenceIssues(definition.variant, value, active));
       }
+      const fieldIndex = fieldsByName(definition);
       for (const rule of definition.rules ?? []) {
-        const issue = rulePresenceIssue(rule, value);
+        const issue =
+          rule._tag === 'requiredWhenEquals'
+            ? rulePresenceIssue(rule, value)
+            : (() => {
+                const field = fieldIndex.get(rule.target);
+                return field === undefined
+                  ? undefined
+                  : activationIssue(rule, field, value, active);
+              })();
         if (issue) issues.push(issue);
       }
       return issues.length === 0 ? undefined : issues;
@@ -495,11 +590,20 @@ const makePresenceFilter = (definition: FormDefinition) =>
 export const definitionToSchema = (
   definition: FormDefinition,
 ): Schema.Codec<DecodedForm, Encoded> => {
+  const activationTargets = new Set(
+    (definition.rules ?? [])
+      .filter((rule) => rule._tag === 'activeWhenEquals')
+      .map((rule) => rule.target),
+  );
   const fields: Record<string, Schema.Top> = buildStructFields(
     definition.fields,
+    activationTargets,
   );
   if (definition.variant) {
-    Object.assign(fields, buildVariantOptionalFields(definition.variant));
+    Object.assign(
+      fields,
+      buildVariantOptionalFields(definition.variant, activationTargets),
+    );
   }
 
   const struct = Schema.Struct(fields).check(
