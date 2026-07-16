@@ -274,7 +274,6 @@ test(
                 submission_batch_id,
                 idempotency_token,
                 command_hash,
-                public_token_hash,
                 billing_mode,
                 currency,
                 total_amount,
@@ -288,7 +287,6 @@ test(
                 'batch-concurrency',
                 'commerce-attempt',
                 'commerce-hash',
-                'public-hash',
                 'perRegistrant',
                 'cad',
                 0,
@@ -414,7 +412,6 @@ test(
           submission_batch_id,
           idempotency_token,
           command_hash,
-          public_token_hash,
           billing_mode,
           currency,
           total_amount,
@@ -423,7 +420,7 @@ test(
         ) VALUES (
           'registration-actor', '/2026', 'registration', 'v-actor',
           'batch-actor', 'commerce-actor', 'commerce-hash-actor',
-          'public-hash-actor', 'group', 'cad', 5000,
+          'group', 'cad', 5000,
           '2026-08-01T12:00:00Z', '2026-08-02T12:00:00Z'
         )
       `;

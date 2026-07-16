@@ -238,7 +238,6 @@ const registrationCommerce = Effect.gen(function* () {
         REFERENCES submission_batches(batch_id),
       idempotency_token text NOT NULL,
       command_hash text NOT NULL,
-      public_token_hash text NOT NULL UNIQUE,
       billing_mode text NOT NULL CHECK (
         billing_mode IN ('group', 'perRegistrant')
       ),

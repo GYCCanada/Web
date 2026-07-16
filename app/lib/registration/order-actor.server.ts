@@ -80,6 +80,41 @@ export class Processor extends Context.Service<
   }
 >()('gycc/lib/registration/order-actor.server/Processor') {}
 
+export class EnqueueError extends Schema.TaggedErrorClass<EnqueueError>()(
+  'OrderActor.EnqueueError',
+  { operation: Schema.String },
+) {}
+
+export class Sender extends Context.Service<
+  Sender,
+  {
+    readonly createCheckout: (
+      orderId: OrderId,
+    ) => Effect.Effect<void, EnqueueError>;
+  }
+>()('gycc/lib/registration/order-actor.server/Sender') {}
+
+type CreateCheckoutRequirements = Effect.Services<
+  ReturnType<typeof Order.CreateCheckout.send>
+>;
+
+export const senderLayer = Layer.effect(
+  Sender,
+  Effect.gen(function* () {
+    const context = yield* Effect.context<CreateCheckoutRequirements>();
+    return Sender.of({
+      createCheckout: (orderId) =>
+        Order.CreateCheckout.send({ orderId }).pipe(
+          Effect.provide(context),
+          Effect.asVoid,
+          Effect.mapError(
+            () => new EnqueueError({ operation: 'enqueue Checkout creation' }),
+          ),
+        ),
+    });
+  }),
+);
+
 export const processorLayer = Layer.effect(
   Processor,
   Effect.gen(function* () {

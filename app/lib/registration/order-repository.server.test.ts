@@ -54,7 +54,6 @@ const seedOrder = Effect.gen(function* () {
       submission_batch_id,
       idempotency_token,
       command_hash,
-      public_token_hash,
       billing_mode,
       currency,
       total_amount,
@@ -62,7 +61,7 @@ const seedOrder = Effect.gen(function* () {
       quote_expires_at
     ) VALUES (
       'registration-1', '/2026', 'registration', 'v1', 'batch-1',
-      'registration-attempt-1', 'registration-hash-1', 'public-hash-1',
+      'registration-attempt-1', 'registration-hash-1',
       'group', 'cad', 5000, '2026-08-01T12:00:00Z', '2026-08-02T12:00:00Z'
     )
   `;
