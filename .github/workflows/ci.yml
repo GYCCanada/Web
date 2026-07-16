@@ -98,8 +98,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Production boot fail-fasts without MAIL_* (ADR 0004); dummies let the
-      # container boot — nothing sends mail during the smoke.
+      # Production boot fail-fasts without MAIL_* or TOAST_COOKIE_SECRET (see
+      # .env.example, ADR 0004); dummies let the container boot during smoke.
       # `meta.outputs.version` is the primary tag name the metadata-action chose
       # (e.g. sha-d5e414a) — a single value, unlike outputs.tags which is
       # multiline on main. Run the exact image we just loaded.

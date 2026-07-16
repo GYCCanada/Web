@@ -59,14 +59,21 @@ export class Toast extends Context.Service<
       );
       const isProduction = nodeEnv === 'production';
       const secret = isProduction
-        ? yield* Config.nonEmptyString('TOAST_COOKIE_SECRET').pipe(
-            Config.map(Redacted.make),
+        ? yield* Config.redacted('TOAST_COOKIE_SECRET').pipe(
+            Config.mapOrFail((redacted) =>
+              Schema.decodeUnknownEffect(Schema.NonEmptyString)(
+                Redacted.value(redacted).trim(),
+              ).pipe(
+                Effect.as(redacted),
+                Effect.mapError((error) => new Config.ConfigError(error)),
+              ),
+            ),
           )
         : yield* Config.redacted('TOAST_COOKIE_SECRET').pipe(
             Config.withDefault(Redacted.make('development-toast-secret')),
           );
       return makeToastLayer({
-        secret: Redacted.value(secret),
+        secret,
         secure: isProduction,
       });
     }),
@@ -75,7 +82,7 @@ export class Toast extends Context.Service<
 
 /** Explicit constructor for isolated tests and composed runtimes. */
 export function makeToastLayer(options: {
-  readonly secret: string;
+  readonly secret: Redacted.Redacted<string>;
   readonly secure: boolean;
 }) {
   const storage = createCookieSessionStorage({
@@ -84,7 +91,7 @@ export function makeToastLayer(options: {
       sameSite: 'lax',
       path: '/',
       httpOnly: true,
-      secrets: [options.secret],
+      secrets: [Redacted.value(options.secret)],
       secure: options.secure,
     },
   });

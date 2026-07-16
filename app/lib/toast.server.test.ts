@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { ConfigProvider, Effect, Layer } from 'effect';
+import { ConfigProvider, Effect, Layer, Redacted } from 'effect';
 import { createCookieSessionStorage } from 'react-router';
 
 import {
@@ -11,7 +11,10 @@ import {
 } from './toast.server';
 
 const TEST_SECRET = 'toast-test-secret';
-const testLayer = makeToastLayer({ secret: TEST_SECRET, secure: false });
+const testLayer = makeToastLayer({
+  secret: Redacted.make(TEST_SECRET),
+  secure: false,
+});
 const toastSessionStorage = createCookieSessionStorage({
   cookie: {
     name: toastCookieName,
@@ -109,6 +112,21 @@ describe('Toast.get', () => {
   it('requires TOAST_COOKIE_SECRET when constructing production layer', async () => {
     const config = ConfigProvider.layer(
       ConfigProvider.fromEnv({ env: { NODE_ENV: 'production' } }),
+    );
+    const exit = await Effect.runPromise(
+      Effect.scoped(Layer.build(Toast.layer)).pipe(
+        Effect.provide(config),
+        Effect.exit,
+      ),
+    );
+    expect(exit._tag).toBe('Failure');
+  });
+
+  it('rejects a blank TOAST_COOKIE_SECRET in production', async () => {
+    const config = ConfigProvider.layer(
+      ConfigProvider.fromEnv({
+        env: { NODE_ENV: 'production', TOAST_COOKIE_SECRET: '   ' },
+      }),
     );
     const exit = await Effect.runPromise(
       Effect.scoped(Layer.build(Toast.layer)).pipe(
