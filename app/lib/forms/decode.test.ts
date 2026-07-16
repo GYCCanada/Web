@@ -158,6 +158,101 @@ describe('url', () => {
   });
 });
 
+const numberDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'number',
+      name: 'tickets',
+      label: text('Tickets', 'Billets'),
+      min: 1,
+      max: 4,
+      requiredMessage: 'registration.form.gender.required',
+      invalidMessage: 'registration.form.merch.required',
+    },
+  ],
+});
+
+describe('number', () => {
+  test('decodes a bounded integer string to a number', () => {
+    const result = decodeForm(numberDef, { tickets: '3' });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) expect(result.success['tickets']).toBe(3);
+  });
+
+  test('rejects empty, fractional, and out-of-range values with authored keys', () => {
+    expect(errorsFor(numberDef, {})?.fieldErrors['tickets']).toEqual([
+      'registration.form.gender.required',
+    ]);
+    for (const tickets of ['1.5', '0', '5', 'not-a-number']) {
+      expect(
+        errorsFor(numberDef, { tickets })?.fieldErrors['tickets'],
+      ).toEqual(['registration.form.merch.required']);
+    }
+  });
+});
+
+const activationDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'literal',
+      name: 'kind',
+      label: text('Kind', 'Type'),
+      requiredMessage: 'registration.form.type.required',
+      options: [
+        { value: 'single', label: text('Single', 'Simple') },
+        { value: 'family', label: text('Family', 'Famille') },
+      ],
+    },
+    {
+      _tag: 'number',
+      name: 'children',
+      label: text('Children', 'Enfants'),
+      min: 1,
+      max: 10,
+      requiredMessage: 'registration.form.gender.required',
+      invalidMessage: 'registration.form.merch.required',
+    },
+  ],
+  rules: [
+    {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'kind',
+        equals: ['family'],
+      },
+      target: 'children',
+    },
+  ],
+});
+
+describe('activeWhenEquals', () => {
+  test('requires active targets and accepts absent inactive targets', () => {
+    expect(
+      errorsFor(activationDef, { kind: 'family' })?.fieldErrors['children'],
+    ).toEqual(['registration.form.gender.required']);
+    expect(
+      Result.isSuccess(decodeForm(activationDef, { kind: 'single' })),
+    ).toBe(true);
+  });
+
+  test('rejects smuggled inactive values and decodes active values', () => {
+    expect(
+      errorsFor(activationDef, { kind: 'single', children: '2' })?.fieldErrors[
+        'children'
+      ],
+    ).toEqual(['registration.form.merch.required']);
+    const result = decodeForm(activationDef, {
+      kind: 'family',
+      children: '2',
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) expect(result.success['children']).toBe(2);
+  });
+});
+
 const literalDef = asDefinition({
   title: text('F', 'F'),
   fields: [

@@ -1,7 +1,11 @@
 import { Schema } from 'effect';
 
 import { Text } from '../content/schema';
-import { root } from '../localization/translations';
+import { PartySection } from './party';
+import { PricingRules } from './pricing';
+import { FieldName, MessageKey, OptionValue } from './tokens';
+
+export { FieldName, MessageKey, OptionValue } from './tokens';
 
 /** The closed set of site Forms. */
 export const FormId = Schema.Literals(['contact', 'volunteer', 'registration']);
@@ -51,59 +55,6 @@ export const FORM_IDS = FormId.literals;
  * `definition.test.ts`) and historical Submissions keep an exact schema reference.
  */
 
-// ---------------------------------------------------------------------------
-// Leaf brands — message keys, field names, literal option tokens
-// ---------------------------------------------------------------------------
-
-/** The closed set of valid translation keys, consulted at decode time. */
-const TRANSLATION_KEYS: ReadonlySet<string> = new Set(Object.keys(root.en));
-
-const messageKeyFilter = Schema.makeFilter<string>(
-  (key) =>
-    TRANSLATION_KEYS.has(key)
-      ? undefined
-      : `MessageKey must be a known TranslationKey; "${key}" is not in translations`,
-  { title: 'MessageKey' },
-);
-
-/**
- * A form-validation error message: a real `TranslationKey`, validated at the
- * boundary against the live `translations` object (`derive-dont-sync`). The
- * generic decoder (Branch 6.2) emits these keys verbatim on each failure path, so
- * an off-list key would render blank in `FieldErrors` — it is rejected here
- * instead (`make-impossible-states-unrepresentable`). The brand keeps the
- * guarantee load-bearing past the decoder; the generic decoder (Branch 6.2)
- * hands a decoded `MessageKey` to `translate()` knowing the boundary already
- * proved it is a real `TranslationKey`.
- */
-export const MessageKey = Schema.NonEmptyString.check(messageKeyFilter).pipe(
-  Schema.brand('MessageKey'),
-);
-export type MessageKey = typeof MessageKey.Type;
-
-/**
- * A field's submit-name — the key the browser POSTs and the path segment the
- * decoder addresses. Constrained to a JS-identifier-like token (`a-z`, `A-Z`,
- * `0-9`, `_`) so a hand-edited definition cannot smuggle a dotted path, a `[`, or
- * whitespace into a name the decoder interpolates into a form-data path
- * (`boundary-discipline`).
- */
-export const FieldName = Schema.NonEmptyString.check(
-  Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]*$/, { title: 'FieldName' }),
-).pipe(Schema.brand('FieldName'));
-export type FieldName = typeof FieldName.Type;
-
-/**
- * A `literal` / `arrayOfLiteral` option value — the token submitted when an
- * option is chosen (e.g. `"attendee"`, `"t-shirt"`, `"male"`). A constrained
- * token (no whitespace, the URL-safe-ish set) so it is safe in a radio `value`
- * and an off-list value is a hard decode error in the generated codec.
- */
-export const OptionValue = Schema.NonEmptyString.check(
-  Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: 'OptionValue' }),
-).pipe(Schema.brand('OptionValue'));
-export type OptionValue = typeof OptionValue.Type;
-
 /**
  * One selectable option of a `literal` / `arrayOfLiteral` field: its submitted
  * `value` token plus its bilingual `label` (what the radio / checkbox shows).
@@ -140,7 +91,7 @@ type FieldChrome<Name, Txt> = {
   readonly label: Txt;
   readonly placeholder?: Txt;
 };
-type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
+type FieldKindShape<Name, Txt, Msg, Opt, Bool, Num> =
   | ({
       readonly _tag: 'requiredText';
       readonly optional?: Bool;
@@ -166,6 +117,14 @@ type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
       readonly invalidMessage: Msg;
     } & FieldChrome<Name, Txt>)
   | ({
+      readonly _tag: 'number';
+      readonly optional?: Bool;
+      readonly min?: Num;
+      readonly max?: Num;
+      readonly requiredMessage: Msg;
+      readonly invalidMessage: Msg;
+    } & FieldChrome<Name, Txt>)
+  | ({
       readonly _tag: 'literal';
       readonly options: ReadonlyArray<{ readonly value: Opt; readonly label: Txt }>;
       readonly requiredMessage: Msg;
@@ -186,7 +145,9 @@ type FieldKindShape<Name, Txt, Msg, Opt, Bool> =
       readonly label: Txt;
       readonly optional?: Bool;
       readonly presenceAnchor?: Name;
-      readonly fields: ReadonlyArray<FieldKindShape<Name, Txt, Msg, Opt, Bool>>;
+      readonly fields: ReadonlyArray<
+        FieldKindShape<Name, Txt, Msg, Opt, Bool, Num>
+      >;
     };
 
 /** The decoded `FieldKind` (brands load-bearing). */
@@ -195,7 +156,8 @@ export type FieldKind = FieldKindShape<
   Text,
   MessageKey,
   OptionValue,
-  boolean
+  boolean,
+  number
 >;
 /** The encoded `FieldKind` — the JSON shape (brands erased to plain strings). */
 type FieldKindEncoded = FieldKindShape<
@@ -203,7 +165,8 @@ type FieldKindEncoded = FieldKindShape<
   { readonly en: string; readonly fr: string },
   string,
   string,
-  boolean
+  boolean,
+  number
 >;
 
 /**
@@ -236,6 +199,8 @@ const fieldChrome = {
   label: Text,
   placeholder: Schema.optionalKey(Text),
 } as const;
+
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
  * `FieldKind` — the CLOSED, specified set of field kinds (CONTEXT §Form
@@ -338,6 +303,14 @@ export const FieldKind = Schema.TaggedUnion({
   url: {
     ...fieldChrome,
     optional: Schema.optionalKey(Schema.Boolean),
+    requiredMessage: MessageKey,
+    invalidMessage: MessageKey,
+  },
+  number: {
+    ...fieldChrome,
+    optional: Schema.optionalKey(Schema.Boolean),
+    min: Schema.optionalKey(NonNegativeInt),
+    max: Schema.optionalKey(NonNegativeInt),
     requiredMessage: MessageKey,
     invalidMessage: MessageKey,
   },
@@ -482,6 +455,29 @@ const nonEmptyEquals = Schema.makeFilter<ReadonlyArray<unknown>>(
   { title: 'requiredWhenEquals.equals' },
 );
 
+const nonEmptyActivationValues = Schema.makeFilter<ReadonlyArray<unknown>>(
+  (values) =>
+    values.length > 0
+      ? undefined
+      : 'activeWhen must name at least one trigger value',
+  { title: 'ActiveWhen.values' },
+);
+
+export const ActiveWhen = Schema.TaggedUnion({
+  literalEquals: {
+    when: FieldName,
+    equals: Schema.Array(OptionValue).check(nonEmptyActivationValues),
+  },
+  arrayIncludesAny: {
+    when: FieldName,
+    values: Schema.Array(OptionValue).check(nonEmptyActivationValues),
+  },
+  checkboxChecked: {
+    when: FieldName,
+  },
+});
+export type ActiveWhen = typeof ActiveWhen.Type;
+
 /**
  * A CLOSED set of cross-field requirement rules — the validity no single-field
  * check can express (CONTEXT §Form definition). One kind today:
@@ -501,8 +497,308 @@ export const CrossFieldRule = Schema.TaggedUnion({
     target: FieldName,
     message: MessageKey,
   },
+  activeWhenEquals: {
+    predicate: ActiveWhen,
+    target: FieldName,
+  },
 });
 export type CrossFieldRule = typeof CrossFieldRule.Type;
+
+type EncodedFieldNode = {
+  readonly _tag: string;
+  readonly name: string;
+  readonly options?: ReadonlyArray<{ readonly value: string }>;
+  readonly fields?: ReadonlyArray<EncodedFieldNode>;
+};
+
+const pricingReferencesResolve = Schema.makeFilter<{
+  readonly fields: ReadonlyArray<EncodedFieldNode>;
+  readonly variant?: {
+    readonly variants: ReadonlyArray<{
+      readonly fields: ReadonlyArray<EncodedFieldNode>;
+    }>;
+  };
+  readonly pricing?: {
+    readonly rules: ReadonlyArray<
+      | {
+          readonly _tag: 'choice';
+          readonly field: string;
+          readonly prices: ReadonlyArray<{ readonly option: string }>;
+        }
+      | {
+          readonly _tag: 'multiChoice';
+          readonly field: string;
+          readonly prices: ReadonlyArray<{ readonly option: string }>;
+        }
+      | { readonly _tag: 'toggle'; readonly field: string }
+      | { readonly _tag: 'quantity'; readonly field: string }
+    >;
+  };
+}>(
+  (definition) => {
+    if (definition.pricing === undefined) return undefined;
+
+    const kindByName = new Map<string, string>();
+    const optionsByName = new Map<string, ReadonlySet<string>>();
+    const walk = (nodes: ReadonlyArray<EncodedFieldNode>): void => {
+      for (const node of nodes) {
+        kindByName.set(node.name, node._tag);
+        if (
+          (node._tag === 'literal' || node._tag === 'arrayOfLiteral') &&
+          node.options !== undefined
+        ) {
+          optionsByName.set(
+            node.name,
+            new Set(node.options.map((option) => option.value)),
+          );
+        }
+        // Pricing rules carry a field token rather than a structural path.
+        // Nested fields are therefore intentionally unavailable until the
+        // commerce model can address them without an ambiguous flat lookup.
+      }
+    };
+
+    walk(definition.fields);
+    for (const branch of definition.variant?.variants ?? []) walk(branch.fields);
+
+    for (const rule of definition.pricing.rules) {
+      const kind = kindByName.get(rule.field);
+      if (kind === undefined) {
+        return `pricing rule references unknown field "${rule.field}"`;
+      }
+      if (rule._tag === 'toggle') {
+        if (kind !== 'checkboxBoolean') {
+          return `toggle pricing rule "${rule.field}" must target a checkboxBoolean field, not "${kind}"`;
+        }
+        continue;
+      }
+      if (rule._tag === 'quantity') {
+        if (kind !== 'number') {
+          return `quantity pricing rule "${rule.field}" must target a number field, not "${kind}"`;
+        }
+        continue;
+      }
+      const expectedKind = rule._tag === 'choice' ? 'literal' : 'arrayOfLiteral';
+      if (kind !== expectedKind) {
+        return `${rule._tag} pricing rule "${rule.field}" must target a ${expectedKind} field, not "${kind}"`;
+      }
+      const options = optionsByName.get(rule.field) ?? new Set<string>();
+      for (const price of rule.prices) {
+        if (!options.has(price.option)) {
+          return `pricing rule "${rule.field}" prices unknown option "${price.option}"`;
+        }
+      }
+    }
+    return undefined;
+  },
+  { title: 'FormDefinition.pricingReferencesResolve' },
+);
+
+type EncodedCrossFieldRule =
+  | {
+      readonly _tag: 'requiredWhenEquals';
+      readonly when: string;
+      readonly equals: ReadonlyArray<string>;
+      readonly target: string;
+    }
+  | {
+      readonly _tag: 'activeWhenEquals';
+      readonly predicate:
+        | {
+            readonly _tag: 'literalEquals';
+            readonly when: string;
+            readonly equals: ReadonlyArray<string>;
+          }
+        | {
+            readonly _tag: 'arrayIncludesAny';
+            readonly when: string;
+            readonly values: ReadonlyArray<string>;
+          }
+        | {
+            readonly _tag: 'checkboxChecked';
+            readonly when: string;
+          };
+      readonly target: string;
+    };
+
+type RuleScope = {
+  readonly kindByName: ReadonlyMap<string, string>;
+  readonly optionsByName: ReadonlyMap<string, ReadonlySet<string>>;
+};
+
+const rulesReferToExistingFields = Schema.makeFilter<{
+  readonly fields: ReadonlyArray<EncodedFieldNode>;
+  readonly variant?: {
+    readonly discriminator: string;
+    readonly options: ReadonlyArray<{ readonly value: string }>;
+    readonly variants: ReadonlyArray<{
+      readonly fields: ReadonlyArray<EncodedFieldNode>;
+    }>;
+  };
+  readonly rules?: ReadonlyArray<EncodedCrossFieldRule>;
+}>(
+  (definition) => {
+    if (definition.rules === undefined || definition.rules.length === 0) {
+      return undefined;
+    }
+
+    const collect = (
+      nodes: ReadonlyArray<EncodedFieldNode>,
+      scope: {
+        kindByName: Map<string, string>;
+        optionsByName: Map<string, Set<string>>;
+      },
+    ): void => {
+      for (const node of nodes) {
+        scope.kindByName.set(node.name, node._tag);
+        if (
+          (node._tag === 'literal' || node._tag === 'arrayOfLiteral') &&
+          node.options !== undefined
+        ) {
+          scope.optionsByName.set(
+            node.name,
+            new Set(node.options.map((option) => option.value)),
+          );
+        }
+      }
+    };
+
+    const topScope = {
+      kindByName: new Map<string, string>(),
+      optionsByName: new Map<string, Set<string>>(),
+    };
+    collect(definition.fields, topScope);
+    if (definition.variant !== undefined) {
+      topScope.kindByName.set(definition.variant.discriminator, 'literal');
+      topScope.optionsByName.set(
+        definition.variant.discriminator,
+        new Set(definition.variant.options.map((option) => option.value)),
+      );
+      for (const branch of definition.variant.variants) {
+        collect(branch.fields, topScope);
+      }
+    }
+
+    // Cross-field rules carry field names, not structural paths. Until the
+    // authoring model can encode a nested path, accept only the flat root scope
+    // (common fields, discriminator, and variant fields) so a nested target can
+    // never publish while the renderer/decoder would interpret it differently.
+    const scopeOf = (name: string): RuleScope | undefined =>
+      topScope.kindByName.has(name) ? topScope : undefined;
+
+    for (const rule of definition.rules) {
+      if (rule._tag === 'requiredWhenEquals') {
+        const scope = scopeOf(rule.target);
+        if (scope === undefined) {
+          return `cross-field rule references unknown target field "${rule.target}"`;
+        }
+        const whenKind = scope.kindByName.get(rule.when);
+        if (whenKind === undefined) {
+          return `requiredWhenEquals "when" field "${rule.when}" does not exist in the same scope as target "${rule.target}"`;
+        }
+        if (rule.when === rule.target) {
+          return `cross-field rule "when" and "target" must differ ("${rule.when}")`;
+        }
+        const options = scope.optionsByName.get(rule.when);
+        if (options !== undefined) {
+          for (const value of rule.equals) {
+            if (!options.has(value)) {
+              return `requiredWhenEquals "when" field "${rule.when}" has no option "${value}"`;
+            }
+          }
+        }
+        continue;
+      }
+
+      const scope = scopeOf(rule.target);
+      if (scope === undefined) {
+        return `activeWhenEquals references unknown target field "${rule.target}"`;
+      }
+      const predicate = rule.predicate;
+      const whenKind = scope.kindByName.get(predicate.when);
+      if (whenKind === undefined) {
+        return `activeWhenEquals "when" field "${predicate.when}" does not exist in the same scope as target "${rule.target}"`;
+      }
+      if (predicate.when === rule.target) {
+        return `activeWhenEquals "when" and "target" must differ ("${predicate.when}")`;
+      }
+      switch (predicate._tag) {
+        case 'literalEquals': {
+          if (whenKind !== 'literal') {
+            return `activeWhenEquals literalEquals "when" field "${predicate.when}" must be a literal, not "${whenKind}"`;
+          }
+          const options =
+            scope.optionsByName.get(predicate.when) ?? new Set<string>();
+          for (const value of predicate.equals) {
+            if (!options.has(value)) {
+              return `activeWhenEquals "when" field "${predicate.when}" has no option "${value}"`;
+            }
+          }
+          break;
+        }
+        case 'arrayIncludesAny': {
+          if (whenKind !== 'arrayOfLiteral') {
+            return `activeWhenEquals arrayIncludesAny "when" field "${predicate.when}" must be an arrayOfLiteral, not "${whenKind}"`;
+          }
+          const options =
+            scope.optionsByName.get(predicate.when) ?? new Set<string>();
+          for (const value of predicate.values) {
+            if (!options.has(value)) {
+              return `activeWhenEquals "when" field "${predicate.when}" has no option "${value}"`;
+            }
+          }
+          break;
+        }
+        case 'checkboxChecked':
+          if (whenKind !== 'checkboxBoolean') {
+            return `activeWhenEquals checkboxChecked "when" field "${predicate.when}" must be a checkboxBoolean, not "${whenKind}"`;
+          }
+          break;
+      }
+    }
+
+    const activationEdges = new Map<string, string>();
+    for (const rule of definition.rules) {
+      if (rule._tag === 'activeWhenEquals') {
+        activationEdges.set(rule.target, rule.predicate.when);
+      }
+    }
+    for (const start of activationEdges.keys()) {
+      const seen = new Set<string>();
+      let node: string | undefined = start;
+      while (node !== undefined) {
+        if (seen.has(node)) {
+          return `activeWhenEquals rules form a cycle through "${node}"`;
+        }
+        seen.add(node);
+        node = activationEdges.get(node);
+      }
+    }
+    return undefined;
+  },
+  { title: 'FormDefinition.rulesReferToExistingFields' },
+);
+
+const partyPayerBiconditional = Schema.makeFilter<{
+  readonly party?: {
+    readonly billingMode: { readonly options: Record<string, unknown> };
+    readonly payer?: unknown;
+  };
+}>(
+  (definition) => {
+    if (definition.party === undefined) return undefined;
+    const offersGroup = 'group' in definition.party.billingMode.options;
+    const hasPayer = definition.party.payer !== undefined;
+    if (offersGroup && !hasPayer) {
+      return 'a party offering the "group" billing mode must author a payer block';
+    }
+    if (!offersGroup && hasPayer) {
+      return 'a party that does not offer the "group" billing mode must not author a payer block';
+    }
+    return undefined;
+  },
+  { title: 'FormDefinition.partyPayerBiconditional' },
+);
 
 // ---------------------------------------------------------------------------
 // Notification projection
@@ -557,8 +853,14 @@ export const FormDefinition = Schema.Struct({
   fields: FieldList,
   variant: Schema.optionalKey(FormVariantSet),
   rules: Schema.optionalKey(Schema.Array(CrossFieldRule)),
+  pricing: Schema.optionalKey(PricingRules),
+  party: Schema.optionalKey(PartySection),
   // Optional only so historical stored definitions remain decodable. Every new
   // publish is normalized to an explicit, validated projection.
   notification: Schema.optionalKey(NotificationProjection),
-});
+}).check(
+  pricingReferencesResolve,
+  rulesReferToExistingFields,
+  partyPayerBiconditional,
+);
 export type FormDefinition = typeof FormDefinition.Type;

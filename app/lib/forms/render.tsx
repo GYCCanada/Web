@@ -93,6 +93,20 @@ function LeafField({
           <FieldErrors />
         </TextField>
       );
+    case 'number':
+      return (
+        <TextField name={name}>
+          <Label>{label}</Label>
+          <TextField.Input
+            type="number"
+            min={field.min}
+            max={field.max}
+            step={1}
+            placeholder={placeholder}
+          />
+          <FieldErrors />
+        </TextField>
+      );
     case 'literal':
       return (
         <RadioGroup name={name}>
@@ -163,15 +177,39 @@ function RuleGatedField({
   formId: string;
   children: React.ReactNode;
 }) {
-  const meta = useField<string>(rule.when);
+  const when =
+    rule._tag === 'requiredWhenEquals' ? rule.when : rule.predicate.when;
+  const meta = useField<unknown>(when);
   const fallback =
     typeof meta.defaultValue === 'string' ? meta.defaultValue : undefined;
-  const live = useFormData(formId, (formData) => formData.get(rule.when), {
-    fallback,
+  const live = useFormData(formId, (formData) => formData.getAll(when), {
+    fallback: fallback === undefined ? [] : [fallback],
   });
-  const value = typeof live === 'string' ? live : fallback;
-  const active =
-    typeof value === 'string' && rule.equals.includes(value as never);
+  const values = live.filter(
+    (value): value is string => typeof value === 'string',
+  );
+  const active = (() => {
+    if (rule._tag === 'requiredWhenEquals') {
+      return values.some((value) => rule.equals.includes(value as never));
+    }
+    const predicate = rule.predicate;
+    switch (predicate._tag) {
+      case 'literalEquals': {
+        const equals = predicate.equals;
+        return values.some((value) =>
+          equals.includes(value as never),
+        );
+      }
+      case 'arrayIncludesAny': {
+        const allowed = predicate.values;
+        return values.some((value) =>
+          allowed.includes(value as never),
+        );
+      }
+      case 'checkboxChecked':
+        return values.some((value) => value === 'true' || value === 'on');
+    }
+  })();
   return active ? <>{children}</> : null;
 }
 
@@ -235,10 +273,12 @@ function VariantSection({
   variant,
   locale,
   formId,
+  gateRules,
 }: {
   variant: FormVariantSet;
   locale: Locale;
   formId: string;
+  gateRules: ReadonlyMap<string, CrossFieldRule>;
 }) {
   // The conform `/future` field metadata exposes no live `.value`, so read the
   // submitted discriminator from the live `FormData`, falling back to the field's
@@ -278,6 +318,7 @@ function VariantSection({
               prefix=""
               locale={locale}
               formId={formId}
+              gateRules={gateRules}
             />
           ))
         : null}
@@ -301,7 +342,7 @@ export function FormFields({
 }) {
   const locale = useLocale();
 
-  // Index the `requiredWhenEquals` rules by their `target` so a gated top-level
+  // Index visibility rules by target so validation and rendering share the
   // field (the `method`-gated `email`/`phone`) renders only when its `when` value
   // is one of `equals` — reproducing the hand-tuned forms' conditional visibility
   // so an inactive field is ABSENT from the POST, not a present blank its codec
@@ -309,7 +350,7 @@ export function FormFields({
   const gateRules = React.useMemo(() => {
     const map = new Map<string, CrossFieldRule>();
     for (const rule of definition.rules ?? []) {
-      if (rule._tag === 'requiredWhenEquals') map.set(rule.target, rule);
+      map.set(rule.target, rule);
     }
     return map;
   }, [definition.rules]);
@@ -331,6 +372,7 @@ export function FormFields({
           variant={definition.variant}
           locale={locale}
           formId={formId}
+          gateRules={gateRules}
         />
       ) : null}
       <HoneypotField />

@@ -1,6 +1,7 @@
 import { Schema } from 'effect';
 
 import {
+  type CrossFieldRule,
   type FieldKind,
   type FormDefinition,
   type FormId,
@@ -93,7 +94,15 @@ const assertConditionalRule = (
   issues: string[],
 ): void => {
   const matches = (definition.rules ?? []).filter(
-    (rule) => rule.when === method && rule.target === target,
+    (
+      rule,
+    ): rule is Extract<
+      CrossFieldRule,
+      { _tag: 'requiredWhenEquals' }
+    > =>
+      rule._tag === 'requiredWhenEquals' &&
+      rule.when === method &&
+      rule.target === target,
   );
   const covered = new Set(
     matches.flatMap((rule) => rule.equals.map((value) => String(value))),

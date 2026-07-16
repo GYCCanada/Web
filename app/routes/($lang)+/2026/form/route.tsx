@@ -1,8 +1,10 @@
 import { type MetaFunction, useActionData, useLoaderData } from 'react-router';
+import { Schema } from 'effect';
 
 import { Content } from '~/lib/content.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeHandler } from '~/lib/effect/route';
+import { FormDefinition } from '~/lib/forms/definition';
 import { Forms } from '~/lib/forms/forms.server';
 import {
   newSubmissionCommandFields,
@@ -50,7 +52,7 @@ export const loader = routeHandler(function* () {
   const published = yield* forms.current('registration');
   return {
     conference,
-    definition: published.definition,
+    definition: yield* Schema.encodeEffect(FormDefinition)(published.definition),
     command: newSubmissionCommandFields(published.version),
   };
 });

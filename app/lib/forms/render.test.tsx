@@ -113,6 +113,15 @@ const everyKindDef = asDefinition({
       invalidMessage: 'registration.form.website.required',
     },
     {
+      _tag: 'number',
+      name: 'tickets',
+      label: text('Tickets', 'Billets'),
+      min: 1,
+      max: 4,
+      requiredMessage: 'registration.form.gender.required',
+      invalidMessage: 'registration.form.merch.required',
+    },
+    {
       _tag: 'literal',
       name: 'gender',
       label: text('Gender', 'Genre'),
@@ -161,6 +170,7 @@ describe('FormFields renders each field kind', () => {
       'fullName',
       'email',
       'website',
+      'tickets',
       'gender',
       'tos',
       'merch',
@@ -173,6 +183,9 @@ describe('FormFields renders each field kind', () => {
     const html = render(everyKindDef);
     expect(html).toContain('type="email"');
     expect(html).toContain('type="url"');
+    expect(html).toContain('type="number"');
+    expect(html).toContain('min="1"');
+    expect(html).toContain('max="4"');
   });
 
   test('literal / arrayOfLiteral render each option label', () => {
@@ -354,5 +367,52 @@ describe('FormFields gates requiredWhenEquals targets on their when-field', () =
     const html = render(methodGatedDef, { defaultValue: { method: 'phone' } });
     expect(html).toContain('name="name"');
     expect(html).toContain('name="method"');
+  });
+});
+
+const activationDef = asDefinition({
+  title: text('F', 'F'),
+  fields: [
+    {
+      _tag: 'literal',
+      name: 'kind',
+      label: text('Kind', 'Type'),
+      options: [
+        { value: 'single', label: text('Single', 'Simple') },
+        { value: 'family', label: text('Family', 'Famille') },
+      ],
+      requiredMessage: 'registration.form.type.required',
+    },
+    {
+      _tag: 'number',
+      name: 'children',
+      label: text('Children', 'Enfants'),
+      min: 1,
+      max: 10,
+      requiredMessage: 'registration.form.gender.required',
+      invalidMessage: 'registration.form.merch.required',
+    },
+  ],
+  rules: [
+    {
+      _tag: 'activeWhenEquals',
+      predicate: {
+        _tag: 'literalEquals',
+        when: 'kind',
+        equals: ['family'],
+      },
+      target: 'children',
+    },
+  ],
+});
+
+describe('FormFields shares activeWhenEquals visibility', () => {
+  test('renders the target only while its predicate is active', () => {
+    expect(
+      render(activationDef, { defaultValue: { kind: 'family' } }),
+    ).toContain('name="children"');
+    expect(
+      render(activationDef, { defaultValue: { kind: 'single' } }),
+    ).not.toContain('name="children"');
   });
 });
