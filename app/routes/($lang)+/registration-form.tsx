@@ -30,13 +30,6 @@ const PartyInput = Schema.Struct({
   ),
 });
 
-const DynamicRegistrantInput = Schema.Record(Schema.String, Schema.Unknown);
-
-const RegistrationFormShape = Schema.Struct({
-  party: Schema.optional(PartyInput),
-  registrants: Schema.mutable(Schema.Array(DynamicRegistrantInput)),
-});
-
 const makeRegistrationStandardSchema = (definition: FormDefinition) => {
   const schema = Schema.Struct({
     party: Schema.optional(PartyInput),
@@ -44,9 +37,7 @@ const makeRegistrationStandardSchema = (definition: FormDefinition) => {
       Schema.Array(compileForm(definition).codec),
     ).annotateKey({ messageMissingKey: 'registration.form.type.required' }),
   });
-  return Schema.toStandardSchemaV1(schema) as unknown as ReturnType<
-    typeof Schema.toStandardSchemaV1<typeof RegistrationFormShape>
-  >;
+  return Schema.toStandardSchemaV1(schema);
 };
 
 /** A new Registrant starts empty; the published Form definition owns every field. */
