@@ -67,6 +67,25 @@ const formRecords = Effect.gen(function* () {
   `;
 });
 
+const submissionTokens = Effect.gen(function* () {
+  const sql = yield* SqlClient;
+  yield* sql`
+    ALTER TABLE submissions
+    ADD COLUMN idempotency_token text
+  `;
+  yield* sql`
+    UPDATE submissions AS submission
+    SET idempotency_token = batch.idempotency_token
+    FROM submission_batches AS batch
+    WHERE batch.batch_id = submission.batch_id
+  `;
+  yield* sql`
+    ALTER TABLE submissions
+    ALTER COLUMN idempotency_token SET NOT NULL
+  `;
+});
+
 export const loader = Migrator.fromRecord({
   '0001_form_records': formRecords,
+  '0002_submission_tokens': submissionTokens,
 });

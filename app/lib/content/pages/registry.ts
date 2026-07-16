@@ -13,7 +13,8 @@ import {
   defaultVolunteerForm,
   defaultVolunteerPage,
 } from './defaults';
-import { FormDefinition } from '../../forms/definition';
+import { FormDefinition, FormId } from '../../forms/definition';
+export { FORM_IDS, FormId } from '../../forms/definition';
 import {
   AboutPage,
   ArchivePage,
@@ -97,17 +98,6 @@ export const PAGE_LABELS = {
   home: 'Home (evergreen)',
   team: 'Team',
 } as const satisfies { readonly [P in PageId]: string };
-
-/**
- * The closed set of site Forms (CONTEXT §Form definition). Each owns a
- * `FormDefinition` object (`forms/<form>.json`) — the structural field graph the
- * generic decoder/renderer (Branch 6) read.
- */
-export const FormId = Schema.Literals(['contact', 'volunteer', 'registration']);
-export type FormId = typeof FormId.Type;
-
-/** Every registered Form id, in declaration order. */
-export const FORM_IDS = FormId.literals;
 
 // ---------------------------------------------------------------------------
 // Storage-key templates (derived from the id — never hand-typed at a call site)

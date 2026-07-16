@@ -3,6 +3,13 @@ import { Schema } from 'effect';
 import { Text } from '../content/schema';
 import { root } from '../localization/translations';
 
+/** The closed set of site Forms. */
+export const FormId = Schema.Literals(['contact', 'volunteer', 'registration']);
+export type FormId = typeof FormId.Type;
+
+/** Every Form identity, in declaration order. */
+export const FORM_IDS = FormId.literals;
+
 /**
  * The structural `FormDefinition` schema (ADR 0007, CONTEXT §Form definition;
  * registration-launch Branch 6). A `FormDefinition` is **data** — the JSON object
