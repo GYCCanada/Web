@@ -279,6 +279,18 @@ describe('RegistrationOrders', () => {
         reason: 'late_payment',
         detail: 'Payment arrived after expiry.',
       });
+      yield* (yield* RegistrationOrders.Service).resolveReview(
+        'review-open',
+        Date.parse('2026-08-03T01:00:00Z'),
+      );
+      expect(yield* (yield* RegistrationOrders.Service).openReviews).toEqual([]);
+      const resolved = yield* sql<{ status: string; resolvedAt: string }>`
+        SELECT status, resolved_at::text AS "resolvedAt"
+        FROM registration_order_reviews
+        WHERE review_id = 'review-open'
+      `;
+      expect(resolved[0]?.status).toBe('resolved');
+      expect(resolved[0]?.resolvedAt).toContain('2026-08-03 01:00:00');
     }).pipe(Effect.provide(testLayer(captured)));
   });
 });

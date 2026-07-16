@@ -77,6 +77,10 @@ export class Service extends Context.Service<
       orderId: OrderId,
       at: number,
     ) => Effect.Effect<string, PersistenceError>;
+    readonly resolveReview: (
+      reviewId: string,
+      at: number,
+    ) => Effect.Effect<void, NotFound | PersistenceError>;
     readonly expireDue: (
       at: number,
       limit?: number,
@@ -201,6 +205,22 @@ export const layer = Layer.effect(
       );
       return rows.length;
     });
+    const resolveReview = Effect.fn('RegistrationOrders.resolveReview')(
+      function* (reviewId: string, at: number) {
+        const rows = yield* sql<{ id: string }>`
+          UPDATE registration_order_reviews
+          SET status = 'resolved', resolved_at = ${new Date(at).toISOString()}
+          WHERE review_id = ${reviewId}
+            AND status = 'open'
+          RETURNING review_id AS id
+        `.pipe(
+          Effect.mapError(
+            () => new PersistenceError({ operation: 'resolve Order review' }),
+          ),
+        );
+        if (rows.length === 0) return yield* new NotFound();
+      },
+    );
     const openReviews = sql<ReviewRow>`
       SELECT
         review_id AS id,
@@ -229,6 +249,7 @@ export const layer = Layer.effect(
       byCheckoutSession,
       byRegistration,
       requestRefund,
+      resolveReview,
       expireDue,
       openReviews,
     });

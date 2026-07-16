@@ -28,6 +28,7 @@ const decodeRevision = Schema.decodeUnknownResult(
 const decodeExternalUrl = Schema.decodeUnknownResult(ExternalHttpsUrl);
 const decodeTimeZone = Schema.decodeUnknownResult(Registrar.ConferenceTimeZone);
 const decodeOrderId = Schema.decodeUnknownResult(OrderId);
+const decodeReviewId = Schema.decodeUnknownResult(Schema.NonEmptyString);
 
 type ActionResponse = {
   readonly ok: false;
@@ -161,6 +162,16 @@ export const action = routeAction(function* () {
         ? adminRedirectWithStatus('/admin/registration', 'Full refund enqueued.')
         : failure(503, 'The refund could not be enqueued.');
     }
+    case 'resolveReview': {
+      const reviewId = decodeReviewId(submitted.get('reviewId'));
+      if (Result.isFailure(reviewId)) return failure(400, 'The review id is invalid.');
+      const result = yield* (yield* RegistrationOrders.Service)
+        .resolveReview(reviewId.success, Date.now())
+        .pipe(Effect.result);
+      return Result.isSuccess(result)
+        ? adminRedirectWithStatus('/admin/registration', 'Order review resolved.')
+        : failure(409, 'The review is no longer open.');
+    }
     default:
       return failure(400, 'Unknown registration action.');
   }
@@ -258,6 +269,7 @@ export default function RegistrationAdmin() {
               <li key={review.id} className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm">
                 <strong>{review.reason}</strong> · {review.orderId}<p>{review.detail}</p>
                 <Form method="post" className="mt-3"><input type="hidden" name="revision" value={channel.revision} /><input type="hidden" name="orderId" value={review.orderId} /><Submit intent="refund">Enqueue full refund</Submit></Form>
+                <Form method="post" className="mt-3"><input type="hidden" name="revision" value={channel.revision} /><input type="hidden" name="reviewId" value={review.id} /><Submit intent="resolveReview">Mark review resolved</Submit></Form>
               </li>
             ))}
           </ul>
