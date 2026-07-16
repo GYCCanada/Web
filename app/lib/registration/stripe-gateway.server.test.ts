@@ -49,7 +49,7 @@ describe('StripeGateway', () => {
           url: 'https://checkout.stripe.test/cs_1',
         });
       },
-      refund: () => Effect.void,
+      refund: () => Effect.succeed({ id: 're_1', status: 'succeeded' }),
       constructEvent: () => Effect.succeed({}),
     };
     return Effect.gen(function* () {
@@ -90,4 +90,35 @@ describe('StripeGateway', () => {
       expect(error).toBeInstanceOf(Unavailable);
     }).pipe(Effect.provide(makeLayer(Option.none()))),
   );
+
+  it.effect('requests a full refund by PaymentIntent with Order metadata', () => {
+    const calls: unknown[] = [];
+    const client: Client = {
+      createCheckout: () => Effect.die('unused'),
+      refund: (input, options) => {
+        calls.push({ input, options });
+        return Effect.succeed({ id: 're_1', status: 'succeeded' });
+      },
+      constructEvent: () => Effect.succeed({}),
+    };
+    return Effect.gen(function* () {
+      const gateway = yield* StripeGateway.Service;
+      const result = yield* gateway.refund({
+        orderId: OrderId.make('order-1'),
+        paymentIntentId: 'pi_1',
+        idempotencyKey: 'refund-order-1',
+      });
+      expect(result).toEqual({ refundId: 're_1', status: 'succeeded' });
+      expect(calls).toEqual([
+        {
+          input: {
+            payment_intent: 'pi_1',
+            reason: 'requested_by_customer',
+            metadata: { orderId: 'order-1' },
+          },
+          options: { idempotencyKey: 'refund-order-1' },
+        },
+      ]);
+    }).pipe(Effect.provide(makeLayer(Option.some(client))));
+  });
 });

@@ -45,8 +45,14 @@ export type Checkout = {
 };
 
 export type Refund = {
+  readonly orderId: OrderId;
   readonly paymentIntentId: string;
   readonly idempotencyKey: string;
+};
+
+export type RefundResult = {
+  readonly refundId: string;
+  readonly status: string | null;
 };
 
 export type StripeEvent = Webhooks.StripeEvent;
@@ -90,7 +96,7 @@ export class Service extends Context.Service<
     ) => Effect.Effect<Checkout, Unavailable | RequestFailed>;
     readonly refund: (
       command: Refund,
-    ) => Effect.Effect<void, Unavailable | RequestFailed>;
+    ) => Effect.Effect<RefundResult, Unavailable | RequestFailed>;
     readonly constructEvent: (
       payload: string | Uint8Array | ArrayBuffer,
       signature: string | null | undefined,
@@ -160,16 +166,32 @@ export const makeLayer = (client: Option.Option<Client>) =>
       }),
       refund: Effect.fn('StripeGateway.refund')(function* (command: Refund) {
         if (Option.isNone(client)) return yield* new Unavailable();
-        yield* client.value
+        return yield* client.value
           .refund(
             {
               payment_intent: command.paymentIntentId,
               reason: 'requested_by_customer',
+              metadata: { orderId: command.orderId },
             },
             { idempotencyKey: command.idempotencyKey },
           )
           .pipe(
-            Effect.asVoid,
+            Effect.map((output) => {
+              const refund = output as { readonly id?: unknown; readonly status?: unknown };
+              if (typeof refund.id !== 'string') {
+                return Effect.fail(
+                  new RequestFailed({ operation: 'decode refund response' }),
+                );
+              }
+              return Effect.succeed({
+                refundId: refund.id,
+                status:
+                  typeof refund.status === 'string' || refund.status === null
+                    ? refund.status
+                    : null,
+              });
+            }),
+            Effect.flatten,
             Effect.mapError(
               () => new RequestFailed({ operation: 'create full refund' }),
             ),
