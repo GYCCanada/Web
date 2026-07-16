@@ -44,6 +44,23 @@ idempotency token returns the already-committed result; equal payloads with diff
 remain distinct submissions. Email is dispatched only after commit and remains a notification
 of the durable record, never the record itself.
 
+Existing object-storage records move through the offline
+`bun run migrate:legacy-forms` command. It is a validation-only dry run unless
+`--apply` is supplied. The command validates every published legacy Form and
+Submission against the same definition-derived codecs as the application, then
+imports the complete set in one database transaction. Draft Form objects are
+reported but intentionally not published. Legacy Submission identifiers are
+deterministically namespaced by Form on import because the old object-key model
+only guaranteed uniqueness within a Form prefix, while the relational identifier
+is globally unique. The original identifier remains recoverable from the
+`legacy:<form>:<id>` idempotency token.
+
+The migration is safe to rerun and refuses to replace a current definition that
+has advanced beyond either the bundled definition or the legacy definition being
+imported. Operators run and inspect `--dry-run --json`, back up both stores, run
+`--apply --json`, then retain the bucket objects until relational backup and
+registrar reads have been verified.
+
 ## Rejected alternatives
 
 - **Continue writing bucket objects against the current definition.** Historical decoding
@@ -63,7 +80,8 @@ of the durable record, never the record itself.
   intentional equal submissions.
 - Registrar reads gain indexed ordering, filtering, constraints, and stable version joins.
 - The application gains a PostgreSQL dependency, migrations, backup/restore responsibilities,
-  and a migration path for existing Form objects and Submission objects.
+  and an explicit dry-run-first migration command for existing Form objects and Submission
+  objects.
 - Form publishing and Submission persistence move behind one relational module; public form
   rendering continues to consume the current published Form definition through the existing
   application boundary.

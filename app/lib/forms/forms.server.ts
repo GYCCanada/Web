@@ -23,6 +23,10 @@ import { ValidationIssue, validationIssues } from '../validation-issue';
 
 import { decodeForm, definitionToSchema } from './decode';
 import { FORM_IDS, FormDefinition, FormId } from './definition';
+import {
+  prepareDefinitionVersion,
+  submissionCommandHash,
+} from './form-version';
 import * as SubmissionCommand from './submission-command';
 
 export const FormDefinitionVersionId =
@@ -187,7 +191,6 @@ const issueMessages = (error: Schema.SchemaError): readonly string[] =>
     return path ? `${path}: ${issue.message}` : issue.message;
   });
 
-const decodeDefinition = Schema.decodeUnknownEffect(FormDefinition);
 const decodeDefinitionJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(FormDefinition),
 );
@@ -196,15 +199,6 @@ const encodeDefinitionJson = Schema.encodeUnknownEffect(
 );
 const decodeVersion = Schema.decodeUnknownEffect(FormDefinitionVersionId);
 const decodeTimestamp = Schema.decodeUnknownEffect(Schema.DateTimeUtcFromString);
-
-const hash = Effect.fn('Forms.hash')(function* (value: string) {
-  const digest = yield* Effect.promise(() =>
-    crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
-  );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, '0'),
-  ).join('');
-});
 
 interface PublishedRow {
   readonly form: string;
@@ -313,17 +307,15 @@ export const layer = Layer.effect(
     >(
       command: PublishCommand<F>,
     ) {
-      const definition = yield* decodeDefinition(command.definition).pipe(
+      const prepared = yield* prepareDefinitionVersion(
+        command.form,
+        command.definition,
+      ).pipe(
         Effect.mapError(
           (error) => new DefinitionRejected({ issues: issueMessages(error) }),
         ),
       );
-      const definitionJson = yield* encodeDefinitionJson(definition).pipe(
-        Effect.orDie,
-      );
-      const version = FormDefinitionVersionId.make(
-        `sha256:${yield* hash(`${command.form}\0${definitionJson}`)}`,
-      );
+      const { definitionJson, version } = prepared;
 
       return yield* sql.withTransaction(
         Effect.gen(function* () {
@@ -508,10 +500,13 @@ export const layer = Layer.effect(
       const payloadJson = yield* Effect.forEach(decoded, (payload) =>
         Schema.encodeUnknownEffect(payloadSchema)(payload),
       ).pipe(Effect.orDie);
-      const commandJson = yield* Schema.encodeUnknownEffect(
-        Schema.fromJsonString(Schema.Array(Schema.String)),
-      )([definitionVersion, ...payloadJson]).pipe(Effect.orDie);
-      return { payloadJson, commandHash: yield* hash(commandJson) };
+      return {
+        payloadJson,
+        commandHash: yield* submissionCommandHash(
+          definitionVersion,
+          payloadJson,
+        ),
+      };
     });
 
     const submitUnmapped = Effect.fn('Forms.submit.unmapped')(function* <

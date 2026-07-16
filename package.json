@@ -9,6 +9,7 @@
     "build": "bun --bun react-router build",
     "dev": "bun --hot ./server.ts",
     "lint": "oxlint",
+    "migrate:legacy-forms": "bun scripts/migrate-legacy-forms.ts",
     "start": "NODE_ENV=production bun ./server.ts",
     "typecheck": "react-router typegen && tsgo --noEmit",
     "test": "bun test",
