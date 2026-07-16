@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'effect-bun-test';
-import { Effect, Layer, Option } from 'effect';
+import { Effect, Fiber, Layer, Option } from 'effect';
+import { TestClock } from 'effect/testing';
 import * as ShardingConfig from 'effect/unstable/cluster/ShardingConfig';
 
 import { Cents } from '../forms/pricing';
@@ -75,7 +76,11 @@ describe('Registration Order actor', () => {
       client,
     );
     return Effect.gen(function* () {
-      yield* OrderActor.Order.CreateCheckout.execute({ orderId });
+      const execution = yield* OrderActor.Order.CreateCheckout.execute({ orderId }).pipe(
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust('1 minute');
+      yield* Fiber.join(execution);
       expect(checkoutCalls).toHaveLength(1);
       expect(test.state().status).toBe('awaiting_payment');
       expect(test.state().stripeCheckoutSessionId).toBe('cs_actor');
@@ -85,9 +90,13 @@ describe('Registration Order actor', () => {
     }).pipe(Effect.provide(test.layer));
   });
 
-  it.effect('leaves Checkout pending when transport fails so the durable operation retries', () => {
+  it.effect('retries Checkout transport before recording terminal failure', () => {
+    let attempts = 0;
     const client: Client = {
-      createCheckout: () => Effect.fail('Stripe unavailable'),
+      createCheckout: () => {
+        attempts += 1;
+        return Effect.fail('Stripe unavailable');
+      },
       refund: () => Effect.die('unused'),
       constructEvent: () => Effect.die('unused'),
     };
@@ -96,12 +105,16 @@ describe('Registration Order actor', () => {
       client,
     );
     return Effect.gen(function* () {
-      const exit = yield* Effect.exit(
-        OrderActor.Order.CreateCheckout.execute({ orderId }),
+      const execution = yield* OrderActor.Order.CreateCheckout.execute({ orderId }).pipe(
+        Effect.forkChild,
       );
-      expect(exit._tag).toBe('Failure');
-      expect(test.state().status).toBe('preparing_checkout');
-      expect(test.events).toEqual([]);
+      yield* TestClock.adjust('1 minute');
+      yield* Fiber.join(execution);
+      expect(attempts).toBe(6);
+      expect(test.state().status).toBe('failed');
+      expect(test.events.map((command) => command.event._tag)).toEqual([
+        'CheckoutCreationFailed',
+      ]);
     }).pipe(Effect.provide(test.layer));
   });
 
@@ -161,10 +174,14 @@ describe('Registration Order actor', () => {
     }).pipe(Effect.provide(test.layer));
   });
 
-  it.effect('leaves a refund pending on transport failure so the same attempt retries', () => {
+  it.effect('retries refund transport before opening operator review', () => {
+    let attempts = 0;
     const client: Client = {
       createCheckout: () => Effect.die('unused'),
-      refund: () => Effect.fail('Stripe unavailable'),
+      refund: () => {
+        attempts += 1;
+        return Effect.fail('Stripe unavailable');
+      },
       constructEvent: () => Effect.die('unused'),
     };
     const test = harness(
@@ -177,17 +194,18 @@ describe('Registration Order actor', () => {
       client,
     );
     return Effect.gen(function* () {
-      const exit = yield* Effect.exit(
-        OrderActor.Order.Refund.execute({
-          orderId,
-          attemptId: 'attempt-1',
-          at: 100,
-        }),
-      );
-      expect(exit._tag).toBe('Failure');
-      expect(test.state().status).toBe('refund_pending');
+      const execution = yield* OrderActor.Order.Refund.execute({
+        orderId,
+        attemptId: 'attempt-1',
+        at: 100,
+      }).pipe(Effect.forkChild);
+      yield* TestClock.adjust('1 minute');
+      yield* Fiber.join(execution);
+      expect(attempts).toBe(6);
+      expect(test.state().status).toBe('refund_failed');
       expect(test.events.map((command) => command.event._tag)).toEqual([
         'RefundRequested',
+        'RefundFailed',
       ]);
     }).pipe(Effect.provide(test.layer));
   });

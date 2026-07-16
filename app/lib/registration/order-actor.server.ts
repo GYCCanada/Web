@@ -1,6 +1,6 @@
 export * as OrderActor from './order-actor.server';
 
-import { Clock, Context, Effect, Layer, Schema } from 'effect';
+import { Clock, Context, Effect, Layer, Result, Schedule, Schema } from 'effect';
 import { Actor } from 'effect-encore';
 
 import {
@@ -161,17 +161,25 @@ const processor =
             ...checkout.success,
             now,
           })
-          .pipe(Effect.orDie);
+          .pipe(
+            Effect.retry({
+              times: 5,
+              schedule: Schedule.exponential('1 second'),
+            }),
+            Effect.result,
+          );
         yield* repository
           .apply(
-            {
-              orderId,
-              event: {
-                _tag: 'CheckoutCreated',
-                sessionId: created.sessionId,
-                checkoutUrl: created.url,
-              },
-            },
+            Result.isSuccess(created)
+              ? {
+                  orderId,
+                  event: {
+                    _tag: 'CheckoutCreated',
+                    sessionId: created.success.sessionId,
+                    checkoutUrl: created.success.url,
+                  },
+                }
+              : { orderId, event: { _tag: 'CheckoutCreationFailed' } },
           )
           .pipe(Effect.asVoid, Effect.orDie);
       },
@@ -240,9 +248,29 @@ const processor =
             paymentIntentId,
             idempotencyKey: `registration:refund:${orderId}`,
           })
-          .pipe(Effect.orDie);
+          .pipe(
+            Effect.retry({
+              times: 5,
+              schedule: Schedule.exponential('1 second'),
+            }),
+            Effect.result,
+          );
 
-        if (refunded.status === 'succeeded') {
+        if (Result.isFailure(refunded)) {
+          yield* repository
+            .apply({
+              orderId,
+              event: {
+                _tag: 'RefundFailed',
+                at: completedAt,
+                detail: 'Stripe did not accept the full refund after retries',
+              },
+            })
+            .pipe(Effect.asVoid, Effect.orDie);
+          return;
+        }
+
+        if (refunded.success.status === 'succeeded') {
           yield* repository
             .apply({
               orderId,
@@ -250,9 +278,9 @@ const processor =
             })
             .pipe(Effect.asVoid, Effect.orDie);
         } else if (
-          refunded.status === 'failed' ||
-          refunded.status === 'canceled' ||
-          refunded.status === 'cancelled'
+          refunded.success.status === 'failed' ||
+          refunded.success.status === 'canceled' ||
+          refunded.success.status === 'cancelled'
         ) {
           yield* repository
             .apply({
@@ -260,7 +288,7 @@ const processor =
               event: {
                 _tag: 'RefundFailed',
                 at: completedAt,
-                detail: `Stripe refund entered ${refunded.status} status`,
+                detail: `Stripe refund entered ${refunded.success.status} status`,
               },
             })
             .pipe(Effect.asVoid, Effect.orDie);
