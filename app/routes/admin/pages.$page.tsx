@@ -1,4 +1,4 @@
-import { Cause, Clock, Effect, Option, Schema } from 'effect';
+import { Effect, Option, Schema } from 'effect';
 import {
   Form,
   redirect,
@@ -7,29 +7,24 @@ import {
   useNavigation,
 } from 'react-router';
 
-import { adminMeta, adminRedirectWithStatus, adminFlashStatus, adminSecurityHeaders } from '~/lib/admin-headers';
+import { adminMeta, adminFlashStatus, adminSecurityHeaders } from '~/lib/admin-headers';
 import { Auth } from '~/lib/auth.server';
 import {
   DraftEditor,
   pageScope,
-  type IssueError,
 } from '~/lib/content/draft-editor.server';
 import {
   assembleOverrides,
-  imageUploadTarget,
-  isAcceptedImageType,
   normalizeFaqAnswers,
-  uploadedImageKey,
   type Json,
 } from '~/lib/content/admin-form';
-import { prepareImage } from '~/lib/content/image-optimize.server';
-import { collectListOps, fieldName } from '~/lib/content/list-edit';
+import { handleAdminEditRequest } from '~/lib/content/admin-edit-request.server';
+import { fieldName } from '~/lib/content/list-edit';
 import { PAGE_SPECS, PageId } from '~/lib/content/pages/registry';
 import { ListItemId } from '~/lib/content/schema';
 import { Env } from '~/lib/env.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction, routeHandler } from '~/lib/effect/route';
-import { Storage } from '~/lib/storage.server';
 import {
   AddItemButton,
   Bilingual,
@@ -94,13 +89,6 @@ const PAGE_LABELS: { readonly [P in PageId]: string } = {
 
 type ActionResponse = ActionResult;
 
-/** Map a `DraftEditor` `IssueError` to the editor's JSON action response. */
-const issueResponse = (error: IssueError): Response =>
-  Response.json(
-    { ok: false, error: error.message, issues: error.issues },
-    { status: error.status },
-  );
-
 /** Auth gate shared by the loader + action (404 when admin is disabled). */
 const requireAdmin = Effect.fn('admin/pages.requireAdmin')(function* () {
   const { request } = yield* ReactRouterContext;
@@ -145,119 +133,15 @@ export const loader = routeHandler(function* () {
 export const action = routeAction(function* () {
   yield* requireAdmin();
   const page = yield* requirePageId();
-  const scope = pageScope(page);
-
-  const editor = yield* DraftEditor.Service;
-  const storage = yield* Storage.Service;
   const { request } = yield* ReactRouterContext;
   const form = yield* Effect.promise(() => request.formData());
-  const intent = String(form.get('intent') ?? 'save-draft');
-
-  // ---- image upload --------------------------------------------------------
-  // Identical in shape to the site editor (`content.tsx`), scoped to THIS page:
-  // validate the file, optimize it at the shared `prepareImage` boundary, store
-  // the prepared bytes, then `DraftEditor.applyImageUpload`
-  // rewrites the targeted `<image>.key` field on the page draft so the new image
-  // survives a reload and a later publish. The image-upload path is REUSED, not
-  // re-implemented — `applyImageUpload` is scope-generic and `setAtPath` already
-  // navigates `groupPhoto.key` / `portrait.key` as plain object paths.
-  const uploadTarget = imageUploadTarget(intent);
-  if (uploadTarget !== null) {
-    const file = form.get('file');
-    if (!(file instanceof File) || file.size === 0) {
-      return Response.json(
-        { ok: false, error: 'Choose an image before uploading.', issues: [] },
-        { status: 400 },
-      );
-    }
-    if (!isAcceptedImageType(file.type)) {
-      return Response.json(
-        {
-          ok: false,
-          error: 'Upload a JPEG, PNG, WebP, GIF, or AVIF image.',
-          issues: [],
-        },
-        { status: 400 },
-      );
-    }
-
-    // Shrink + re-encode at the ONE shared boundary (Feature B), identical to
-    // the site editor: WebP for decodable rasters, GIF/originals passed through,
-    // so the key + `storage.put` follow `prepared.contentType`, never `file.type`.
-    const bytes = new Uint8Array(yield* Effect.promise(() => file.arrayBuffer()));
-    const prepared = yield* prepareImage(bytes, file.type);
-    const now = yield* Clock.currentTimeMillis;
-    const key = uploadedImageKey(uploadTarget, prepared.contentType, now);
-
-    const putExit = yield* Effect.exit(
-      storage.put(key, prepared.bytes, prepared.contentType),
-    );
-    if (putExit._tag === 'Failure') {
-      return Response.json(
-        {
-          ok: false,
-          error:
-            'Image upload failed — is the bucket configured? ' +
-            Cause.pretty(putExit.cause),
-          issues: [],
-        },
-        { status: 502 },
-      );
-    }
-
-    const applied = yield* editor
-      .applyImageUpload(scope, uploadTarget, key)
-      .pipe(Effect.result);
-    if (applied._tag === 'Failure') return issueResponse(applied.failure);
-    return adminRedirectWithStatus(
-      `/admin/pages/${page}`,
-      `Image uploaded: ${key}`,
-    );
-  }
-
-  // ---- list op (add / remove / reorder) ------------------------------------
-  if (intent === 'list-op') {
-    const ops = collectListOps(form.entries());
-    if (ops.length === 0) {
-      return Response.json(
-        { ok: false, error: 'No list change to apply.', issues: [] },
-        { status: 400 },
-      );
-    }
-    const applied = yield* editor.applyListOps(scope, ops).pipe(Effect.result);
-    if (applied._tag === 'Failure') return issueResponse(applied.failure);
-    return Response.json({ ok: true as const });
-  }
-
-  if (intent !== 'save-draft' && intent !== 'publish') {
-    return Response.json(
-      { ok: false, error: 'Unknown submit intent.', issues: [] },
-      { status: 400 },
-    );
-  }
-
-  // ---- save / publish ------------------------------------------------------
-  // The page form carries only dotted-path fields (no translation god-bag — page
-  // copy lives in the typed object now), so `assembleOverrides` is the whole
-  // override; `DraftEditor.editDocument` merges it onto the current page, decodes
-  // at the page's DRAFT boundary, and stores `…draft.json`. The FAQ answer input
-  // posts a plain bilingual `items.<id>.answer` leaf, which `normalizeFaqAnswers`
-  // rewrites into the encoded single-`text`-token `RichText` the `FaqPage` schema
-  // decodes (a no-op for every other page — only FAQ-answer leaves are touched).
-  const override = normalizeFaqAnswers(assembleOverrides(form.entries()));
-  const edited = yield* editor.editDocument(scope, override).pipe(Effect.result);
-  if (edited._tag === 'Failure') return issueResponse(edited.failure);
-
-  if (intent === 'save-draft') {
-    return adminRedirectWithStatus(`/admin/pages/${page}`, 'Draft saved.');
-  }
-
-  const published = yield* editor.publish(scope).pipe(Effect.result);
-  if (published._tag === 'Failure') return issueResponse(published.failure);
-  return adminRedirectWithStatus(
-    `/admin/pages/${page}`,
-    'Published. Live on the next page load.',
-  );
+  return yield* handleAdminEditRequest({
+    scope: pageScope(page),
+    form,
+    redirectTo: `/admin/pages/${page}`,
+    buildOverride: (submitted) =>
+      normalizeFaqAnswers(assembleOverrides(submitted.entries())),
+  });
 });
 
 // ---------------------------------------------------------------------------
