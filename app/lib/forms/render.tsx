@@ -171,18 +171,21 @@ function LeafField({
 function RuleGatedField({
   rule,
   formId,
+  namePrefix,
   children,
 }: {
   rule: CrossFieldRule;
   formId: string;
+  namePrefix: string;
   children: React.ReactNode;
 }) {
   const when =
     rule._tag === 'requiredWhenEquals' ? rule.when : rule.predicate.when;
-  const meta = useField<unknown>(when);
+  const fieldName = `${namePrefix}${when}`;
+  const meta = useField<unknown>(fieldName);
   const fallback =
     typeof meta.defaultValue === 'string' ? meta.defaultValue : undefined;
-  const live = useFormData(formId, (formData) => formData.getAll(when), {
+  const live = useFormData(formId, (formData) => formData.getAll(fieldName), {
     fallback: fallback === undefined ? [] : [fallback],
   });
   const values = live.filter(
@@ -260,7 +263,7 @@ function FieldControl({
   );
   const rule = gateRules?.get(field.name);
   return rule ? (
-    <RuleGatedField rule={rule} formId={formId}>
+    <RuleGatedField rule={rule} formId={formId} namePrefix={prefix}>
       {control}
     </RuleGatedField>
   ) : (
@@ -274,11 +277,13 @@ function VariantSection({
   locale,
   formId,
   gateRules,
+  prefix,
 }: {
   variant: FormVariantSet;
   locale: Locale;
   formId: string;
   gateRules: ReadonlyMap<string, CrossFieldRule>;
+  prefix: string;
 }) {
   // The conform `/future` field metadata exposes no live `.value`, so read the
   // submitted discriminator from the live `FormData`, falling back to the field's
@@ -287,12 +292,13 @@ function VariantSection({
   // idiom the hand-tuned `method` forms use. A discriminator with no default
   // (registration's `type`) renders no branch until the user selects one, exactly
   // as the registration form does today.
-  const meta = useField<string>(variant.discriminator);
+  const discriminator = `${prefix}${variant.discriminator}`;
+  const meta = useField<string>(discriminator);
   const fallback =
     typeof meta.defaultValue === 'string' ? meta.defaultValue : undefined;
   const live = useFormData(
     formId,
-    (formData) => formData.get(variant.discriminator),
+    (formData) => formData.get(discriminator),
     { fallback },
   );
   const selected = typeof live === 'string' ? live : fallback;
@@ -300,7 +306,7 @@ function VariantSection({
 
   return (
     <>
-      <RadioGroup name={variant.discriminator}>
+      <RadioGroup name={discriminator}>
         <Radios>
           {variant.options.map((option) => (
             <Radio key={option.value} value={option.value}>
@@ -315,7 +321,7 @@ function VariantSection({
             <FieldControl
               key={field.name}
               field={field}
-              prefix=""
+              prefix={prefix}
               locale={locale}
               formId={formId}
               gateRules={gateRules}
@@ -336,9 +342,13 @@ function VariantSection({
 export function FormFields({
   definition,
   formId,
+  namePrefix = '',
+  includeHoneypot = true,
 }: {
   definition: FormDefinition;
   formId: string;
+  namePrefix?: string;
+  includeHoneypot?: boolean;
 }) {
   const locale = useLocale();
 
@@ -361,7 +371,7 @@ export function FormFields({
         <FieldControl
           key={field.name}
           field={field}
-          prefix=""
+          prefix={namePrefix}
           locale={locale}
           formId={formId}
           gateRules={gateRules}
@@ -373,9 +383,10 @@ export function FormFields({
           locale={locale}
           formId={formId}
           gateRules={gateRules}
+          prefix={namePrefix}
         />
       ) : null}
-      <HoneypotField />
+      {includeHoneypot ? <HoneypotField /> : null}
     </>
   );
 }
