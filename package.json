@@ -12,6 +12,7 @@
     "migrate:legacy-forms": "bun scripts/migrate-legacy-forms.ts",
     "migrate:form-notifications": "bun scripts/migrate-form-notification-projections.ts",
     "start": "NODE_ENV=production bun ./server.ts",
+    "test:postgres": "bun test ./app/lib/registration/workflow-storage.postgres.ts",
     "typecheck": "react-router typegen && tsgo --noEmit",
     "test": "bun test",
     "prepare": "effect-tsgo patch"

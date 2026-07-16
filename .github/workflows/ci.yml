@@ -18,6 +18,21 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+        env:
+          POSTGRES_DB: gycc_test
+          POSTGRES_PASSWORD: gycc
+          POSTGRES_USER: gycc
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gycc -d gycc_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -40,6 +55,11 @@ jobs:
 
       - name: Test
         run: bun test
+
+      - name: PostgreSQL integration test
+        env:
+          TEST_DATABASE_URL: postgres://gycc:gycc@localhost:5432/gycc_test
+        run: bun run test:postgres
 
   docker:
     needs: build
