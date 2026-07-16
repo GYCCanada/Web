@@ -72,7 +72,9 @@ describe('Registrar', () => {
   test('serializes the named closed → external → preview → open lifecycle', () =>
     Effect.gen(function* () {
       const registrar = yield* Registrar.Service;
+      const sql = yield* SqlClient;
       const ready = yield* publishReadyRegistration;
+      yield* sql`DELETE FROM registration_channels WHERE conference_slug = '/2026'`;
       const closed = yield* registrar.ensureClosed(conference);
       expect(closed.state).toBe('closed');
       expect(closed.revision).toBe(0);
@@ -145,6 +147,7 @@ describe('Registrar', () => {
       const registrar = yield* Registrar.Service;
       const sql = yield* SqlClient;
       const ready = yield* publishReadyRegistration;
+      yield* sql`DELETE FROM registration_channels WHERE conference_slug = '/2026'`;
       const closed = yield* registrar.ensureClosed(conference);
       const preview = yield* registrar.setPreview({
         conference,

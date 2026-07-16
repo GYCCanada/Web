@@ -23,6 +23,7 @@ const seedOrder = Effect.gen(function* () {
     INSERT INTO form_definition_versions (form_id, version_id, definition)
     VALUES ('registration', 'v1', '{}'::jsonb)
   `;
+  yield* sql`DELETE FROM registration_channels WHERE conference_slug = '/2026'`;
   yield* sql`
     INSERT INTO registration_channels (
       conference_slug,

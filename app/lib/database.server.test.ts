@@ -13,6 +13,21 @@ describe('Database lifecycle', () => {
 
       yield* database.ready;
 
+      const defaultChannel = yield* sql<{
+        state: string;
+        externalUrl: string | null;
+      }>`
+        SELECT state, external_url AS "externalUrl"
+        FROM registration_channels
+        WHERE conference_slug = '/2026'
+      `;
+      expect(defaultChannel).toEqual([
+        {
+          state: 'external',
+          externalUrl: 'https://gyccanada.regfox.com/gyc-canada-2026-speak',
+        },
+      ]);
+
       const rows = yield* sql<{ tableName: string }>`
         SELECT table_name AS "tableName"
         FROM information_schema.tables
@@ -75,7 +90,7 @@ describe('Database lifecycle', () => {
           form_definition_version_id,
           conference_timezone
         ) VALUES (
-          '/2026',
+          '/2027',
           'preview',
           'registration',
           'v1',
@@ -95,7 +110,7 @@ describe('Database lifecycle', () => {
           form_definition_version_id,
           conference_timezone
         ) VALUES (
-          '/2027',
+          '/2028',
           'open',
           'registration',
           'missing',
@@ -124,7 +139,7 @@ describe('Database lifecycle', () => {
           form_definition_version_id,
           conference_timezone
         ) VALUES (
-          '/2026',
+          '/2027',
           'open',
           'registration',
           'v1',

@@ -215,6 +215,21 @@ const registrationCommerce = Effect.gen(function* () {
     )
   `;
 
+  // Preserve the live RegFox path when the registrar schema first lands. The
+  // CMS may explicitly advance this row through preview -> open later; a deploy
+  // alone must never turn first-party intake on.
+  yield* sql`
+    INSERT INTO registration_channels (
+      conference_slug,
+      state,
+      external_url
+    ) VALUES (
+      '/2026',
+      'external',
+      'https://gyccanada.regfox.com/gyc-canada-2026-speak'
+    )
+  `;
+
   yield* sql`
     CREATE TABLE form_definition_drafts (
       form_id text PRIMARY KEY REFERENCES forms(form_id) ON DELETE CASCADE,
