@@ -85,7 +85,24 @@ const submissionTokens = Effect.gen(function* () {
   `;
 });
 
+const normalizeSubmissionAggregate = Effect.gen(function* () {
+  const sql = yield* SqlClient;
+  yield* sql`DROP INDEX submissions_form_submitted_at`;
+  yield* sql`
+    ALTER TABLE submissions
+      DROP COLUMN form_id,
+      DROP COLUMN definition_version_id,
+      DROP COLUMN idempotency_token,
+      DROP COLUMN submitted_at
+  `;
+  yield* sql`
+    CREATE INDEX submission_batches_form_submitted_at
+    ON submission_batches(form_id, submitted_at DESC)
+  `;
+});
+
 export const loader = Migrator.fromRecord({
   '0001_form_records': formRecords,
   '0002_submission_tokens': submissionTokens,
+  '0003_normalize_submission_aggregate': normalizeSubmissionAggregate,
 });

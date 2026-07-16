@@ -670,21 +670,13 @@ export const layer = Layer.effect(
               INSERT INTO submissions (
                 submission_id,
                 batch_id,
-                form_id,
-                definition_version_id,
-                idempotency_token,
                 ordinal,
-                payload,
-                submitted_at
+                payload
               ) VALUES (
                 ${SubmissionId.make(nanoid())},
                 ${batchId},
-                ${command.form},
-                ${published.version},
-                ${command.idempotencyToken},
                 ${ordinal},
-                ${json}::jsonb,
-                ${insertedBatch.value.submittedAt}::timestamptz
+                ${json}::jsonb
               )
             `;
           }
