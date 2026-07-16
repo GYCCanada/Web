@@ -47,13 +47,14 @@ export const loader = routeHandler(function* () {
   const content = yield* Content.Service;
   const forms = yield* Forms.Service;
   const channel = yield* (yield* Registrar.Service).get(ConferenceSlug.make('/2026'));
-  if (channel.state === 'external') {
-    return yield* Effect.fail(redirect(channel.url));
+  const publicChannel = Registrar.projectPublicChannel(channel, locale);
+  if (publicChannel.intake === 'external') {
+    return yield* Effect.fail(redirect(publicChannel.url));
   }
-  if (channel.state === 'closed' || channel.state === 'draining') {
+  if (publicChannel.intake === 'unavailable') {
     return yield* Effect.fail(new Response('Not Found', { status: 404 }));
   }
-  if (channel.state === 'preview') {
+  if (publicChannel.intake === 'preview') {
     const auth = yield* Auth.Service;
     const authenticated = yield* auth
       .checkCookie(request.headers.get('cookie'))
@@ -63,12 +64,12 @@ export const loader = routeHandler(function* () {
     }
   }
   const conference = yield* content.getCurrentConference(locale);
-  const published = yield* forms.published('registration', channel.formVersion);
+  const published = yield* forms.published('registration', publicChannel.formVersion);
   return {
     conference,
     definition: yield* Schema.encodeEffect(FormDefinition)(published.definition),
     command: newSubmissionCommandFields(published.version),
-    preview: channel.state === 'preview',
+    preview: publicChannel.intake === 'preview',
   };
 });
 

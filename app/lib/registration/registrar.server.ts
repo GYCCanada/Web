@@ -52,6 +52,37 @@ export type Channel =
     })
   | PinnedChannel;
 
+export type PublicChannel =
+  | { readonly intake: 'unavailable' }
+  | { readonly intake: 'external'; readonly url: typeof ExternalHttpsUrl.Type }
+  | {
+      readonly intake: 'preview' | 'open';
+      readonly formVersion: FormDefinitionVersionId;
+      readonly registrationUrl?: string;
+    };
+
+/** The sole projection from CMS lifecycle state to public CTA and intake access. */
+export const projectPublicChannel = (
+  channel: Channel,
+  locale: 'en' | 'fr',
+): PublicChannel => {
+  switch (channel.state) {
+    case 'external':
+      return { intake: 'external', url: channel.url };
+    case 'preview':
+      return { intake: 'preview', formVersion: channel.formVersion };
+    case 'open':
+      return {
+        intake: 'open',
+        formVersion: channel.formVersion,
+        registrationUrl: `${locale === 'fr' ? '/fr' : ''}/2026/form`,
+      };
+    case 'closed':
+    case 'draining':
+      return { intake: 'unavailable' };
+  }
+};
+
 export type ExpectedRevision = {
   readonly conference: typeof ConferenceSlug.Type;
   readonly expectedRevision: number;

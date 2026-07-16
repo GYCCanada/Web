@@ -229,13 +229,11 @@ describe('Content optional detail-page projection (Option → string|undefined)'
       );
     }).pipe(provideSeeded(defaultContent)));
 
-  it.effect('projects 2026 — registrationUrl and copy sections enabled', () =>
+  it.effect('projects 2026 without a second registrar URL authority', () =>
     Effect.gen(function* () {
       const content = yield* Content.Service;
       const conference = yield* content.getConference('en', 2026);
-      expect(conference.registrationUrl).toBe(
-        'https://gyccanada.regfox.com/gyc-canada-2026-speak',
-      );
+      expect(conference.registrationUrl).toBeUndefined();
       expect(conference.scheduleUrl).toBeUndefined();
       expect(conference.travel.enabled).toBe(false);
       expect(conference.accommodations.enabled).toBe(false);

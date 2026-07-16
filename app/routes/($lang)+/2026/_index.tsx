@@ -30,12 +30,13 @@ export const loader = routeHandler(function* () {
   const locale = getLocale(params);
   const content = yield* Content.Service;
   const channel = yield* (yield* Registrar.Service).get(ConferenceSlug.make('/2026'));
+  const publicChannel = Registrar.projectPublicChannel(channel, locale);
   const loaded = yield* content.getConference(locale, 2026);
   const registrationUrl =
-    channel.state === 'external'
-      ? channel.url
-      : channel.state === 'open'
-        ? `${locale === 'fr' ? '/fr' : ''}/2026/form`
+    publicChannel.intake === 'external'
+      ? publicChannel.url
+      : publicChannel.intake === 'open'
+        ? publicChannel.registrationUrl
         : undefined;
   return { conference: { ...loaded, registrationUrl } };
 });

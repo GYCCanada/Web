@@ -15,6 +15,7 @@ import {
   InvalidTransition,
   Registrar,
   RevisionConflict,
+  projectPublicChannel,
 } from './registrar.server';
 
 const formsLayer = Forms.layer.pipe(Layer.provideMerge(DatabaseTest.layer));
@@ -89,6 +90,37 @@ const publishReadyRegistration = Effect.gen(function* () {
 });
 
 describe('Registrar', () => {
+  test('projects one public CTA/intake policy from lifecycle state', () => Effect.sync(() => {
+    const base = { conference, revision: 0, updatedAt: at };
+    const externalUrl = ExternalHttpsUrl.make('https://example.com/register');
+    expect(projectPublicChannel({ ...base, state: 'closed' }, 'en')).toEqual({
+      intake: 'unavailable',
+    });
+    expect(
+      projectPublicChannel(
+        {
+          ...base,
+          state: 'external',
+          url: externalUrl,
+        },
+        'en',
+      ),
+    ).toEqual({ intake: 'external', url: externalUrl });
+    expect(
+      projectPublicChannel(
+        {
+          ...base,
+          state: 'open',
+          formVersion: Forms.FormDefinitionVersionId.make(
+            `sha256:${'0'.repeat(64)}`,
+          ),
+          timeZone,
+        },
+        'fr',
+      ),
+    ).toMatchObject({ intake: 'open', registrationUrl: '/fr/2026/form' });
+  }));
+
   it.effect('derives infrastructure readiness internally before opening', () =>
     Effect.gen(function* () {
       const registrar = yield* Registrar.Service;
