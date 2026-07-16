@@ -1,14 +1,13 @@
 import { Effect, Option, Schema } from 'effect';
 import {
   Form,
-  redirect,
   useActionData,
   useLoaderData,
   useNavigation,
 } from 'react-router';
 
+import { requireAdminRequest } from '~/lib/admin-auth.server';
 import { adminMeta, adminFlashStatus, adminSecurityHeaders } from '~/lib/admin-headers';
-import { Auth } from '~/lib/auth.server';
 import { fieldName } from '~/lib/content/list-edit';
 import { PAGE_LABELS, PageId } from '~/lib/content/pages/registry';
 import {
@@ -71,19 +70,6 @@ const decodePageId = Schema.decodeUnknownOption(PageId);
 
 type ActionResponse = ActionResult;
 
-/** Auth gate shared by the loader + action (404 when admin is disabled). */
-const requireAdmin = Effect.fn('admin/pages.requireAdmin')(function* () {
-  const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth.Service;
-  yield* auth.checkCookie(request.headers.get('cookie')).pipe(
-    Effect.catchTags({
-      'Auth.Disabled': () =>
-        Effect.fail(new Response('Not Found', { status: 404 })),
-      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
-    }),
-  );
-});
-
 /** Resolve the `:page` param to a `PageId` or 404 the route. */
 const requirePageId = Effect.fn('admin/pages.requirePageId')(function* () {
   const { params } = yield* ReactRouterContext;
@@ -95,7 +81,7 @@ const requirePageId = Effect.fn('admin/pages.requirePageId')(function* () {
 });
 
 export const loader = routeHandler(function* () {
-  yield* requireAdmin();
+  yield* requireAdminRequest();
   const page = yield* requirePageId();
   const { request } = yield* ReactRouterContext;
 
@@ -108,7 +94,7 @@ export const loader = routeHandler(function* () {
 });
 
 export const action = routeAction(function* () {
-  yield* requireAdmin();
+  yield* requireAdminRequest();
   const page = yield* requirePageId();
   const { request } = yield* ReactRouterContext;
   const form = yield* Effect.promise(() => request.formData());

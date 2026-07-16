@@ -1,19 +1,18 @@
 import { Effect, Option, Result, Schema } from 'effect';
 import {
   Form,
-  redirect,
   useActionData,
   useLoaderData,
   useNavigation,
 } from 'react-router';
 
+import { requireAdminRequest } from '~/lib/admin-auth.server';
 import {
   adminFlashStatus,
   adminMeta,
   adminRedirectWithStatus,
   adminSecurityHeaders,
 } from '~/lib/admin-headers';
-import { Auth } from '~/lib/auth.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction, routeHandler } from '~/lib/effect/route';
 import { FormDefinition, FormId } from '~/lib/forms/definition';
@@ -49,19 +48,6 @@ const failure = (
   issues: readonly string[] = [],
 ): Response => Response.json({ ok: false, error, issues }, { status });
 
-/** Keep this route independently safe even when called outside its guard layout. */
-const requireAdmin = Effect.fn('admin/forms.requireAdmin')(function* () {
-  const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth.Service;
-  yield* auth.checkCookie(request.headers.get('cookie')).pipe(
-    Effect.catchTags({
-      'Auth.Disabled': () =>
-        Effect.fail(new Response('Not Found', { status: 404 })),
-      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
-    }),
-  );
-});
-
 const requireFormId = Effect.fn('admin/forms.requireFormId')(function* () {
   const { params } = yield* ReactRouterContext;
   const form = decodeFormId(params['form']);
@@ -72,7 +58,7 @@ const requireFormId = Effect.fn('admin/forms.requireFormId')(function* () {
 });
 
 export const loader = routeHandler(function* () {
-  yield* requireAdmin();
+  yield* requireAdminRequest();
   const form = yield* requireFormId();
   const { request } = yield* ReactRouterContext;
   const published = yield* (yield* Forms.Service).current(form);
@@ -87,7 +73,7 @@ export const loader = routeHandler(function* () {
 });
 
 export const action = routeAction(function* () {
-  yield* requireAdmin();
+  yield* requireAdminRequest();
   const form = yield* requireFormId();
   const { request } = yield* ReactRouterContext;
   const submitted = yield* Effect.promise(() => request.formData());

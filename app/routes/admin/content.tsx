@@ -1,12 +1,12 @@
 import { Effect, Option, Schema } from 'effect';
 import {
   Form,
-  redirect,
   useActionData,
   useLoaderData,
   useNavigation,
 } from 'react-router';
 
+import { requireAdminRequest } from '~/lib/admin-auth.server';
 import { adminMeta, adminFlashStatus, adminSecurityHeaders } from '~/lib/admin-headers';
 import {
   AddItemButton,
@@ -18,7 +18,6 @@ import {
   Section,
   Text,
 } from './controls';
-import { Auth } from '~/lib/auth.server';
 import { Env } from '~/lib/env.server';
 import {
   DraftEditor,
@@ -77,17 +76,8 @@ const encodeDocument = Schema.encodeUnknownEffect(DraftSiteContent);
 type EncodedDocument = typeof DraftSiteContent.Encoded;
 
 export const loader = routeHandler(function* () {
+  yield* requireAdminRequest();
   const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth.Service;
-  // 404 the whole area when disabled; the layout guard already redirected an
-  // unauthenticated visitor, but re-checking keeps this route safe on its own.
-  yield* auth.checkCookie(request.headers.get('cookie')).pipe(
-    Effect.catchTags({
-      'Auth.Disabled': () =>
-        Effect.fail(new Response('Not Found', { status: 404 })),
-      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
-    }),
-  );
 
   const editor = yield* DraftEditor.Service;
   const env = yield* Env.Service;
@@ -104,15 +94,8 @@ export const loader = routeHandler(function* () {
 });
 
 export const action = routeAction(function* () {
+  yield* requireAdminRequest();
   const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth.Service;
-  yield* auth.checkCookie(request.headers.get('cookie')).pipe(
-    Effect.catchTags({
-      'Auth.Disabled': () =>
-        Effect.fail(new Response('Not Found', { status: 404 })),
-      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
-    }),
-  );
 
   const form = yield* Effect.promise(() => request.formData());
   return yield* handleAdminEditRequest({

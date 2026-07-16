@@ -1,9 +1,7 @@
-import { Effect } from 'effect';
-import { Form, Link, Outlet, redirect } from 'react-router';
+import { Form, Link, Outlet } from 'react-router';
 
+import { requireAdminRequest } from '~/lib/admin-auth.server';
 import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
-import { Auth } from '~/lib/auth.server';
-import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeHandler } from '~/lib/effect/route';
 
 export const meta = adminMeta;
@@ -24,15 +22,7 @@ export const headers = adminSecurityHeaders;
  * loader short-circuits.
  */
 export const loader = routeHandler(function* () {
-  const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth.Service;
-  yield* auth.checkCookie(request.headers.get('cookie')).pipe(
-    Effect.catchTags({
-      'Auth.Disabled': () =>
-        Effect.fail(new Response('Not Found', { status: 404 })),
-      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
-    }),
-  );
+  yield* requireAdminRequest();
   return null;
 });
 
