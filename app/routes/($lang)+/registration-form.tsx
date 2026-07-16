@@ -98,11 +98,8 @@ const RegistrantInput = Schema.Struct({
  * is not in the closed `FieldKind` set), so it wraps the per-registrant codec in
  * `{ registrants: Array(...) }`.
  *
- * The definition is read from `Content.getForm('registration')` in each
- * `{2024,2025,2026}/form` loader and passed in as the `definition` prop (BLOCKER 2:
- * registration is now CMS-backed like contact/volunteer — editing the stored
- * `forms/registration.json` changes what the form accepts and how it renders, with
- * no code change; ADR 0007/0008 consequence). The loader JSON crossed a boundary,
+ * Each `{2024,2025,2026}/form` loader reads the current immutable definition from
+ * Forms and passes it with its version and attempt token. The loader JSON crossed a boundary,
  * so the component re-decodes it through `FormDefinition` (`boundary-discipline`)
  * before building the client codec.
  *

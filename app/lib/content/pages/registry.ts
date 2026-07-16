@@ -3,18 +3,13 @@ import { Schema } from 'effect';
 import {
   defaultAboutPage,
   defaultArchivePage,
-  defaultContactForm,
   defaultContactPage,
   defaultFaqPage,
   defaultGivePage,
   defaultHomePage,
-  defaultRegistrationForm,
   defaultTeamPage,
-  defaultVolunteerForm,
   defaultVolunteerPage,
 } from './defaults';
-import { FormDefinition, FormId } from '../../forms/definition';
-export { FORM_IDS, FormId } from '../../forms/definition';
 import {
   AboutPage,
   ArchivePage,
@@ -32,31 +27,27 @@ import {
   VolunteerPage,
 } from './schema';
 import { backfillHomeMissionPhoto } from './home-photo-backfill';
-import { type ListItemId } from '../schema';
 
 /**
- * The per-Page + per-Form object REGISTRY (ADR 0008, registration-launch Branch 5.2).
+ * The per-Page object registry (ADR 0008).
  *
- * Each evergreen Page and each Form definition is its own bucket object
- * (`content/pages/<page>.json`, `forms/<form>.json`). This module is the SINGLE
- * source that maps a closed `PageId` / `FormId` to the three things every consumer
+ * Each evergreen Page is its own bucket object (`content/pages/<page>.json`).
+ * This module is the single source that maps a closed `PageId` to what consumers
  * of an object needs:
  *
  *   - its **schema** (the decode/encode boundary),
  *   - its bundled **default** (the dev / fallback value, seeded on first publish),
  *   - its storage **keys** (derived from the id — never hand-typed at a call site).
  *
- * Both the `DraftEditor`'s per-object draft/published reconciliation (Branch 5.2)
- * and the `Content` service's multi-object read path (Branch 5.3) resolve through
- * this one registry, so the page/form set is enumerated ONCE (`derive-dont-sync`).
+ * Both `DraftEditor` and `Content` resolve Pages through this registry.
  *
  * Principles (`~/.brain/principles`):
- *   - `make-impossible-states-unrepresentable`: `PageId` / `FormId` are CLOSED
+ *   - `make-impossible-states-unrepresentable`: `PageId` is CLOSED
  *     `Schema.Literals`. A scope, a storage key, or a read can only ever name a
- *     page/form that exists — there is no free-string object name.
+ *     Page that exists — there is no free-string object name.
  *   - `derive-dont-sync`: the storage keys are derived from the id by one
- *     template (`pageObjectKey` / `formObjectKey`); the registry record is the
- *     lone place a new page/form is registered (schema + default), so adding a
+ *     template (`pageObjectKey`); the registry record is the
+ *     lone place a new Page is registered (schema + default), so adding a
  *     Page is one entry, not a scattering of switch arms.
  *   - `subtract-before-you-add`: the registry is keyed by the same closed id set
  *     the `/admin` sections (Branch 5.5) and routes (Branch 5.4) enumerate.
@@ -112,24 +103,6 @@ export const pageDraftKey = (page: PageId): string =>
   `content/pages/${page}.draft.json`;
 
 /** The published bucket key a Form definition object lives at (`forms/<form>.json`). */
-export const formObjectKey = (form: FormId): string => `forms/${form}.json`;
-
-/** The *unpublished* draft key for a Form definition object (`forms/<form>.draft.json`). */
-export const formDraftKey = (form: FormId): string =>
-  `forms/${form}.draft.json`;
-
-/**
- * The bucket key one persisted `Submission` lives at
- * (`submissions/<form>/<id>.json`, CONTEXT §Submission, settled #8). Derived from
- * the closed `FormId` plus the submission's `ListItemId` so a persist call can
- * never target a form that doesn't exist nor hand-type the prefix — the same
- * `make-impossible-states-unrepresentable` discipline the page/form key templates
- * carry. The `<form>/` segment groups a form's submissions under one prefix the
- * future first-party registrar (CONTEXT §Submission:47) lists by.
- */
-export const submissionKey = (form: FormId, id: ListItemId): string =>
-  `submissions/${form}/${id}.json`;
-
 // ---------------------------------------------------------------------------
 // Object specs (schema + default per id)
 // ---------------------------------------------------------------------------
@@ -181,8 +154,8 @@ const draftPageSpec = <A, I>(
 
 /**
  * Build a spec with NO laxer draft variant: the draft boundary IS the strict
- * schema. Used by pages/forms without an add-item flow (contact, volunteer, home,
- * and the form definitions) — there is no id-only intermediate state, so the draft
+ * schema. Used by Pages without an add-item flow (contact and volunteer) — there
+ * is no id-only intermediate state, so the draft
  * and publish boundaries coincide.
  */
 const pageSpec = <A, I>(
@@ -222,20 +195,5 @@ export const PAGE_SPECS = {
   team: draftPageSpec(TeamPage, DraftTeamPage, defaultTeamPage),
 } as const satisfies { readonly [P in PageId]: ObjectSpec<unknown, unknown> };
 
-/**
- * The Form registry — one entry per `FormId`. Each decodes through the structural
- * `FormDefinition` (Branch 6.1: the closed `FieldKind` set + variants + cross-field
- * rules); the bundled default carries the form's CMS-editable copy with an empty
- * field graph until that form migrates onto the engine (6.3–6.5).
- */
-export const FORM_SPECS = {
-  contact: pageSpec(FormDefinition, defaultContactForm),
-  volunteer: pageSpec(FormDefinition, defaultVolunteerForm),
-  registration: pageSpec(FormDefinition, defaultRegistrationForm),
-} as const satisfies { readonly [F in FormId]: ObjectSpec<unknown, unknown> };
-
 /** The decoded content type of a Page object, by its id. */
 export type PageContent<P extends PageId> = (typeof PAGE_SPECS)[P]['default'];
-
-/** The decoded content type of a Form object, by its id. */
-export type FormContent<F extends FormId> = (typeof FORM_SPECS)[F]['default'];

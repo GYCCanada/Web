@@ -6,7 +6,6 @@ import {
   Content,
   SITE_CONTENT_DRAFT_KEY,
   SITE_CONTENT_KEY,
-  bustForm,
   bustPage,
   bustSite,
   type BustTarget,
@@ -22,14 +21,9 @@ import { defaultDraftContent } from './defaults';
 import { backfillListItemIds } from './id-backfill';
 import { applyListEdit, type ListOp } from './list-edit';
 import {
-  FORM_SPECS,
   PAGE_SPECS,
-  formDraftKey,
-  formObjectKey,
   pageDraftKey,
   pageObjectKey,
-  type FormContent,
-  type FormId,
   type ObjectSpec,
   type PageContent,
   type PageId,
@@ -47,13 +41,13 @@ import type { ObjectHead } from '../storage.server';
  * "auth → parse intent → call `DraftEditor` → map result to `Response`".
  *
  * Branch 5.2 WIDENS the `ContentScope` union from one inhabitant (`site`) to the
- * per-Page and per-Form objects (ADR 0008): `editDocument` / `applyImageUpload` /
+ * per-Page objects (ADR 0008): `editDocument` / `applyImageUpload` /
  * `applyListOps` / `publish` / `load` now operate on ANY content object addressed
  * by its scope, each with its OWN draft/published key pair, decode boundary, and
  * default. The reconciliation algorithm did not fork — it routes through
  * `resolveScope(scope)`, which is the lone place a scope becomes a concrete
  * `{ draftKey, publishedKey, codec, default }` bundle (one site case + N
- * page/form cases). The bucket-key choreography never leaks back to the route.
+ * Page cases). The bucket-key choreography never leaks back to the route.
  *
  * Principles (see `~/.brain/principles`):
  *   - `small-interface-deep-implementation`: `load`, `editDocument`,
@@ -61,11 +55,11 @@ import type { ObjectHead } from '../storage.server';
  *     draft/published key-pair choreography, the double draft-read, and the
  *     merge/decode/re-encode dance — for every scope, the same five calls.
  *   - `make-impossible-states-unrepresentable`: every operation is addressed by a
- *     `ContentScope`, a *closed* union whose page/form members carry a closed
- *     `PageId` / `FormId`. `resolveScope` maps it to a real
+ *     `ContentScope`, a *closed* union whose Page member carries a closed
+ *     `PageId`. `resolveScope` maps it to a real
  *     `{ draftKey, publishedKey }` pair — an editor cannot target a key that is
- *     not a known scope, and a scope cannot name a page/form that does not exist.
- *   - `derive-dont-sync`: the page/form key pairs, schemas, and defaults are NOT
+ *     not a known scope, and a scope cannot name a Page that does not exist.
+ *   - `derive-dont-sync`: the Page key pairs, schemas, and defaults are NOT
  *     re-declared here — they resolve through the one `pages/registry` (the same
  *     registry Branch 5.3's read path reads), so the object set is enumerated once.
  *   - `boundary-discipline`: decode happens here, once, before a draft is stored;
@@ -90,19 +84,13 @@ export type PageScope<P extends PageId = PageId> = {
   readonly page: P;
 };
 
-/** Address one Form definition object (`forms/<form>.json`). */
-export type FormScope<F extends FormId = FormId> = {
-  readonly kind: 'form';
-  readonly form: F;
-};
-
 /**
  * What a `DraftEditor` operation targets. A closed union over the three object
  * families ADR 0008 splits storage into. Widened from a single inhabitant in
- * Branch 1; the page/form members carry the closed `PageId` / `FormId` so no scope
+ * Branch 1; the Page member carries the closed `PageId` so no scope
  * can name an object that does not exist.
  */
-export type ContentScope = SiteScope | PageScope | FormScope;
+export type ContentScope = SiteScope | PageScope;
 
 /** The one site scope, named so callers never construct the literal inline. */
 export const siteScope: SiteScope = { kind: 'site' };
@@ -113,12 +101,6 @@ export const pageScope = <P extends PageId>(page: P): PageScope<P> => ({
   page,
 });
 
-/** The scope addressing one Form definition (keeps the concrete `FormId`). */
-export const formScope = <F extends FormId>(form: F): FormScope<F> => ({
-  kind: 'form',
-  form,
-});
-
 /** The draft/published bucket-key PAIR a scope addresses. */
 export interface ScopeKeys {
   readonly draftKey: string;
@@ -126,7 +108,7 @@ export interface ScopeKeys {
 }
 
 /**
- * Resolve a `ContentScope` to its draft/published key pair. The page/form keys
+ * Resolve a `ContentScope` to its draft/published key pair. The Page keys
  * are derived from the id through `pages/registry` (`derive-dont-sync`); the site
  * pair is the historical `content/site(.draft).json`.
  */
@@ -141,11 +123,6 @@ export const scopeKeys = (scope: ContentScope): ScopeKeys => {
       return {
         draftKey: pageDraftKey(scope.page),
         publishedKey: pageObjectKey(scope.page),
-      };
-    case 'form':
-      return {
-        draftKey: formDraftKey(scope.form),
-        publishedKey: formObjectKey(scope.form),
       };
   }
 };
@@ -164,15 +141,13 @@ const bustTargetOf = (scope: ContentScope): BustTarget => {
       return bustSite;
     case 'page':
       return bustPage(scope.page);
-    case 'form':
-      return bustForm(scope.form);
   }
 };
 
 /**
  * The decoded DRAFT value a scope's `load` returns. Site is the laxer
  * `DraftSiteContent` (a freshly-added list item may carry only its `id`, ADR
- * 0006); a Page/Form is its own typed object. The conditional ties each scope
+ * 0006); a Page is its own typed object. The conditional ties each scope
  * member to the concrete type its registry entry decodes to, so a caller that
  * narrows the scope statically gets the narrow content type (no widened union).
  */
@@ -180,15 +155,13 @@ export type ScopeContent<S extends ContentScope> = S extends SiteScope
   ? DraftSiteContentType
   : S extends { readonly kind: 'page'; readonly page: infer P extends PageId }
     ? PageContent<P>
-    : S extends { readonly kind: 'form'; readonly form: infer F extends FormId }
-      ? FormContent<F>
-      : never;
+    : never;
 
 /**
  * The encoded form of a scope's content, returned to the view by a write
  * (`editDocument` / `applyImageUpload` / `applyListOps`) so the route can
  * revalidate without a re-read. Site is the `DraftSiteContent` encoded shape; a
- * Page/Form is its schema's `Encoded`.
+ * Page is its schema's `Encoded`.
  */
 export type ScopeEncoded<S extends ContentScope> = S extends SiteScope
   ? typeof DraftSiteContent.Encoded
@@ -252,10 +225,8 @@ const parseJson = Schema.decodeUnknownEffect(
  * Branch 2): a freshly-added list item may carry only its `id` until its
  * bilingual content is filled in, so the site draft decodes/encodes through
  * `DraftSiteContent` while publish promotes through the strict `SiteContent`. A
- * Page/Form has no id-only-add flow yet, so its draft and publish codecs are the
- * SAME strict schema — an honest current state, not a stub: when Branch 5.5 gives
- * pages the add-item flow it introduces the page draft variants and wires them
- * here, exactly as the site scope already is.
+ * Page without an id-only-add flow has identical draft and publish codecs. Pages
+ * with add-item flows supply a laxer draft schema through their registry spec.
  *
  * `fromBucket` reads a draft (or published — also a valid draft) document FROM
  * the bucket: parse → (site only) id-backfill → decode-draft, so a site document
@@ -336,13 +307,13 @@ const siteCodec: ScopeCodec = {
 };
 
 /**
- * Build a codec bundle for a Page/Form object from its registry `ObjectSpec`.
+ * Build a codec bundle for a Page object from its registry `ObjectSpec`.
  *
  * Branch 5.5 gives the list-bearing pages (FAQ, give, about, archive) an add-item
  * flow, so their draft boundary is the LAXER `spec.draftSchema` (a freshly-added
  * id-only item is draft-valid) and the publish boundary the STRICT `spec.schema`
  * (re-enforcing the both-locales `Text` invariant) — exactly the site scope's
- * `DraftSiteContent`/`SiteContent` split. A page/form with no add-item flow wires
+ * `DraftSiteContent`/`SiteContent` split. A Page with no add-item flow wires
  * `draftSchema === schema` in the registry, so this same code path keeps draft and
  * publish identical for it without a special case (`derive-dont-sync`). There is
  * still no id-backfill: these objects are brand-new storage (ADR 0008), so no
@@ -388,7 +359,7 @@ const objectCodec = (
 };
 
 /**
- * Resolve a scope to its codec bundle. One site case + N page/form cases, each
+ * Resolve a scope to its codec bundle. One site case + N Page cases, each
  * derived from `pages/registry`. The decoder/encoder value types differ per page,
  * so the bundle is type-erased (`unknown`) at this seam — each scope's methods are
  * internally consistent (the same schema decodes and encodes a scope's value) —
@@ -404,8 +375,6 @@ const resolveScope = (scope: ContentScope): ScopeCodec => {
       // encode close over the precise schema and widen to the bundle's `unknown`
       // surface on return — no spec erasure / cast needed at this seam.
       return objectCodec(PAGE_SPECS[scope.page], scopeKeys(scope));
-    case 'form':
-      return objectCodec(FORM_SPECS[scope.form], scopeKeys(scope));
   }
 };
 

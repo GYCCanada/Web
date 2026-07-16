@@ -96,12 +96,7 @@ const positionsLine = (decoded: DecodedForm): string => {
   return positions.join(", ");
 };
 
-// The volunteer action is the generic skeleton (Branch 6.2; persist-then-notify
-// wired in Branch 7.3): `Content.getForm` → `decodeForm` → `Submissions.persist`
-// → `notify` → `toast.redirect`. The form-specific part is the notification — the
-// same mailer body the hand-tuned action built, now over the PERSISTED record's
-// payload (the durable `submissions/volunteer/<id>.json` object is already written
-// when `notify` runs, so a mailer failure cannot lose the record).
+// Forms validates and commits first; this route owns only notification copy.
 export const action = formAction({
   form: "volunteer",
   page: "volunteer",

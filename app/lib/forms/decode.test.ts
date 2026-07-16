@@ -33,7 +33,7 @@ import { FormDefinition as FormDefinitionSchema } from './definition';
 
 const text = (en: string, fr: string) => ({ en, fr });
 
-/** Decode a raw JSON definition through the schema (as `Content.getForm` would). */
+/** Decode a raw JSON definition through the domain boundary. */
 const asDefinition = (json: unknown): FormDefinition =>
   Schema.decodeUnknownSync(FormDefinitionSchema)(json);
 

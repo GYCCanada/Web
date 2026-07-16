@@ -43,44 +43,10 @@ export type AppError =
   | StorageError
   | NotFound;
 
-// `storageLayer` is the ONE `Storage` instance the whole app runtime shares. It
-// is provided to `Content.layer` (NOT `Content.defaultLayer`, which would bake
-// in its own separate `Storage.layerOptional`) AND merged into the base, so the
-// public read path's `Content.getForm`/`getPage`, the `/admin` editor's
-// reads/writes (`DraftEditor`), the form-action persist step (`Submissions`),
-// and any route that reads `Storage` directly all resolve the SAME
-// `Storage.Service` over the SAME bucket — there is genuinely no second instance
-// to coordinate. Production passes `Storage.layerOptional` (bucket-less it reports
-// `NotFound`, which the read path recovers to the bundled defaults, D3; writes
-// fail `StorageError` rather than silently dropping). `Content.layer` exposes
-// `Content` with only `Env` left open, discharged by the surrounding merge.
-//
-// The admin write surface is only *reachable* when `Auth` is enabled
-// (`ADMIN_PASSWORD` + `COOKIE_SECRET` set), independent of the bucket; the
-// editor still surfaces a `StorageError` when an admin is configured without a
-// bucket, rather than silently dropping a save.
-//
-// `Auth` is likewise optional everywhere: with `ADMIN_PASSWORD` unset its layer
-// builds a disabled instance (admin 404s), so it never fails to build either.
-//
-// `DraftEditor.layer` (the `/admin` editor's write pipeline) and
-// `Submissions.layer` (the form-action persist step) are layered ON TOP of this
-// base via `provideMerge`, so each consumes the SAME exposed `Content.Service`
-// (DraftEditor's `publish` busts the very cache the public read serves from;
-// Submissions reads each form's CMS-editable definition through it) and the SAME
-// exposed `Storage.Service` the editor route reads/writes and the persisted
-// `submissions/<form>/<id>.json` objects land in.
 /**
- * Build the full app layer over a chosen `Storage` layer. Production uses
- * `Storage.layerOptional` (bucket-less it reports `NotFound`/`StorageError`,
- * never failing to build). A test can pass an in-memory `Storage` layer (the
- * `Map`-backed `layerTest`) so a code path that WRITES — the form-action
- * `Submissions.persist` step — can be exercised end-to-end through the real
- * request runtime, since a bucket-less write would otherwise fail. The single
- * `storageLayer` instance is shared by `Content`, `DraftEditor`, and
- * `Submissions`: a form seeded into the injected bucket is read back by
- * `Content.getForm` through that SAME bucket (no second instance to coordinate),
- * so the write path is faithfully exercisable end-to-end through this seam.
+ * Compose the application over explicit object-storage and relational adapters.
+ * Content and DraftEditor share one Storage instance; Forms owns the supplied
+ * database lifecycle. Tests substitute both adapters without changing callers.
  */
 export const makeAppLayer = (
   storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,

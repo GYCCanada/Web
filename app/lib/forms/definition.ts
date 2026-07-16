@@ -26,7 +26,7 @@ export const FORM_IDS = FormId.literals;
  *
  * It replaces the page-level-copy-only PLACEHOLDER that lived in
  * `content/pages/schema.ts` (Branch 5.1): every consumer (the per-form registry,
- * the bundled form defaults, `Content.getForm`) is migrated to this module and
+ * the bundled Form defaults and `Forms.current`) is migrated to this module and
  * the placeholder is deleted (`migrate-callers-then-delete-legacy-apis`,
  * `subtract-before-you-add`). The `title` / `intro` copy fields are preserved so
  * the placeholder objects still decode and a form keeps a CMS-editable heading.

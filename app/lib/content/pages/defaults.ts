@@ -456,7 +456,7 @@ export const defaultTeamPage: TeamPage = Schema.decodeUnknownSync(TeamPage)({
  * (the closed `FieldKind` set, variants, cross-field rules); volunteer and
  * registration carry the CMS-editable page copy with an EMPTY `fields` graph
  * until they migrate onto the engine (volunteer 6.4, registration 6.5) — until
- * then each falls back to its hand-tuned schema, and `Content.getForm` reads this
+ * then each falls back to its hand-tuned schema, and `Forms` seeds this
  * typed default so the per-form object + read path stay proven
  * (`migrate-callers-then-delete-legacy-apis`).
  */
