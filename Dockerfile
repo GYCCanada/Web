@@ -13,7 +13,7 @@
 # the site serves bundled content, and without admin /admin 404s.
 
 # ---- deps: full install for the vite/react-router build ----
-FROM oven/bun:1.3-alpine AS deps
+FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 # --ignore-scripts skips `prepare` (effect-tsgo patch) — typecheck-only tooling.
@@ -29,13 +29,13 @@ COPY . .
 RUN bun run build
 
 # ---- prod-deps: production node_modules only ----
-FROM oven/bun:1.3-alpine AS prod-deps
+FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS prod-deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production --ignore-scripts
 
 # ---- runtime ----
-FROM oven/bun:1.3-alpine
+FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0
 WORKDIR /app
 ENV NODE_ENV=production
 
