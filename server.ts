@@ -13,6 +13,7 @@ import {
   checkAppReady,
   disposeAppRuntime,
   drainFormNotifications,
+  expireRegistrationOrders,
   makeRequestRuntime,
   type RequestRuntime,
 } from './app/lib/effect/runtime.ts';
@@ -258,6 +259,16 @@ const StartupCheck = Layer.effectDiscard(
         Effect.promise(drainFormNotifications).pipe(
           Effect.catchCause((cause) =>
             Effect.logError('Form notification worker failed', cause),
+          ),
+          Effect.delay('30 seconds'),
+        ),
+      ),
+    );
+    yield* Effect.forkScoped(
+      Effect.forever(
+        Effect.promise(expireRegistrationOrders).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError('Registration Order expiry worker failed', cause),
           ),
           Effect.delay('30 seconds'),
         ),
