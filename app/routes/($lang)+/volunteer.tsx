@@ -8,7 +8,7 @@ import {
 } from "react-router";
 
 import { Content } from "~/lib/content.server";
-import { getEnabledPageOr404 } from "~/lib/content/page-guard.server";
+import { readPageView } from "~/lib/content/pages/pages.server";
 import { FormProvider, useForm } from "~/lib/conform";
 import { definitionToSchema, type DecodedForm } from "~/lib/forms/decode";
 import { FormDefinition } from "~/lib/forms/definition";
@@ -19,7 +19,6 @@ import { routeHandler } from "~/lib/effect/route";
 import { ReactRouterContext } from "~/lib/effect/router-context";
 import { useTranslate } from "~/lib/localization/context";
 import { getLocale } from "~/lib/localization/localization";
-import { toVolunteerView } from "~/lib/content/pages/project";
 import { Mailer } from "~/lib/mailer.server";
 import { Button } from "~/ui/button";
 import { fieldErrorStyle } from "~/ui/field-error";
@@ -47,7 +46,7 @@ export const loader = routeHandler(function* () {
   const locale = getLocale(params);
   const content = yield* Content.Service;
   // 404 when the volunteer page is disabled (Feature C); else project + load form.
-  const page = toVolunteerView(yield* getEnabledPageOr404("volunteer"), locale);
+  const page = yield* readPageView("volunteer", locale);
   return {
     page,
     definition: yield* content.getForm("volunteer"),

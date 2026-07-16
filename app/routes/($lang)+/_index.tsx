@@ -12,7 +12,7 @@ import { Breakpoint, useBreakpoint } from "~/lib/client-hints";
 import { FormProvider, useForm } from "~/lib/conform";
 import { Content } from "~/lib/content.server";
 import { getEnabledPageOr404 } from "~/lib/content/page-guard.server";
-import { toHomeView } from "~/lib/content/pages/project";
+import { readPageView } from "~/lib/content/pages/pages.server";
 import { dayjs } from "~/lib/dayjs";
 import { formValidationError, notFound } from "~/lib/effect/errors";
 import { routeFormAction, SubmissionContext } from "~/lib/effect/form";
@@ -56,7 +56,7 @@ export const loader = routeHandler(function* () {
   return {
     conference: yield* content.getCurrentConference(locale),
     // 404 when the home page is disabled (Feature C); else project the decoded page.
-    page: toHomeView(yield* getEnabledPageOr404("home"), locale),
+    page: yield* readPageView("home", locale),
     newsletterEnabled: Option.isSome(env.sendgrid),
   };
 });

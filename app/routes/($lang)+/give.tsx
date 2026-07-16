@@ -1,11 +1,10 @@
 import { type MetaFunction, useLoaderData } from "react-router";
 
-import { getEnabledPageOr404 } from "~/lib/content/page-guard.server";
+import { readPageView } from "~/lib/content/pages/pages.server";
 import { ReactRouterContext } from "~/lib/effect/router-context";
 import { routeHandler } from "~/lib/effect/route";
 import { useTranslate } from "~/lib/localization/context";
 import { getLocale } from "~/lib/localization/localization";
-import { toGiveView } from "~/lib/content/pages/project";
 import { buttonStyle } from "~/ui/button";
 import { Main } from "~/ui/main";
 
@@ -27,7 +26,7 @@ export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   // 404 when the page is disabled (Feature C); else project the decoded page.
-  return { page: toGiveView(yield* getEnabledPageOr404("give"), locale) };
+  return { page: yield* readPageView("give", locale) };
 });
 
 export default function Index() {

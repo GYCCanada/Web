@@ -1,8 +1,7 @@
 import { type MetaFunction, useLoaderData } from 'react-router';
 
 import { Content } from '~/lib/content.server';
-import { getEnabledPageOr404 } from '~/lib/content/page-guard.server';
-import { toTeamView } from '~/lib/content/pages/project';
+import { readPageView } from '~/lib/content/pages/pages.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeHandler } from '~/lib/effect/route';
 import { useTranslate } from '~/lib/localization/context';
@@ -33,7 +32,7 @@ export const loader = routeHandler(function* () {
   // `getTeam()` (conference-executive data, not page copy — not migrated here).
   // 404 when the team page is disabled (Feature C — today's default-hidden team is
   // this flag now, not a nav comment).
-  const page = toTeamView(yield* getEnabledPageOr404('team'), locale);
+  const page = yield* readPageView('team', locale);
   const { team, board } = yield* content.getTeam();
   return { page, team, board };
 });
