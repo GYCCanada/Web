@@ -7,7 +7,7 @@ import { Env } from './env.server';
 
 export class MailError extends Schema.TaggedErrorClass<MailError>()(
   'Mailer.Error',
-  { cause: Schema.optional(Schema.Defect) },
+  { cause: Schema.optional(Schema.Defect()) },
 ) {}
 
 /**

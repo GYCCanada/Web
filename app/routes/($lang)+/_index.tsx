@@ -1,5 +1,4 @@
 import { Effect, Option, Result, Schema } from "effect";
-import { FacebookIcon, InstagramIcon, YoutubeIcon } from "lucide-react";
 import * as React from "react";
 import {
   Form,
@@ -28,16 +27,17 @@ import { Sendgrid } from "~/lib/sendgrid.server";
 import { Toast } from "~/lib/toast.server";
 import { Button, buttonStyle } from "~/ui/button";
 import { HoneypotField } from "~/ui/honeypot-field";
+import { FacebookIcon, InstagramIcon, YoutubeIcon } from "~/ui/icon";
 import { FieldErrors, fieldErrorStyle } from "~/ui/field-error";
 import { Label } from "~/ui/label";
 import { Link } from "~/ui/link";
 import { Main } from "~/ui/main";
 import { TextField } from "~/ui/text-field";
 
-export const meta: MetaFunction<typeof loader> = ({ data, params }) => {
+export const meta: MetaFunction<typeof loader> = ({ loaderData, params }) => {
   const locale = getLocale(params);
   return [
-    { title: `${data?.conference.title} | GYCC` },
+    { title: `${loaderData?.conference.title} | GYCC` },
     {
       name: "description",
       content:

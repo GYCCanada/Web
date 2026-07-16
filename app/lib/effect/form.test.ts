@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { Effect } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
 import { BadRequestError, formValidationError, redirect } from './errors';
@@ -120,6 +121,7 @@ describe('routeFormAction', () => {
   it('runs the body when the honeypot field is empty', async () => {
     let bodyRan = false;
     const action = routeFormAction(function* () {
+      yield* Effect.void;
       bodyRan = true;
       return { reset: true } satisfies FormSuccess;
     });

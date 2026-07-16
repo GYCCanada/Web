@@ -1,5 +1,5 @@
 import { formatPath } from '@conform-to/dom/future';
-import { Result, Schema, SchemaIssue } from 'effect';
+import { Result, Schema, SchemaIssue, SchemaParser } from 'effect';
 import type { Issue } from 'effect/SchemaIssue';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 
@@ -53,7 +53,7 @@ function issuePathToName(
 export const parseSchema = <A, I>(
   schema: Schema.Codec<A, I, never, never>,
   payload: unknown,
-): Result.Result<A, Issue> => Schema.decodeUnknownResult(schema)(payload);
+): Result.Result<A, Issue> => SchemaParser.decodeUnknownResult(schema)(payload);
 
 /**
  * Convert an Effect Schema parse {@link Result} into conform's

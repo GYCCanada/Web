@@ -6,7 +6,6 @@ import {
 } from "react-router";
 import dayjs from "dayjs";
 import { AnimatePresence, motion } from "framer-motion";
-import { FacebookIcon, InstagramIcon, YoutubeIcon } from "lucide-react";
 import * as React from "react";
 import { Button } from "@base-ui/react/button";
 import { ClientOnly } from "remix-utils/client-only";
@@ -24,7 +23,14 @@ import { LocalizationProvider } from "~/lib/localization/provider";
 import { useRootLoader } from "~/lib/root-loader";
 import { useToast } from "~/lib/toast";
 import { ExternalLink, linkStyle } from "~/ui/external-link";
-import { CloseIcon, LanguageIcon, MenuIcon } from "~/ui/icon";
+import {
+  CloseIcon,
+  FacebookIcon,
+  InstagramIcon,
+  LanguageIcon,
+  MenuIcon,
+  YoutubeIcon,
+} from "~/ui/icon";
 import { Link } from "~/ui/link";
 import { Portal } from "~/ui/portal";
 
@@ -265,7 +271,7 @@ function getNextLocalePath(path: string, nextLocale: Locale): string {
     .exhaustive();
 }
 
-const MotionLink = motion(Link);
+const MotionLink = motion.create(Link);
 
 /** Per-link delay (seconds) for the staggered PopupNav reveal. */
 const STAGGER_STEP = 0.1;

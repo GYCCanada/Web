@@ -4,7 +4,6 @@ import { createRoutesStub } from 'react-router';
 
 import { Breakpoint } from '~/lib/client-hints';
 import type { Conference } from '~/lib/content.server';
-import { defaultContent } from '~/lib/content/defaults';
 import { LocalizationProvider } from '~/lib/localization/provider';
 import { root as translations } from '~/lib/localization/translations';
 
@@ -43,12 +42,6 @@ const disabledRegistrationCopy = {
   title: 'Register Now!',
   subtitle: 'Subtitle',
   buttonLabel: 'Register Now',
-} as const;
-
-const disabledFaqCopy = {
-  enabled: false,
-  title: 'Got Questions?',
-  subtitle: 'FAQ subtitle',
 } as const;
 
 /** A fully-populated boundary `Conference` — every detail section has data. */

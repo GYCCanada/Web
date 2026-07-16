@@ -29,6 +29,16 @@ export class SubmissionContext extends Context.Service<
  * route effect has, plus the {@link SubmissionContext}.
  */
 export type FormServices = AppServices | ReactRouterContext | SubmissionContext;
+type GeneratorError<Eff> = [Eff] extends [never]
+  ? never
+  : [Eff] extends [Effect.Effect<unknown, infer E, unknown>]
+    ? E
+    : never;
+type GeneratorServices<Eff> = [Eff] extends [never]
+  ? never
+  : [Eff] extends [Effect.Effect<unknown, unknown, infer R>]
+    ? R & FormServices
+    : never;
 
 /**
  * What a form-action body returns on the happy path. `reset` tells conform
@@ -94,8 +104,8 @@ const validationResult = (
  */
 const handleFormError = (
   submission: Submission,
-  error: AppError,
-): Effect.Effect<FormResult, AppError> => {
+  error: unknown,
+): Effect.Effect<FormResult, unknown> => {
   if (RedirectError.is(error)) return Effect.fail(error);
   if (FormValidationError.is(error)) {
     return Effect.succeed(validationResult(submission, error.error));
@@ -135,7 +145,7 @@ const handleFormError = (
  *    errors become form/field error reports; redirects propagate via C1.
  */
 export const routeFormAction =
-  <Eff extends Effect.Yieldable<any, any, any, FormServices>>(
+  <Eff extends Effect.Effect<unknown, unknown, FormServices>>(
     body: () => Generator<Eff, FormSuccess, never>,
     options?: {
       /**
@@ -154,11 +164,7 @@ export const routeFormAction =
     },
   ) =>
   (args: RouteArgs): Promise<FormResult> => {
-    const pipeline: Effect.Effect<
-      FormResult,
-      AppError,
-      AppServices | ReactRouterContext
-    > = Effect.gen(function* () {
+    const pipeline = Effect.gen(function* () {
       if (options?.guard !== undefined) {
         yield* options.guard;
       }
@@ -187,10 +193,12 @@ export const routeFormAction =
         return successResult(submission, true);
       }
 
+      // TS 7 does not reduce Effect.gen's conditional channel extraction at
+      // this generic call site; these are the exact channels of `body`.
       const bodyEffect = Effect.gen(body) as Effect.Effect<
         FormSuccess,
-        AppError,
-        FormServices
+        GeneratorError<Eff>,
+        GeneratorServices<Eff>
       >;
 
       return yield* bodyEffect.pipe(
@@ -200,5 +208,13 @@ export const routeFormAction =
       );
     });
 
-    return args.context.runtime.run(args, pipeline);
+    // SubmissionContext was provided above; only request/app modules remain.
+    return args.context.runtime.run(
+      args,
+      pipeline as Effect.Effect<
+        FormResult,
+        unknown,
+        AppServices | ReactRouterContext
+      >,
+    );
   };
