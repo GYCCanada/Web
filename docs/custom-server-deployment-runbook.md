@@ -40,26 +40,18 @@ docker pull "$PREVIOUS_IMAGE"
 Record the candidate digest, Git commit, CI run, database backup identifier, object-store
 backup identifier, operator, and deployment time in the host's deployment log.
 
-## First-party registrar feature flag
+## First-party Registration channel
 
-The first-party registrar must not merge or deploy until it implements a fail-closed,
-Effect-Config-backed `REGISTRAR_MODE` flag with a default of `off`:
+The Registration channel is a CMS-owned relational lifecycle, not an environment flag. Its
+`closed`, `external`, `preview`, `open`, and `draining` states are defined by ADR 0011. The
+serving image must never infer channel state from a second boolean or from an external URL.
 
-| Mode     | New public registrations | CMS preview                | Stripe reconciliation | Order runner and sweep |
-| -------- | ------------------------ | -------------------------- | --------------------- | ---------------------- |
-| `off`    | disabled                 | disabled                   | disabled              | disabled               |
-| `shadow` | disabled                 | enabled for administrators | disabled              | disabled               |
-| `live`   | enabled                  | enabled                    | enabled               | enabled                |
-| `drain`  | disabled                 | read-only                  | enabled               | enabled                |
-
-`drain` is load-bearing: after the first Checkout Session exists, a rollback must stop new
-intake without abandoning webhooks or durable Orders already in flight. Transition to `off`
-only after there are no pending Orders and Stripe has no undelivered events. Public route
-loaders/actions, CMS channel activation, webhook registration, runner startup, and sweep
-startup must all derive from this one mode; no second boolean is allowed.
-
-Until the first-party registrar ships, keep `REGISTRAR_MODE=off`. RegFox remains the live
-Registration channel.
+Before deployment, record the current Conference channel state and count of non-terminal
+Orders. A candidate may be deployed while the channel is `external` or `preview`; opening
+first-party intake is a separate audited CMS transition after candidate verification.
+`draining` is load-bearing: it stops new intake without abandoning webhooks, refunds, or
+durable Orders already in flight. The CMS refuses a transition from `draining` to `closed` or
+`external` until no Order is non-terminal.
 
 ## Preflight and migrate
 
@@ -132,32 +124,32 @@ curl --fail --silent --show-error --output /dev/null http://127.0.0.1:3001/2026/
 docker logs --tail 200 gycc-candidate
 ```
 
-For a registrar-capable release, deploy first with `REGISTRAR_MODE=shadow`. Verify an
-administrator can preview the published Form definition and adaptive price while anonymous
-requests cannot create a Submission, Checkout Session, or Order. Change to `live` only for
-the scheduled launch after Stripe webhook configuration has been verified against the
-candidate endpoint.
+For a registrar-capable release, leave the CMS channel in `external` or move it to `preview`.
+Verify an administrator can preview the pinned Form definition and adaptive price while
+anonymous requests cannot create a Submission, Checkout Session, or Order. Move the channel
+to `open` only for the scheduled launch after Stripe webhook configuration and durable Order
+processing have been verified against the candidate endpoint.
 
 ## Cut over
 
 1. Point the existing reverse proxy or container supervisor at the verified candidate.
 2. Probe the public HTTPS `/healthz`, `/`, `/fr`, and current-conference routes.
 3. Submit one non-payment form and verify its Submission and notification outbox state.
-4. When the registrar is `live`, perform one Stripe test-mode registration and verify the
-   immutable Form definition version, atomic Submission group, frozen Order amount, Checkout
-   Session, signed webhook, and terminal Order state.
+4. When the Registration channel is `open`, perform one Stripe test-mode registration and
+   verify the immutable Form definition version, atomic Submission group, frozen Order
+   amount, Checkout Session, signed webhook, and terminal Order state.
 5. Watch application, PostgreSQL, mail, Stripe, and container health through the release
    observation window before removing the previous container.
 
 ## Rollback
 
-Before any Checkout Session exists, set `REGISTRAR_MODE=off`, point traffic back to
-`$PREVIOUS_IMAGE`, and repeat the health probes.
+Before any Checkout Session exists, move the CMS channel to `closed` or `external`, point
+traffic back to `$PREVIOUS_IMAGE`, and repeat the health probes.
 
-After payment intake has started, set the candidate to `REGISTRAR_MODE=drain` and keep its
-webhook and Order runner reachable until every in-flight Order is terminal. Route public
-traffic back to `$PREVIOUS_IMAGE` only if that image is compatible with the migrated schema.
-Do not set the registrar to `off`, delete the candidate, or unregister the Stripe webhook
+After payment intake has started, move the CMS channel to `draining` and keep its webhook and
+Order runner reachable until every in-flight Order is terminal. Route public traffic back to
+`$PREVIOUS_IMAGE` only if that image is compatible with the migrated schema. Do not move the
+channel to `closed` or `external`, delete the candidate, or unregister the Stripe webhook
 while an Order or Stripe event is outstanding.
 
 Record the rollback reason and both digests. Preserve migrated data and migration reports for
