@@ -95,13 +95,14 @@ greppable and verified in C7.
 
 ### Deferred / accepted drift
 
-- **Registration actions stay no-op.** The three registration routes are deduped into one
+- **Registration actions originally stayed no-op.** The three registration routes were deduped into one
   `RegistrationForm` (parameterized by year) with thin wrappers; their `action`s are typed
   `routeAction` no-ops pending a product decision on submission handling. No submission
-  logic was invented.
-- **Toast cookie secret stays hardcoded** (`'secret-key'` in `app/lib/toast.server.ts`,
-  pre-existing). Moving it to `Config.redacted` with a dev default is deferred — it is a
-  config change, orthogonal to this migration.
+  logic was invented. **Superseded by ADR 0010:** registration now validates and commits an
+  atomic relational Submission group before sending its notification.
+- **Toast cookie config debt is resolved.** `Toast.layer` constructs its session storage
+  from `Config.redacted('TOAST_COOKIE_SECRET')`, requires a non-empty production secret,
+  and uses an explicit development/test default only outside production.
 - **`getCurrentConference` stays a pure function.** Services are for side effects; a pure
   TS data lookup does not need one, and keeping it pure avoids colliding with the planned
   CMS `Content` service.

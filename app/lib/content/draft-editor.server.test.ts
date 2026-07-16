@@ -19,23 +19,16 @@ import {
 } from './admin-form';
 import {
   DraftEditor,
-  formScope,
   pageScope,
   scopeKeys,
   siteScope,
 } from './draft-editor.server';
 import { defaultContent } from './defaults';
+import { defaultFaqPage } from './pages/defaults';
 import {
-  defaultContactForm,
-  defaultFaqPage,
-} from './pages/defaults';
-import {
-  formDraftKey,
-  formObjectKey,
   pageDraftKey,
   pageObjectKey,
 } from './pages/registry';
-import { FormDefinition } from '../forms/definition';
 import { FaqPage } from './pages/schema';
 import { BoardMember, deterministicListItemId, DraftSiteContent, SiteContent } from './schema.server';
 import type {
@@ -130,8 +123,8 @@ describe('scopeKeys', () => {
     }),
   );
 
-  // Branch 5.2: the widened scope union resolves each page/form to its OWN
-  // draft/published key pair (ADR 0008 — one object per page/form), derived from
+  // Branch 5.2: the widened scope union resolves each page to its OWN
+  // draft/published key pair (ADR 0008 — one object per page), derived from
   // the id through `pages/registry` (`derive-dont-sync`), never the site keys.
   it.effect('a page scope addresses content/pages/<page>(.draft).json', () =>
     Effect.sync(() => {
@@ -146,27 +139,12 @@ describe('scopeKeys', () => {
     }),
   );
 
-  it.effect('a form scope addresses forms/<form>(.draft).json', () =>
-    Effect.sync(() => {
-      expect(scopeKeys(formScope('contact'))).toEqual({
-        draftKey: formDraftKey('contact'),
-        publishedKey: formObjectKey('contact'),
-      });
-      expect(scopeKeys(formScope('contact'))).toEqual({
-        draftKey: 'forms/contact.draft.json',
-        publishedKey: 'forms/contact.json',
-      });
-    }),
-  );
-
   it.effect('every scope resolves to a distinct key pair (no collisions)', () =>
     Effect.sync(() => {
       const keys = [
         scopeKeys(siteScope),
         scopeKeys(pageScope('faq')),
         scopeKeys(pageScope('about')),
-        scopeKeys(formScope('contact')),
-        scopeKeys(formScope('registration')),
       ];
       const published = keys.map((k) => k.publishedKey);
       expect(new Set(published).size).toBe(published.length);
@@ -203,6 +181,22 @@ describe('DraftEditor.load (draft → published → defaults reconciliation)', (
           adminStorage({ [SITE_CONTENT_KEY]: published }),
         ),
       ),
+    ),
+  );
+
+  it.effect('blocks authoring instead of replacing a malformed published object', () =>
+    Effect.gen(function* () {
+      const editor = yield* DraftEditor.Service;
+      const loaded = yield* editor.load(siteScope).pipe(Effect.flip);
+      const edited = yield* editor
+        .editDocument(siteScope, { translations: {} })
+        .pipe(Effect.flip);
+
+      expect(loaded.status).toBe(409);
+      expect(loaded.message).toContain('is malformed');
+      expect(edited.status).toBe(409);
+    }).pipe(
+      provideEditor(adminStorage({ [SITE_CONTENT_KEY]: '{not valid json' })),
     ),
   );
 
@@ -641,7 +635,7 @@ describe('DraftEditor.publish (promote draft → published, drop draft, bust)', 
 // ---------------------------------------------------------------------------
 // Branch 5.2 — per-OBJECT draft/publish reconciliation (ADR 0008)
 //
-// The widened `ContentScope` routes every page/form object through the SAME five
+// The widened `ContentScope` routes every page object through the SAME five
 // `DraftEditor` calls as the site scope, each with its own draft/published key
 // pair, decode boundary, and default. These tests prove the reconciliation
 // generalizes per-object BEFORE any route migrates (plan, Branch 5.2): a page
@@ -652,7 +646,6 @@ describe('DraftEditor.publish (promote draft → published, drop draft, bust)', 
 const encodeFaq = Schema.encodeUnknownEffect(Schema.fromJsonString(FaqPage));
 const decodeFaq = Schema.decodeUnknownEffect(Schema.fromJsonString(FaqPage));
 const decodeFaqObject = Schema.decodeUnknownEffect(FaqPage);
-const decodeFormObject = Schema.decodeUnknownEffect(FormDefinition);
 
 const FAQ_KEY = pageObjectKey('faq');
 const FAQ_DRAFT_KEY = pageDraftKey('faq');
@@ -826,40 +819,6 @@ describe('DraftEditor.editDocument / publish (per-object: page scope)', () => {
           expect(issueError.status).toBe(400);
           expect(issueError.issues.length).toBeGreaterThan(0);
         }
-      }).pipe(provideEditor(adminStorage({}))),
-  );
-});
-
-describe('DraftEditor (per-object: form scope)', () => {
-  it.effect(
-    'edits + publishes a form definition through its own forms/<form> object',
-    () =>
-      Effect.gen(function* () {
-        const editor = yield* DraftEditor.Service;
-
-        // Load falls back to the bundled form default (typed FormDefinition).
-        const loaded = yield* editor.load(formScope('contact'));
-        expect(loaded.source).toBe('defaults');
-        expect(loaded.content.title.en).toBe(defaultContactForm.title.en);
-
-        // Edit the form copy and publish it to forms/contact.json.
-        const override = assembleOverrides([
-          ['title.en', 'Get in touch'],
-        ]) as Json;
-        yield* TestClock.adjust('1 second');
-        const encoded = yield* editor.editDocument(
-          formScope('contact'),
-          override,
-        );
-        const returned = yield* decodeFormObject(encoded);
-        expect(returned.title.en).toBe('Get in touch');
-
-        yield* editor.publish(formScope('contact'));
-        const publishedBody = yield* readStoredText(formObjectKey('contact'));
-        const publishedForm = yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(FormDefinition),
-        )(publishedBody);
-        expect(publishedForm.title.en).toBe('Get in touch');
       }).pipe(provideEditor(adminStorage({}))),
   );
 });

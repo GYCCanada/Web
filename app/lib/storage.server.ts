@@ -13,8 +13,8 @@ import {
 import { Env } from './env.server';
 
 /**
- * Object-storage service over Bun's native `S3Client` (ADR 0004 / CMS decision
- * D4 — Railway first-party Buckets, no `@aws-sdk`). A narrow surface — `get`,
+ * Object-storage service over Bun's native `S3Client` (CMS decision D4; deployment
+ * is the custom Docker server per ADR 0009). A narrow surface — `get`,
  * `put`, `head`, `list`, `delete` — that the `Content`/admin layers build on
  * (small-interface-deep-implementation).
  *
@@ -41,7 +41,7 @@ export class StorageError extends Schema.TaggedErrorClass<StorageError>()(
   {
     key: Schema.String,
     op: StorageOp,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 

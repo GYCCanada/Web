@@ -70,7 +70,7 @@ describe('Env config', () => {
 
   it.effect('fails fast in production when a required mail var is missing', () =>
     Effect.gen(function* () {
-      const exit = yield* Env.Service.asEffect().pipe(
+      const exit = yield* Effect.service(Env.Service).pipe(
         provideEnv({ NODE_ENV: 'production', MAIL_HOST: 'only-host' }),
         Effect.exit,
       );

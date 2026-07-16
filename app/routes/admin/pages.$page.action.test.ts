@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { ConfigProvider, Effect, Layer, ManagedRuntime } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
@@ -8,8 +8,13 @@ import { Auth } from '~/lib/auth.server';
 import { Content } from '~/lib/content.server';
 import { getEnabledPageOr404 } from '~/lib/content/page-guard.server';
 import { pageDraftKey } from '~/lib/content/pages/registry';
+import { pageObjectKey } from '~/lib/content/pages/registry';
 import { DraftTeamPage } from '~/lib/content/pages/schema';
-import { makeAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
+import {
+  makeRequestRuntimeFromLayer,
+  type RequestRuntime,
+} from '~/lib/effect/runtime';
+import { makeTestAppLayer } from '~/lib/effect/runtime.test-helper';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { NotFoundError } from '~/lib/effect/errors';
 import { Storage } from '~/lib/storage.server';
@@ -33,6 +38,10 @@ import { action } from './pages.$page';
 
 const PASSWORD = 'correct-horse';
 const SECRET = 'a-signing-secret-of-sufficient-length';
+const runtimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+});
 
 /** The admin-enabled config provider injected over the app layer. */
 const adminConfig = ConfigProvider.layer(
@@ -42,14 +51,15 @@ const adminConfig = ConfigProvider.layer(
 );
 
 /** Build the app layer (in-memory storage) with the admin config provided. */
-const makeLayer = () =>
-  Layer.provide(makeAppLayer(layerTest({})), adminConfig);
+const makeLayer = (objects: Parameters<typeof layerTest>[0] = {}) =>
+  Layer.provide(makeTestAppLayer(layerTest(objects)), adminConfig);
 
 /** Build a request runtime + router context over the admin-enabled app layer. */
-const makeContext = () => {
-  const layer = makeLayer();
+const makeContext = (objects: Parameters<typeof layerTest>[0] = {}) => {
+  const layer = makeLayer(objects);
   const context = new RouterContextProvider();
   context.runtime = makeRequestRuntimeFromLayer(layer);
+  runtimes.push(context.runtime);
   return { layer, context };
 };
 
@@ -78,8 +88,9 @@ const mintCookie = async (
  */
 const postUpload = async (
   file: File,
+  objects: Parameters<typeof layerTest>[0] = {},
 ): Promise<{ res: Response; args: RouteArgs }> => {
-  const { layer, context } = makeContext();
+  const { layer, context } = makeContext(objects);
   const cookie = await mintCookie(layer);
 
   const body = new FormData();
@@ -131,6 +142,27 @@ describe('team page editor action — image-upload guards (A.5)', () => {
     const json = (await res.json()) as { ok: boolean; error: string };
     expect(json.ok).toBe(false);
     expect(json.error).toContain('Upload a JPEG');
+  });
+
+  it('deletes uploaded bytes when the document reference cannot be updated', async () => {
+    const image = new File([new Uint8Array([1, 2, 3])], 'photo.gif', {
+      type: 'image/gif',
+    });
+    const { res, args } = await postUpload(image, {
+      [pageObjectKey('team')]: {
+        body: '{malformed json',
+        contentType: 'application/json',
+      },
+    });
+    const uploads = await args.context.runtime.run(
+      args,
+      Effect.gen(function* () {
+        return yield* (yield* Storage.Service).list('images/uploads/');
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(uploads).toEqual([]);
   });
 });
 

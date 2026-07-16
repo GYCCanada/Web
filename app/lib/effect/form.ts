@@ -5,6 +5,7 @@ import { Context, Effect } from 'effect';
 import { isHoneypotTriggered } from '../honeypot';
 import {
   BadRequestError,
+  type FormCommandDisposition,
   FormValidationError,
   InternalServerError,
   NotFoundError,
@@ -29,6 +30,16 @@ export class SubmissionContext extends Context.Service<
  * route effect has, plus the {@link SubmissionContext}.
  */
 export type FormServices = AppServices | ReactRouterContext | SubmissionContext;
+type GeneratorError<Eff> = [Eff] extends [never]
+  ? never
+  : [Eff] extends [Effect.Effect<unknown, infer E, unknown>]
+    ? E
+    : never;
+type GeneratorServices<Eff> = [Eff] extends [never]
+  ? never
+  : [Eff] extends [Effect.Effect<unknown, unknown, infer R>]
+    ? R & FormServices
+    : never;
 
 /**
  * What a form-action body returns on the happy path. `reset` tells conform
@@ -47,24 +58,41 @@ export interface FormSuccess {
 export type FormResult = {
   readonly result: SubmissionResult<string[]>;
   readonly status: 'success' | 'error';
+  readonly command: {
+    readonly disposition: FormCommandDisposition;
+    readonly preserved: Readonly<Record<string, string>>;
+  };
 };
 
 /** Build a successful {@link FormResult} from the body's `reset` flag. */
-const successResult = (submission: Submission, reset: boolean): FormResult => ({
+const successResult = (
+  submission: Submission,
+  reset: boolean,
+  preserved: Readonly<Record<string, string>>,
+): FormResult => ({
   result: report(submission, { reset }),
   status: 'success',
+  command: { disposition: 'preserve', preserved },
 });
 
 /** Build the error-status {@link FormResult} for a set of form-level messages. */
-const formLevelError = (submission: Submission, message: string): FormResult => ({
+const formLevelError = (
+  submission: Submission,
+  message: string,
+  preserved: Readonly<Record<string, string>>,
+  disposition: FormCommandDisposition = 'preserve',
+): FormResult => ({
   result: report(submission, { error: { formErrors: [message] } }),
   status: 'error',
+  command: { disposition, preserved },
 });
 
 /** Build the error-status {@link FormResult} from validation error buckets. */
 const validationResult = (
   submission: Submission,
   error: FormValidationError['error'],
+  preserved: Readonly<Record<string, string>>,
+  disposition: FormCommandDisposition,
 ): FormResult => ({
   result: report(submission, {
     error: {
@@ -81,6 +109,7 @@ const validationResult = (
     },
   }),
   status: 'error',
+  command: { disposition, preserved },
 });
 
 /**
@@ -94,15 +123,23 @@ const validationResult = (
  */
 const handleFormError = (
   submission: Submission,
-  error: AppError,
-): Effect.Effect<FormResult, AppError> => {
+  error: unknown,
+  preserved: Readonly<Record<string, string>>,
+): Effect.Effect<FormResult, unknown> => {
   if (RedirectError.is(error)) return Effect.fail(error);
   if (FormValidationError.is(error)) {
-    return Effect.succeed(validationResult(submission, error.error));
+    return Effect.succeed(
+      validationResult(
+        submission,
+        error.error,
+        preserved,
+        error.commandDisposition ?? 'preserve',
+      ),
+    );
   }
   if (BadRequestError.is(error)) {
     return Effect.succeed(
-      formLevelError(submission, error.message || 'Bad request'),
+      formLevelError(submission, error.message || 'Bad request', preserved),
     );
   }
   // A 404 is a route-level outcome, not a form-validation outcome: a disabled
@@ -114,7 +151,9 @@ const handleFormError = (
     return Effect.fail(error);
   }
   if (InternalServerError.is(error)) {
-    return Effect.succeed(formLevelError(submission, 'An error occurred'));
+    return Effect.succeed(
+      formLevelError(submission, 'An error occurred', preserved),
+    );
   }
   return Effect.fail(error);
 };
@@ -135,7 +174,7 @@ const handleFormError = (
  *    errors become form/field error reports; redirects propagate via C1.
  */
 export const routeFormAction =
-  <Eff extends Effect.Yieldable<any, any, any, FormServices>>(
+  <Eff extends Effect.Effect<unknown, unknown, FormServices>>(
     body: () => Generator<Eff, FormSuccess, never>,
     options?: {
       /**
@@ -151,14 +190,12 @@ export const routeFormAction =
         AppError,
         AppServices | ReactRouterContext
       >;
+      /** String fields that must survive an action-triggered loader revalidation. */
+      readonly preserveFields?: ReadonlyArray<string>;
     },
   ) =>
   (args: RouteArgs): Promise<FormResult> => {
-    const pipeline: Effect.Effect<
-      FormResult,
-      AppError,
-      AppServices | ReactRouterContext
-    > = Effect.gen(function* () {
+    const pipeline = Effect.gen(function* () {
       if (options?.guard !== undefined) {
         yield* options.guard;
       }
@@ -181,24 +218,40 @@ export const routeFormAction =
                 : 'Unable to parse form submission',
           }),
       });
+      const preserved = Object.fromEntries(
+        (options?.preserveFields ?? []).flatMap((field) => {
+          const value = submission.payload[field];
+          return typeof value === 'string' ? [[field, value]] : [];
+        }),
+      );
 
       if (isHoneypotTriggered(formData)) {
         yield* Effect.logInfo('Honeypot triggered');
-        return successResult(submission, true);
+        return successResult(submission, true, preserved);
       }
 
+      // TS 7 does not reduce Effect.gen's conditional channel extraction at
+      // this generic call site; these are the exact channels of `body`.
       const bodyEffect = Effect.gen(body) as Effect.Effect<
         FormSuccess,
-        AppError,
-        FormServices
+        GeneratorError<Eff>,
+        GeneratorServices<Eff>
       >;
 
       return yield* bodyEffect.pipe(
         Effect.provideService(SubmissionContext, submission),
-        Effect.map(({ reset }) => successResult(submission, reset)),
-        Effect.catch((error) => handleFormError(submission, error)),
+        Effect.map(({ reset }) => successResult(submission, reset, preserved)),
+        Effect.catch((error) => handleFormError(submission, error, preserved)),
       );
     });
 
-    return args.context.runtime.run(args, pipeline);
+    // SubmissionContext was provided above; only request/app modules remain.
+    return args.context.runtime.run(
+      args,
+      pipeline as Effect.Effect<
+        FormResult,
+        unknown,
+        AppServices | ReactRouterContext
+      >,
+    );
   };

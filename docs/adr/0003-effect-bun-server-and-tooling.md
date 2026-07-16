@@ -59,8 +59,8 @@ The canonical Effect-v4-on-Bun tooling (per the project-scaffolding skill, and a
   pinning via `overrides` contains it.
 - `tsgo` is type-check + `noEmit` only (no compile); bun runs source directly. CI and the
   local gate use `react-router typegen && tsgo --noEmit`.
-- Diverges from `me` (the Railway anchor) on the _server internals_, but the
-  Railway-by-auto-detect deployment model (`bun.lock` → Nixpacks) is identical, so
-  deployment still "matches fairly well" as intended.
+- The original Railway-by-auto-detect consequence is superseded by ADR 0009.
+  Production now runs the pinned OCI image on the organization's custom Docker
+  server; this ADR continues to govern the Effect/Bun runtime and tooling only.
 - Newsletter/email behaviour must be preserved through the rewrite into Effect services —
   requires verification, not just a typecheck.

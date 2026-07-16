@@ -1,11 +1,16 @@
 # Registration Launch + CMS Expansion — Workflow Brief
 
+> **Historical implementation brief — completed.** ADR 0010 supersedes every
+> bucket-backed Form-definition and Submission persistence decision below. Current
+> deployment and persistence authority is ADR 0009 and ADR 0010; this file is retained
+> only as the execution record for the completed registration-launch work.
+
 **Branch base:** `feature/registration-launch` (off `main`). Implementation lands as a
 **`stacked` PR stack** off this branch, **at FEATURE granularity** — one branch/PR per feature
 (a coherent reviewable unit, roughly one per deepening candidate / ADR), NOT one per commit.
 Each feature branch holds multiple internal sub-commits, each gate-green.
 
-This brief is the single source of truth for the planify workflow. Every planning,
+This brief was the single source of truth for the completed planify workflow. Every planning,
 review, and implementation agent reads it. It encodes decisions already settled with the
 user (do NOT re-litigate them) and points at the grounding (CONTEXT.md glossary, ADRs
 0006–0008, the architecture review's six deepening candidates).

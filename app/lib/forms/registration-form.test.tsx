@@ -3,8 +3,14 @@ import { Schema } from 'effect';
 import { renderToString } from 'react-dom/server';
 import { createRoutesStub } from 'react-router';
 
-import { defaultRegistrationForm } from '~/lib/content/pages/defaults';
+import { defaultRegistrationForm } from '~/lib/forms/defaults';
 import { FormDefinition } from '~/lib/forms/definition';
+import { Forms } from '~/lib/forms/forms.server';
+import {
+  FORM_VERSION_FIELD,
+  IDEMPOTENCY_TOKEN_FIELD,
+  newSubmissionCommandFields,
+} from '~/lib/forms/submission-command';
 import { LocalizationProvider } from '~/lib/localization/provider';
 import { root } from '~/lib/localization/translations';
 import {
@@ -19,6 +25,10 @@ import {
 const encodedRegistrationForm = Schema.encodeSync(FormDefinition)(
   defaultRegistrationForm,
 );
+const command = newSubmissionCommandFields(
+  Forms.FormDefinitionVersionId.make(`sha256:${'0'.repeat(64)}`),
+);
+const commandFieldNames = [FORM_VERSION_FIELD, IDEMPOTENCY_TOKEN_FIELD];
 
 /**
  * Registration render-level field-name + default-value parity (registration-launch
@@ -112,6 +122,7 @@ const renderedNames = (
           <RegistrationForm
             year={2026}
             definition={encodedRegistrationForm}
+            command={command}
             initialRegistrants={initialRegistrants}
           />
         </LocalizationProvider>
@@ -143,6 +154,7 @@ describe('registration render-level field-name + default-value parity', () => {
     // discriminator, the common fields, and the exhibitor branch fields — each
     // prefixed `registrants[0].` by conform.
     const expected = new Set([
+      ...commandFieldNames,
       'registrants[0]',
       `registrants[0].${defaultRegistrationForm.variant?.discriminator}`,
       ...collectNames(defaultRegistrationForm.fields, false).map(
@@ -197,6 +209,7 @@ describe('registration render-level field-name + default-value parity', () => {
       true,
     ).filter((name) => !name.startsWith('parent.'));
     const expected = new Set([
+      ...commandFieldNames,
       'registrants[0]',
       `registrants[0].${defaultRegistrationForm.variant?.discriminator}`,
       ...collectNames(defaultRegistrationForm.fields, false).map(

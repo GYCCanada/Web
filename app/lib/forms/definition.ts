@@ -3,10 +3,17 @@ import { Schema } from 'effect';
 import { Text } from '../content/schema';
 import { root } from '../localization/translations';
 
+/** The closed set of site Forms. */
+export const FormId = Schema.Literals(['contact', 'volunteer', 'registration']);
+export type FormId = typeof FormId.Type;
+
+/** Every Form identity, in declaration order. */
+export const FORM_IDS = FormId.literals;
+
 /**
  * The structural `FormDefinition` schema (ADR 0007, CONTEXT §Form definition;
- * registration-launch Branch 6). A `FormDefinition` is **data** — the JSON object
- * stored at `forms/<form>.json` — describing one of the site's three forms
+ * registration-launch Branch 6). A `FormDefinition` is **data** stored as an
+ * immutable relational version (ADR 0010), describing one of the site's three forms
  * (contact, volunteer, registration): its fields, their kinds (drawn from a
  * CLOSED set), their bilingual labels/placeholders, the discriminated-union
  * variants some forms branch on, and the cross-field requirement rules that no
@@ -19,7 +26,7 @@ import { root } from '../localization/translations';
  *
  * It replaces the page-level-copy-only PLACEHOLDER that lived in
  * `content/pages/schema.ts` (Branch 5.1): every consumer (the per-form registry,
- * the bundled form defaults, `Content.getForm`) is migrated to this module and
+ * the bundled Form defaults and `Forms.current`) is migrated to this module and
  * the placeholder is deleted (`migrate-callers-then-delete-legacy-apis`,
  * `subtract-before-you-add`). The `title` / `intro` copy fields are preserved so
  * the placeholder objects still decode and a form keeps a CMS-editable heading.
@@ -39,9 +46,9 @@ import { root } from '../localization/translations';
  *   - `derive-dont-sync`: `MessageKey`'s valid set IS the `translations` object,
  *     consulted at decode time — never a re-declared copy of the key list.
  *
- * The encoded form of this schema IS the JSON stored at `forms/<form>.json`, so a
- * definition round-trips losslessly through `encode → JSON → decode` (proven in
- * `definition.test.ts`).
+ * Its canonical encoded form is content-addressed to produce the immutable version id,
+ * so a definition round-trips losslessly through `encode → JSON → decode` (proven in
+ * `definition.test.ts`) and historical Submissions keep an exact schema reference.
  */
 
 // ---------------------------------------------------------------------------
@@ -498,6 +505,41 @@ export const CrossFieldRule = Schema.TaggedUnion({
 export type CrossFieldRule = typeof CrossFieldRule.Type;
 
 // ---------------------------------------------------------------------------
+// Notification projection
+// ---------------------------------------------------------------------------
+
+/**
+ * Semantic field roles used to render the durable admin notification. Keeping
+ * these references in the immutable definition lets an editor rename fields
+ * without silently disconnecting the notification projector.
+ */
+export const NotificationProjection = Schema.TaggedUnion({
+  contact: {
+    name: FieldName,
+    method: FieldName,
+    email: FieldName,
+    phone: FieldName,
+    message: FieldName,
+  },
+  volunteer: {
+    name: FieldName,
+    method: FieldName,
+    email: FieldName,
+    phone: FieldName,
+    why: FieldName,
+    background: FieldName,
+    age: FieldName,
+    location: FieldName,
+  },
+  registration: {
+    name: FieldName,
+    email: FieldName,
+    type: FieldName,
+  },
+});
+export type NotificationProjection = typeof NotificationProjection.Type;
+
+// ---------------------------------------------------------------------------
 // FormDefinition
 // ---------------------------------------------------------------------------
 
@@ -515,5 +557,8 @@ export const FormDefinition = Schema.Struct({
   fields: FieldList,
   variant: Schema.optionalKey(FormVariantSet),
   rules: Schema.optionalKey(Schema.Array(CrossFieldRule)),
+  // Optional only so historical stored definitions remain decodable. Every new
+  // publish is normalized to an explicit, validated projection.
+  notification: Schema.optionalKey(NotificationProjection),
 });
 export type FormDefinition = typeof FormDefinition.Type;

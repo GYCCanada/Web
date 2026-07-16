@@ -1,11 +1,17 @@
 # CMS Layer — Plan & End Goal
 
-**Branch:** `cms/storage-foundation` (stacked on `revival/2026-speak`, PR #10).
-**Status:** in progress (ultracode workflow `.claude/workflows/gyc-cms.js`).
+> **Historical implementation plan — completed.** This is not current architecture
+> guidance. ADR 0008 superseded the single-document layout, ADR 0010 moved Form
+> definitions and Submissions to PostgreSQL, and ADR 0009 replaced Railway deployment
+> with a pinned Docker image deployed to the custom server. References below to Railway
+> or bucket-backed Forms/Submissions describe the implementation history only.
+
+**Branch:** `cms/storage-foundation` (historical).
+**Status:** completed and superseded where noted above.
 
 This document is handed to Codex on **every** `okra counsel` review so it situates each
 sub-commit against the whole feature and the end goal, and does not flag intentional
-deferrals. Keep it current.
+deferrals. Preserve it as an implementation record; do not use it as current guidance.
 
 ---
 
@@ -23,7 +29,7 @@ Concretely, when the feature is complete:
 1. **All editable content** — conference data (2024/2025/2026: title, theme name + accent
    colour, dates, tagline, bible ref, location, speakers, seminars, registration windows,
    promos), team members, and the ~200 UI translation keys — lives as **one bilingual
-   `SiteContent` document** in a Railway **Bucket** (S3-compatible) at `content/site.json`.
+   `SiteContent` document** in the configured S3-compatible object store at `content/site.json`.
 2. Images (hero, speaker photos, team photos) live in the same bucket under `images/…` and
    are served through the Effect server (proxied with cache headers), replacing today's
    bare `public/<year>/…` path strings.
@@ -42,7 +48,7 @@ Concretely, when the feature is complete:
 - **No relational DB.** Content is one JSON document in object storage, decoded by Effect
   Schema. (A normalized speaker entity etc. is a possible later refinement, not this PR.)
 - **No `@aws-sdk`.** Use Bun's native `S3Client` (`Bun.s3`) — zero dependency, matches
-  paulo-suzanne, and is Railway's recommended Bun client (`use-the-platform`).
+  paulo-suzanne, and avoids a second S3 SDK (`use-the-platform`).
 - **Portrait mobile hero crop**, 2026 speakers/registration windows — still owed by the
   product, independent of the CMS.
 - **Image upload pipeline polish** (resize/WebP/thumbnail like paulo-suzanne's
@@ -61,7 +67,7 @@ Concretely, when the feature is complete:
 | Read path | build-time direct `S3Client` + redeploy | **runtime `Content` service + TTL cache + TS fallback** (D3) |
 | Admin auth | HMAC cookie, `ADMIN_PASSWORD` + `COOKIE_SECRET` | same (`Auth` Context.Service) |
 | Admin UI | hand-built `/admin` editor, draft→publish | same shape, GYC sections |
-| Publish | write `site.json` + Railway redeploy | write `site.json` + **cache bust, no redeploy** (D3) |
+| Publish | write `site.json` + deployment rebuild | write `site.json` + **cache bust, no redeploy** (D3) |
 | Env | `BUCKET_ENDPOINT/ACCESS_KEY/SECRET_KEY/NAME/REGION` | same names, added to `Env` service, **optional in dev** |
 
 ### Services (Effect v4, `Context.Service`, `effect-v4` skill rules)
@@ -144,7 +150,7 @@ in prod — a bucket-less prod still serves the seeded defaults.
 - **D3 — Runtime read + TTL cache, NO redeploy.** Publishing is instant; bucket-unreachable
   falls back to bundled typed-TS defaults. (Chosen over paulo-suzanne's build-time+redeploy
   because GYC SSRs every request.)
-- **D4 — `Bun.S3Client`, not `@aws-sdk`.** Railway first-party **Buckets**, Bun-native
+- **D4 — `Bun.S3Client`, not `@aws-sdk`.** S3-compatible bucket, Bun-native
   client (use-the-platform).
 - **D5 — Fix the `theme` misnaming** in the new schema (`themeName` + `accentColor`).
 

@@ -1,5 +1,9 @@
 # GYC Canada 2026 "SPEAK" Revival — Full Migration Plan
 
+> **Historical implementation plan — completed.** Deployment guidance in ADR 0004
+> was superseded by ADR 0009: production uses the pinned Docker image on the custom
+> server, not Railway. This file records the original migration sequence only.
+
 > This document is the complete plan for the multi-agent revival workflow. It is handed to
 > Codex (via `okra counsel`) on **every per-commit review** so Codex has the full context:
 > where we are in the sequence, what each phase must do, and what is deliberately deferred.
@@ -23,8 +27,8 @@ add this year's content, without redesigning the site.
   `BunHttpServer` + Effect runtime threaded through RR7 `RouterContextProvider`, services as
   `Context.Service`, `routeHandler`/`routeAction` wrappers. Tooling: **oxlint + tsgo + bun
   test** (`@effect/tsgo`, `@effect/language-service` plugin, `effect-tsgo patch` in prepare).
-- **ADR 0004** — Railway via **Bun auto-detect** (delete `nixpacks.toml`); environment via
-  **Effect `Config`** (`Config.redacted` for secrets), not zod/`process.env`.
+- **ADR 0004 / ADR 0009** — Effect `Config` remains accepted; ADR 0009 supersedes the
+  original Railway decision with a pinned Docker image deployed to the custom server.
 
 ## Reference repos (copy patterns, cite source file+lines)
 

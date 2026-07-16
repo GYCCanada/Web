@@ -1,63 +1,27 @@
-import { Effect, Result } from 'effect';
+import { Effect, Schema } from 'effect';
 
 import { Content } from '../content.server';
-import type { FormId, PageId } from '../content/pages/registry';
+import type { PageId } from '../content/pages/registry';
 import { formValidationError, notFound } from '../effect/errors';
 import {
   type FormSuccess,
   routeFormAction,
   SubmissionContext,
 } from '../effect/form';
-import { formatSchemaResult } from '../effect/form-schema';
+import { formatValidationIssues } from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
+import { FormNotifications } from '../form-notifications.server';
 import type { TranslationKey } from '../localization/translations';
-import { Mailer } from '../mailer.server';
 import { Toast } from '../toast.server';
 
-import { decodeForm } from './decode';
-import type { Submission } from './submission';
-import { Submissions } from './submissions.server';
+import { Forms } from './forms.server';
+import type { FormId } from './definition';
+import {
+  FORM_VERSION_FIELD,
+  IDEMPOTENCY_TOKEN_FIELD,
+} from './submission-command';
 
-/**
- * The generic form action skeleton (ADR 0007; registration-launch Branch 6.2,
- * persist-then-notify wired in Branch 7.3). Collapses the `parse → decode →
- * persist → notify → toast.redirect` pipeline triplicated verbatim across
- * `contact.tsx`, `volunteer.tsx`, and (for the single-registrant shape) the
- * registration route into ONE parameterized effect, driven by the form's
- * `FormDefinition` (read through Branch 5's `Content.getForm`).
- *
- * The triplicated body each route wrote (`contact.tsx:139-179`):
- *   1. read the parsed `SubmissionContext`;
- *   2. `parseSchema(handTunedSchema, payload)` → on failure
- *      `formValidationError(formatSchemaResult(...))`;
- *   3. build + `mailer.send` a notification, mapping a send failure to a
- *      form-level error key;
- *   4. `toast.redirect` to the same path with a success toast.
- *
- * The skeleton reproduces steps 1, 2, and 4 exactly; step 3 (the notification) is
- * the only form-specific part, so it is the caller's `notify` callback. Branch 7.3
- * inserts a `Submissions.persist` step BETWEEN decode and notify: a valid
- * submission is written to its durable `submissions/<form>/<id>.json` object FIRST,
- * and only then is `notify` run over the *stored* `Submission` (CONTEXT §Submission:
- * the email is a notification OF the persisted record, referencing its id). Because
- * `persist` returns the durable record before `notify` runs, a notify failure
- * provably cannot lose the record — the bucket object is already written. The
- * notification stays a CALLBACK rather than baked in because the decoded payload's
- * shape differs per form (contact's `name`/`method`, volunteer's positions list);
- * keeping `persist` (one durable write) separate from `notify` (the form-specific
- * mailer) is exactly the split the Submission plan demands (settled #8).
- *
- * `derive-dont-sync`: the validation comes from the stored `FormDefinition` via
- * `decodeForm`, and the persisted record's payload codec is derived from the SAME
- * definition (`Submissions.persist` → `submissionSchema`), never a re-declared
- * schema — editing `forms/<form>.json` changes both what the action accepts and
- * what it stores with no code change (ADR 0007 + ADR 0008 consequence).
- *
- * Registration's multi-registrant `{ registrants: [...] }` shell is NOT a closed
- * `FieldKind`, so it does not flow through this flat skeleton; it has its own
- * persist-then-notify action (`registration-action.ts`) that reuses the same
- * `Submissions.persist` + `routeFormAction` machinery over the registrant array.
- */
+/** Web adapter for a single-payload Forms submission and post-commit notification. */
 
 /** The success toast copy a form shows after a valid submission. */
 export interface SuccessToast {
@@ -65,23 +29,10 @@ export interface SuccessToast {
   readonly description: TranslationKey;
 }
 
-/**
- * Configure the generic form action for one form. `form` is the `FormId` whose
- * `FormDefinition` drives decode (and names the toast's `form` slot); `notify`
- * runs the form-specific notification over the PERSISTED `Submission` (the durable
- * record, already on the bucket — so the email can reference its id) and fails
- * (with any `AppError`, e.g. a mailer failure mapped to a form-level key) to abort
- * the redirect; `success` is the post-submit toast copy.
- *
- * `notify` receives the stored `Submission`, not the bare decoded payload: by the
- * time it runs, `Submissions.persist` has already written
- * `submissions/<form>/<id>.json`, so the record survives a notify failure
- * (settled #8). `notify`'s context is the form-notification slice of the request
- * runtime (`makeRequestRuntime`): `Mailer` (every form notifies by mail today),
- * plus `ReactRouterContext` / `Content` for a notifier that needs the request or
- * page/form copy.
- */
-export interface FormActionConfig<E> {
+/** Route-owned form, page gate, and success metadata. Notification semantics
+ * live in the immutable Form definition; dispatch is owned by
+ * `FormNotifications` and its durable outbox. */
+export interface FormActionConfig {
   readonly form: FormId;
   /**
    * The evergreen `PageId` that OWNS this form's route (contact ↔ contact page,
@@ -91,59 +42,99 @@ export interface FormActionConfig<E> {
    * the SAME per-page `enabled` flag the loader/nav read (`derive-dont-sync`).
    */
   readonly page: PageId;
-  readonly notify: (
-    submission: Submission,
-  ) => Effect.Effect<
-    void,
-    E,
-    ReactRouterContext | Content.Service | Mailer.Service
-  >;
   readonly success: SuccessToast;
 }
 
 /**
  * Build the route `action` for one form. Wraps the generic body in
  * `routeFormAction` (the same wrapper the hand-tuned forms use), so a migrated
- * route is `export const action = formAction({ form, notify, success })` — no
+ * route is `export const action = formAction({ form, page, success })` — no
  * inline pipeline. The body yields a {@link FormSuccess} only to satisfy the
  * wrapper's body type; on the happy path the terminal `toast.redirect` fails with
  * a `RedirectError` the wrapper forwards to the runtime, so the return is
  * unreachable on success.
  *
- * Pipeline:
- *   1. `Content.getForm(form)` → the form's `FormDefinition`;
- *   2. `decodeForm(definition, submission.payload)` → on failure,
- *      `formValidationError(formatSchemaResult(...))` (bucketed field/form errors);
- *   3. `Submissions.persist(form, decoded)` → the durable record is written to
- *      `submissions/<form>/<id>.json` and returned BEFORE any notification;
- *   4. `notify(submission)` — the caller's form-specific notification OF the
- *      stored record (a failure here cannot lose the record — it is already on
- *      the bucket);
- *   5. `toast.redirect(pathname, { success copy, form })`.
+ * The hidden version binds validation to the rendered definition; the hidden
+ * token provides explicit retry identity. Forms performs validation and commit
+ * atomically, then this adapter notifies and redirects.
  */
-export const formAction = <E>(config: FormActionConfig<E>) =>
+export const formAction = (config: FormActionConfig) =>
   routeFormAction(
     function* () {
       const { url } = yield* ReactRouterContext;
       const submission = yield* SubmissionContext;
-      const content = yield* Content.Service;
-      const submissions = yield* Submissions.Service;
+      const forms = yield* Forms.Service;
       const toast = yield* Toast;
+      const notifications = yield* FormNotifications.Service;
 
-      const definition = yield* content.getForm(config.form);
+      const {
+        [FORM_VERSION_FIELD]: rawVersion,
+        [IDEMPOTENCY_TOKEN_FIELD]: rawToken,
+        ...payload
+      } = submission.payload;
+      const expectedVersion = yield* Schema.decodeUnknownEffect(
+        Forms.FormDefinitionVersionId,
+      )(rawVersion).pipe(
+        Effect.mapError(() =>
+          formValidationError({ formErrors: [`${config.form}.form.error`] }),
+        ),
+      );
+      const idempotencyToken = yield* Schema.decodeUnknownEffect(
+        Forms.IdempotencyToken,
+      )(rawToken).pipe(
+        Effect.mapError(() =>
+          formValidationError({ formErrors: [`${config.form}.form.error`] }),
+        ),
+      );
 
-      const decoded = decodeForm(definition, submission.payload);
-      if (Result.isFailure(decoded)) {
-        return yield* formValidationError(formatSchemaResult(decoded) ?? {});
+      const stored = yield* forms
+        .submit({
+          form: config.form,
+          expectedVersion,
+          idempotencyToken,
+          payloads: [payload],
+        })
+        .pipe(
+          Effect.catchTag('Forms.SubmissionRejected', (error) => {
+            const issue = error.issues[0];
+            return formValidationError(
+              formatValidationIssues(issue?.issues ?? []),
+            );
+          }),
+          Effect.catchTags({
+            'Forms.DefinitionAdvanced': () =>
+              formValidationError(
+                { formErrors: [`${config.form}.form.error`] },
+                'refreshDefinition',
+              ),
+            'Forms.IdempotencyConflict': () =>
+              formValidationError(
+                { formErrors: [`${config.form}.form.error`] },
+                'rotateToken',
+              ),
+            'Forms.FormNotPublished': () =>
+              formValidationError(
+                { formErrors: [`${config.form}.form.error`] },
+                'refreshDefinition',
+              ),
+          }),
+        );
+
+      const delivery = yield* notifications.dispatch(stored).pipe(
+        Effect.catchTags({
+          'Mailer.Error': () =>
+            formValidationError({ formErrors: [`${config.form}.form.error`] }),
+          'NotificationDelivery.PersistenceError': () =>
+            formValidationError({ formErrors: [`${config.form}.form.error`] }),
+          'NotificationDelivery.Timeout': () =>
+            formValidationError({ formErrors: [`${config.form}.form.error`] }),
+        }),
+      );
+      if (delivery._tag === 'InProgress') {
+        return yield* formValidationError({
+          formErrors: [`${config.form}.form.error`],
+        });
       }
-
-      // Persist FIRST: the durable `submissions/<form>/<id>.json` object is
-      // written and returned before any notification runs, so a `notify` failure
-      // provably cannot lose the record (settled #8). A `StorageError` here aborts
-      // the submission (losing a record must never look like success).
-      const stored = yield* submissions.persist(config.form, decoded.success);
-
-      yield* config.notify(stored);
 
       yield* toast.redirect(url.pathname, {
         title: config.success.title,
@@ -154,6 +145,7 @@ export const formAction = <E>(config: FormActionConfig<E>) =>
       return { reset: true } satisfies FormSuccess;
     },
     {
+      preserveFields: [FORM_VERSION_FIELD, IDEMPOTENCY_TOKEN_FIELD],
       // ROUTE-LEVEL 404 gate, run BEFORE form-data parse + honeypot handling so a
       // disabled page rejects EVERY POST (incl. a honeypot-filled one), not only
       // the normal body path (Feature C, Codex #6, Risk 11). Read off the same

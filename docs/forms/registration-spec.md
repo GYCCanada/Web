@@ -44,7 +44,7 @@ render as yes/no radios, not single checkboxes). A repeating-array-of-variant-it
   the section headings, and the boolean-*radio* rendering of `meals` /
   `firstTimeAttending`. The route's **validation** is derived from the engine definition
   (`Schema.Array(definitionToSchema(def))` wrapped in `{ registrants }`), so editing the
-  stored `forms/registration.json` changes what the form accepts with no code change
+  publishing a new `registration` Form version changes what the form accepts with no code change
   (`derive-dont-sync`).
 
 Render parity is therefore asserted at the **field-name + default-value** level (every

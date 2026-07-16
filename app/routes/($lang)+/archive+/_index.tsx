@@ -1,7 +1,6 @@
 import { type MetaFunction, useLoaderData } from 'react-router';
 
-import { getEnabledPageOr404 } from '~/lib/content/page-guard.server';
-import { toArchiveView } from '~/lib/content/pages/project';
+import { readPageView } from '~/lib/content/pages/pages.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeHandler } from '~/lib/effect/route';
 import { getLocale } from '~/lib/localization/localization';
@@ -28,7 +27,7 @@ export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   // 404 when the page is disabled (Feature C); else project the decoded page.
-  return { page: toArchiveView(yield* getEnabledPageOr404('archive'), locale) };
+  return { page: yield* readPageView('archive', locale) };
 });
 
 export default function Index() {

@@ -13,14 +13,9 @@ import {
 import { defaultContent } from './content/defaults';
 import { backfillListItemIds } from './content/id-backfill';
 import {
-  FORM_IDS,
-  FORM_SPECS,
   PAGE_IDS,
   PAGE_SPECS,
-  formObjectKey,
   pageObjectKey,
-  type FormContent,
-  type FormId,
   type ObjectSpec,
   type PageContent,
   type PageId,
@@ -486,14 +481,14 @@ const decodeDocument = (json: string) =>
 /**
  * Which read cache a `bust` invalidates (ADR 0008, registration-launch Branch 5.3).
  * A closed union over the object families `Content` reads: the one `site.json`
- * document, one evergreen `page` object, or one `form` definition object. Editing
- * About busts ONLY About's cache, not the conference (`site`) cache — that
+ * document or one evergreen `page` object. Editing About busts ONLY About's
+ * cache, not the conference (`site`) cache — that
  * per-object isolation is ADR 0008's headline blast-radius property, and it is
  * expressible here precisely because the target is this closed union, not a free
  * string (`make-impossible-states-unrepresentable`).
  *
- * This type is intentionally defined here, over the registry's closed `PageId` /
- * `FormId`, rather than reusing `DraftEditor`'s `ContentScope`: the read path
+ * This type is intentionally defined here, over the registry's closed `PageId`,
+ * rather than reusing `DraftEditor`'s `ContentScope`: the read path
  * never touches the draft/published key PAIR a scope carries — it only ever reads
  * the *published* object — so the bust target is the lighter "which published
  * cache" discriminator. `DraftEditor.publish` maps its `ContentScope` onto this
@@ -502,17 +497,13 @@ const decodeDocument = (json: string) =>
  */
 export type BustTarget =
   | { readonly kind: 'site' }
-  | { readonly kind: 'page'; readonly page: PageId }
-  | { readonly kind: 'form'; readonly form: FormId };
+  | { readonly kind: 'page'; readonly page: PageId };
 
 /** The site bust target, named so callers never construct the literal inline. */
 export const bustSite: BustTarget = { kind: 'site' };
 
 /** The bust target for one evergreen Page object's read cache. */
 export const bustPage = (page: PageId): BustTarget => ({ kind: 'page', page });
-
-/** The bust target for one Form definition object's read cache. */
-export const bustForm = (form: FormId): BustTarget => ({ kind: 'form', form });
 
 export class Service extends Context.Service<
   Service,
@@ -556,23 +547,12 @@ export class Service extends Context.Service<
      */
     readonly getEnabledPages: () => Effect.Effect<Record<PageId, boolean>>;
     /**
-     * Read one Form definition object (`forms/<form>.json`), decoded at its own
-     * boundary through the registry schema, with the same per-object fallback +
-     * cache as `getPage`. This is the read path Branch 6's form engine reads its
-     * CMS-editable form copy through (ADR 0007 / ADR 0008), so the form objects are
-     * first-class storage now, not a hypothetical. Returns the form's precise typed
-     * content (`FormContent<F>`).
-     */
-    readonly getForm: <F extends FormId>(
-      form: F,
-    ) => Effect.Effect<FormContent<F>>;
-    /**
      * Invalidate ONE read cache so a subsequent read re-reads the bucket. Called by
      * the editor's publish action so a publish is visible with no redeploy and
      * without waiting out the TTL (D3, `make-operations-idempotent` — busting an
      * already-empty cache is a no-op). The `target` selects WHICH cache: `bustSite`
-     * (the `content/site.json` document), `bustPage(id)`, or `bustForm(id)`. Busting
-     * one page leaves every other page, every form, and the conference (`site`)
+     * (the `content/site.json` document) or `bustPage(id)`. Busting
+     * one page leaves every other page and the conference (`site`)
      * cache untouched — the per-object isolation ADR 0008 promises. Defaults to the
      * site target so existing site-publish callers are unchanged.
      *
@@ -662,7 +642,7 @@ export const layer = Layer.effect(
 
     // -----------------------------------------------------------------------
     // Per-object read path — one independent decode + fallback + cache per
-    // Page / Form object (ADR 0008, settled #7; registration-launch Branch 5.3)
+    // Page object (ADR 0008)
     // -----------------------------------------------------------------------
 
     /**
@@ -718,9 +698,8 @@ export const layer = Layer.effect(
         return { read, invalidate };
       });
 
-    // Build one independent cache per Page and per Form object up front (the id
-    // sets are closed and small — 8 pages + 3 forms). Eager construction keeps
-    // each `getPage` / `getForm` a pure cache read with no first-call lock, and
+    // Build one independent cache per Page up front (the id set is closed and
+    // small). Eager construction keeps each `getPage` a pure cache read and
     // the bust dispatch a direct record lookup over the closed id.
     const pageCaches = {} as Record<PageId, ObjectCache>;
     for (const page of PAGE_IDS) {
@@ -729,24 +708,10 @@ export const layer = Layer.effect(
         PAGE_SPECS[page],
       );
     }
-    const formCaches = {} as Record<FormId, ObjectCache>;
-    for (const form of FORM_IDS) {
-      formCaches[form] = yield* makeObjectCache(
-        formObjectKey(form),
-        FORM_SPECS[form],
-      );
-    }
-
     const getPage = Effect.fn('Content.getPage')(function* <P extends PageId>(
       page: P,
     ) {
       return (yield* pageCaches[page].read) as PageContent<P>;
-    });
-
-    const getForm = Effect.fn('Content.getForm')(function* <F extends FormId>(
-      form: F,
-    ) {
-      return (yield* formCaches[form].read) as FormContent<F>;
     });
 
     // Read every page's cached object and project to its `enabled` flag — a thin
@@ -826,9 +791,6 @@ export const layer = Layer.effect(
         case 'page':
           yield* pageCaches[target.page].invalidate;
           return;
-        case 'form':
-          yield* formCaches[target.form].invalidate;
-          return;
       }
     });
 
@@ -840,7 +802,6 @@ export const layer = Layer.effect(
       getTeam,
       getPage,
       getEnabledPages,
-      getForm,
       bust,
     });
   }),

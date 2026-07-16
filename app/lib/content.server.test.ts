@@ -5,20 +5,17 @@ import { TestClock } from 'effect/testing';
 import {
   Content,
   SITE_CONTENT_KEY,
-  bustForm,
   bustPage,
 } from './content.server';
 import { defaultContent } from './content/defaults';
 import {
   defaultAboutPage,
-  defaultContactForm,
   defaultFaqPage,
   defaultGivePage,
   defaultTeamPage,
 } from './content/pages/defaults';
-import { formObjectKey, pageObjectKey } from './content/pages/registry';
+import { pageObjectKey } from './content/pages/registry';
 import { AboutPage, FaqPage, GivePage, TeamPage } from './content/pages/schema';
-import { FormDefinition } from './forms/definition';
 import { HexColour, SiteContent } from './content/schema';
 import type { SiteContent as SiteContentType } from './content/schema';
 import { dayjs } from './dayjs';
@@ -565,11 +562,11 @@ describe('Content cache (TTL + single-flight)', () => {
     }).pipe(provideCounting(defaultContent)));
 });
 
-describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3)', () => {
+describe('Content.getPage multi-object read path (ADR 0008, Branch 5.3)', () => {
   /**
-   * The per-object read path (settled #7): each evergreen Page and each Form
-   * definition is its own bucket object with its own decode boundary, fallback,
-   * and cache. These tests pin ADR 0008's contract:
+   * The per-object read path (settled #7): each evergreen Page is its own bucket
+   * object with its own decode boundary, fallback, and cache. These tests pin
+   * ADR 0008's contract:
    *   - a missing object falls back to its bundled default (dev / bucket-less);
    *   - a real published object is read + decoded at its own boundary;
    *   - editing one object busts ONLY its cache, never another's (the headline
@@ -581,11 +578,7 @@ describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3
   const encodeAbout = Schema.encodeUnknownEffect(
     Schema.fromJsonString(AboutPage),
   );
-  const encodeForm = Schema.encodeUnknownEffect(
-    Schema.fromJsonString(FormDefinition),
-  );
-
-  /** Encode a page/form default to its on-bucket JSON, dying on a seed-bug. */
+  /** Encode a Page default to its on-bucket JSON, dying on a seed-bug. */
   const seedJson = <A>(
     encode: (value: A) => Effect.Effect<string, Schema.SchemaError>,
     value: A,
@@ -659,13 +652,6 @@ describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3
       ),
     ));
 
-  it.effect('getForm falls back to the bundled default when the object is absent', () =>
-    Effect.gen(function* () {
-      const content = yield* Content.Service;
-      const form = yield* content.getForm('contact');
-      expect(form).toEqual(defaultContactForm);
-    }).pipe(Effect.provide(Layer.provideMerge(Content.layer, emptyStorage))));
-
   it.effect('getPage reads + decodes a real published page object at its own boundary', () =>
     Effect.gen(function* () {
       const content = yield* Content.Service;
@@ -694,28 +680,8 @@ describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3
       ),
     ));
 
-  it.effect('getForm reads + decodes a real published form object at its own boundary', () =>
-    Effect.gen(function* () {
-      const content = yield* Content.Service;
-      const form = yield* content.getForm('contact');
-      expect(form.title.en).toBe(defaultContactForm.title.en);
-    }).pipe(
-      Effect.provide(
-        Layer.provideMerge(
-          Content.layer,
-          Layer.unwrap(
-            seedJson(encodeForm, defaultContactForm).pipe(
-              Effect.map((json) =>
-                layerTest({ [formObjectKey('contact')]: { body: json } }),
-              ),
-            ),
-          ),
-        ),
-      ),
-    ));
-
   it.effect(
-    'busting one page leaves every other page, form, and the conference cache untouched',
+    'busting one page leaves every other page and the conference cache untouched',
     () =>
       Effect.gen(function* () {
         const content = yield* Content.Service;
@@ -724,12 +690,11 @@ describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3
         // Warm every cache from the seeded objects / defaults.
         const aboutBefore = yield* content.getPage('about');
         const faqBefore = yield* content.getPage('faq');
-        const formBefore = yield* content.getForm('contact');
         const conferenceBefore = yield* content.getConference('en', 2024);
         expect(aboutBefore.title.en).toBe(defaultAboutPage.title.en);
 
-        // Publish a NEW about + faq + contact-form + conference accent to the bucket,
-        // simulating four independent edits landing at once.
+        // Publish a NEW about + faq + conference accent to the bucket,
+        // simulating three independent edits landing at once.
         const editedAbout = yield* seedJson(
           encodeAbout,
           AboutPage.make({
@@ -744,13 +709,6 @@ describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3
             title: { en: 'Help Centre', fr: "Centre d'aide" },
           }),
         );
-        const editedForm = yield* seedJson(
-          encodeForm,
-          FormDefinition.make({
-            ...defaultContactForm,
-            title: { en: 'Reach out', fr: 'Contactez-nous' },
-          }),
-        );
         const editedSite = yield* encode(
           SiteContent.make({
             ...defaultContent,
@@ -763,7 +721,6 @@ describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3
         );
         yield* storage.put(pageObjectKey('about'), editedAbout, 'application/json');
         yield* storage.put(pageObjectKey('faq'), editedFaq, 'application/json');
-        yield* storage.put(formObjectKey('contact'), editedForm, 'application/json');
         yield* storage.put(SITE_CONTENT_KEY, editedSite, 'application/json');
 
         // Bust ONLY the about cache.
@@ -772,21 +729,10 @@ describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3
         // About re-reads (sees the publish); everything else is still cached.
         const aboutAfter = yield* content.getPage('about');
         const faqAfter = yield* content.getPage('faq');
-        const formAfter = yield* content.getForm('contact');
         const conferenceAfter = yield* content.getConference('en', 2024);
         expect(aboutAfter.title.en).toBe('Who We Are'); // busted → fresh
         expect(faqAfter.title.en).toBe(faqBefore.title.en); // untouched cache
-        expect(formAfter.title.en).toBe(formBefore.title.en); // untouched cache
         expect(conferenceAfter.theme).toBe(conferenceBefore.theme); // untouched
-
-        // Busting the form now reveals the form publish — proving each cache is
-        // independently invalidatable.
-        yield* content.bust(bustForm('contact'));
-        const formBusted = yield* content.getForm('contact');
-        expect(formBusted.title.en).toBe('Reach out');
-        // …and faq + conference are STILL cached (only form was busted).
-        const faqStill = yield* content.getPage('faq');
-        expect(faqStill.title.en).toBe(faqBefore.title.en);
       }).pipe(
         Effect.provide(
           Layer.provideMerge(
@@ -795,12 +741,10 @@ describe('Content.getPage / getForm multi-object read path (ADR 0008, Branch 5.3
               Effect.gen(function* () {
                 const about = yield* seedJson(encodeAbout, defaultAboutPage);
                 const faq = yield* seedJson(encodeFaq, defaultFaqPage);
-                const form = yield* seedJson(encodeForm, defaultContactForm);
                 const site = yield* encode(defaultContent);
                 return layerTest({
                   [pageObjectKey('about')]: { body: about },
                   [pageObjectKey('faq')]: { body: faq },
-                  [formObjectKey('contact')]: { body: form },
                   [SITE_CONTENT_KEY]: { body: site },
                 });
               }),

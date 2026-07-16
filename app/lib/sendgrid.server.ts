@@ -7,7 +7,7 @@ import { Env } from './env.server';
 
 export class SendgridError extends Schema.TaggedErrorClass<SendgridError>()(
   'Sendgrid.Error',
-  { cause: Schema.optional(Schema.Defect) },
+  { cause: Schema.optional(Schema.Defect()) },
 ) {}
 
 export class SendgridDisabled extends Schema.TaggedErrorClass<SendgridDisabled>()(

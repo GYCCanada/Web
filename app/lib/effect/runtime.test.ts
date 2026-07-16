@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'bun:test';
-import { Effect } from 'effect';
+import { afterAll, describe, expect, it } from 'bun:test';
+import { Effect, ManagedRuntime } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
 import {
@@ -9,7 +9,10 @@ import {
   NotFoundError,
   RedirectError,
 } from './errors';
-import { makeRequestRuntime } from './runtime';
+import { Database } from '../database.server';
+import { layerTest } from '../storage.test-helper';
+import { makeRequestRuntimeFromLayer } from './runtime';
+import { makeTestAppLayer } from './runtime.test-helper';
 import type { RouteArgs } from './router-context';
 
 const makeArgs = (url = 'http://localhost/test'): RouteArgs => ({
@@ -20,7 +23,9 @@ const makeArgs = (url = 'http://localhost/test'): RouteArgs => ({
   context: new RouterContextProvider(),
 });
 
-const runtime = makeRequestRuntime();
+const testLayer = makeTestAppLayer(layerTest({}));
+const runtime = makeRequestRuntimeFromLayer(testLayer);
+afterAll(() => runtime.dispose());
 
 /**
  * `runtime.run` rethrows the mapped error. Capture whatever it throws so the
@@ -46,6 +51,16 @@ const isDataWithStatus = (
   'init' in value;
 
 describe('runtime tagged-error mapping', () => {
+  it('builds migrations and database readiness in the app lifecycle', async () => {
+    const managed = ManagedRuntime.make(testLayer);
+    await managed.runPromise(
+      Effect.gen(function* () {
+        yield* (yield* Database.Service).ready;
+      }),
+    );
+    await managed.dispose();
+  });
+
   it('maps RedirectError to a redirect Response carrying init headers', async () => {
     const thrown = await runThrown(
       Effect.fail(

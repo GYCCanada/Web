@@ -1,5 +1,8 @@
 # CMS: per-page images + resize-on-upload + per-page `enabled` flag
 
+> **Historical implementation plan — completed.** Retained as the grounded record
+> for the finished CMS image and page-enablement work, not as current architecture guidance.
+
 Synthesized implementation plan (one stacked-PR set off `main`, feature granularity).
 Author: Claude (Opus 4.8). Grounded against the live code as of `9887ca8`.
 

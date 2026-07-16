@@ -19,9 +19,9 @@ import {
 import { pageObjectKey } from '../app/lib/content/pages/registry';
 import { GivePage, TeamPage } from '../app/lib/content/pages/schema';
 import {
-  makeAppLayer,
   makeRequestRuntimeFromLayer,
 } from '../app/lib/effect/runtime';
+import { makeTestAppLayer } from '../app/lib/effect/runtime.test-helper';
 import { layerTest } from '../app/lib/storage.test-helper';
 
 import { loader as layoutLoader } from '../app/routes/($lang)+/_layout';
@@ -41,15 +41,16 @@ const seed = async ({ give, team }: Seed) => {
     encodeTeam(TeamPage.make({ ...defaultTeamPage, enabled: team })),
   );
   const context = new RouterContextProvider();
-  context.runtime = makeRequestRuntimeFromLayer(
-    makeAppLayer(
+  const runtime = makeRequestRuntimeFromLayer(
+    makeTestAppLayer(
       layerTest({
         [pageObjectKey('give')]: { body: giveJson },
         [pageObjectKey('team')]: { body: teamJson },
       }),
     ),
   );
-  return context;
+  context.runtime = runtime;
+  return { context, runtime };
 };
 
 const argsFor = (context: RouterContextProvider, path: string) => {
@@ -74,7 +75,9 @@ const navEnabled = async (
 };
 
 /** Run the give loader; return 'ok' if it renders, '404' if it throws a 404. */
-const giveStatus = async (context: RouterContextProvider): Promise<'ok' | '404'> => {
+const giveStatus = async (
+  context: RouterContextProvider,
+): Promise<'ok' | '404'> => {
   try {
     await giveLoader(argsFor(context, '/give'));
     return 'ok';
@@ -95,25 +98,46 @@ const assert = (label: string, ok: boolean): void => {
 };
 
 const main = async (): Promise<void> => {
-  // 1. give DISABLED, team DISABLED (today's shipped default).
-  const off = await seed({ give: false, team: false });
-  const offNav = await navEnabled(off);
-  assert('give disabled -> give absent from nav', offNav['give'] === false);
-  assert('give disabled -> /give loader 404s', (await giveStatus(off)) === '404');
-  assert('team disabled (default) -> team absent from nav', offNav['team'] === false);
+  const harnesses: Awaited<ReturnType<typeof seed>>[] = [];
+  try {
+    // 1. give DISABLED, team DISABLED (today's shipped default).
+    const off = await seed({ give: false, team: false });
+    harnesses.push(off);
+    const offNav = await navEnabled(off.context);
+    assert('give disabled -> give absent from nav', offNav['give'] === false);
+    assert(
+      'give disabled -> /give loader 404s',
+      (await giveStatus(off.context)) === '404',
+    );
+    assert(
+      'team disabled (default) -> team absent from nav',
+      offNav['team'] === false,
+    );
 
-  // 2. give ENABLED -> nav link returns + /give renders.
-  const giveOn = await seed({ give: true, team: false });
-  const giveOnNav = await navEnabled(giveOn);
-  assert('give enabled -> give present in nav', giveOnNav['give'] === true);
-  assert('give enabled -> /give loader renders', (await giveStatus(giveOn)) === 'ok');
+    // 2. give ENABLED -> nav link returns + /give renders.
+    const giveOn = await seed({ give: true, team: false });
+    harnesses.push(giveOn);
+    const giveOnNav = await navEnabled(giveOn.context);
+    assert('give enabled -> give present in nav', giveOnNav['give'] === true);
+    assert(
+      'give enabled -> /give loader renders',
+      (await giveStatus(giveOn.context)) === 'ok',
+    );
 
-  // 3. team FLIPPED on -> team nav link returns (the CMS-team visibility flip).
-  const teamOn = await seed({ give: true, team: true });
-  const teamOnNav = await navEnabled(teamOn);
-  assert('team enabled -> team present in nav', teamOnNav['team'] === true);
+    // 3. team FLIPPED on -> team nav link returns (the CMS-team visibility flip).
+    const teamOn = await seed({ give: true, team: true });
+    harnesses.push(teamOn);
+    const teamOnNav = await navEnabled(teamOn.context);
+    assert('team enabled -> team present in nav', teamOnNav['team'] === true);
 
-  line(process.exitCode === 1 ? '\nRUNTIME PROOF FAILED' : '\nRUNTIME PROOF PASSED');
+    line(
+      process.exitCode === 1
+        ? '\nRUNTIME PROOF FAILED'
+        : '\nRUNTIME PROOF PASSED',
+    );
+  } finally {
+    await Promise.all(harnesses.map(({ runtime }) => runtime.dispose()));
+  }
 };
 
 await main();

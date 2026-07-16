@@ -3,6 +3,11 @@ import { type MetaFunction, useActionData, useLoaderData } from 'react-router';
 import { Content } from '~/lib/content.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeHandler } from '~/lib/effect/route';
+import { Forms } from '~/lib/forms/forms.server';
+import {
+  newSubmissionCommandFields,
+  resolveSubmissionCommandFields,
+} from '~/lib/forms/submission-command';
 import { getLocale } from '~/lib/localization/localization';
 
 import { action } from '../../registration-route';
@@ -38,21 +43,26 @@ export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
   const content = yield* Content.Service;
+  const forms = yield* Forms.Service;
   const conference = yield* content.getCurrentConference(locale);
-  // The registration form definition is CMS-backed (BLOCKER 2): editing the stored
-  // `forms/registration.json` changes the form's validation + copy with no code
-  // change, exactly like contact/volunteer.
-  const definition = yield* content.getForm('registration');
-  return { conference, definition };
+  // The current immutable relational definition drives validation and copy; an
+  // admin publication changes both with no code deploy.
+  const published = yield* forms.current('registration');
+  return {
+    conference,
+    definition: published.definition,
+    command: newSubmissionCommandFields(published.version),
+  };
 });
 
 export default function Registration2024() {
-  const { definition } = useLoaderData<typeof loader>();
+  const { definition, command } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   return (
     <RegistrationForm
       year={2024}
       definition={definition}
+      command={resolveSubmissionCommandFields(command, actionData?.command)}
       actionData={actionData?.result}
     />
   );

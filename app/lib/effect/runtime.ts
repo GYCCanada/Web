@@ -4,10 +4,14 @@ import { data, redirect } from 'react-router';
 import { AdminDisabled, Auth, BadPassword, Unauthorized } from '~/lib/auth.server';
 import { Content } from '~/lib/content.server';
 import { DraftEditor } from '~/lib/content/draft-editor.server';
-import { Submissions } from '~/lib/forms/submissions.server';
+import { Database } from '~/lib/database.server';
+import type { DatabaseTest } from '~/lib/database.test-helper';
 import { Env } from '~/lib/env.server';
+import { Forms } from '~/lib/forms/forms.server';
+import { FormNotifications } from '~/lib/form-notifications.server';
 import { Sendgrid, SendgridDisabled, SendgridError } from '~/lib/sendgrid.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
+import { NotificationDelivery } from '~/lib/notification-delivery.server';
 import { NotFound, Storage, StorageError } from '~/lib/storage.server';
 import { Toast } from '~/lib/toast.server';
 
@@ -26,7 +30,9 @@ export type AppServices =
   | Sendgrid.Service
   | Content.Service
   | DraftEditor.Service
-  | Submissions.Service
+  | Forms.Service
+  | FormNotifications.Service
+  | NotificationDelivery.Service
   | Auth.Service
   | Storage.Service
   | Toast;
@@ -42,56 +48,32 @@ export type AppError =
   | StorageError
   | NotFound;
 
-// `storageLayer` is the ONE `Storage` instance the whole app runtime shares. It
-// is provided to `Content.layer` (NOT `Content.defaultLayer`, which would bake
-// in its own separate `Storage.layerOptional`) AND merged into the base, so the
-// public read path's `Content.getForm`/`getPage`, the `/admin` editor's
-// reads/writes (`DraftEditor`), the form-action persist step (`Submissions`),
-// and any route that reads `Storage` directly all resolve the SAME
-// `Storage.Service` over the SAME bucket — there is genuinely no second instance
-// to coordinate. Production passes `Storage.layerOptional` (bucket-less it reports
-// `NotFound`, which the read path recovers to the bundled defaults, D3; writes
-// fail `StorageError` rather than silently dropping). `Content.layer` exposes
-// `Content` with only `Env` left open, discharged by the surrounding merge.
-//
-// The admin write surface is only *reachable* when `Auth` is enabled
-// (`ADMIN_PASSWORD` + `COOKIE_SECRET` set), independent of the bucket; the
-// editor still surfaces a `StorageError` when an admin is configured without a
-// bucket, rather than silently dropping a save.
-//
-// `Auth` is likewise optional everywhere: with `ADMIN_PASSWORD` unset its layer
-// builds a disabled instance (admin 404s), so it never fails to build either.
-//
-// `DraftEditor.layer` (the `/admin` editor's write pipeline) and
-// `Submissions.layer` (the form-action persist step) are layered ON TOP of this
-// base via `provideMerge`, so each consumes the SAME exposed `Content.Service`
-// (DraftEditor's `publish` busts the very cache the public read serves from;
-// Submissions reads each form's CMS-editable definition through it) and the SAME
-// exposed `Storage.Service` the editor route reads/writes and the persisted
-// `submissions/<form>/<id>.json` objects land in.
 /**
- * Build the full app layer over a chosen `Storage` layer. Production uses
- * `Storage.layerOptional` (bucket-less it reports `NotFound`/`StorageError`,
- * never failing to build). A test can pass an in-memory `Storage` layer (the
- * `Map`-backed `layerTest`) so a code path that WRITES — the form-action
- * `Submissions.persist` step — can be exercised end-to-end through the real
- * request runtime, since a bucket-less write would otherwise fail. The single
- * `storageLayer` instance is shared by `Content`, `DraftEditor`, and
- * `Submissions`: a form seeded into the injected bucket is read back by
- * `Content.getForm` through that SAME bucket (no second instance to coordinate),
- * so the write path is faithfully exercisable end-to-end through this seam.
+ * Compose the application over explicit object-storage and relational adapters.
+ * Content and DraftEditor share one Storage instance; Forms owns the supplied
+ * database lifecycle. Tests substitute both adapters without changing callers.
  */
 export const makeAppLayer = (
   storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
+  databaseLayer: typeof Database.layer | typeof DatabaseTest.layer,
+  mailerLayer: Layer.Layer<Mailer.Service, never, Env.Service> = Mailer.layer,
 ) => {
   const baseLayer = Layer.mergeAll(
-    Mailer.layer,
+    mailerLayer,
     Sendgrid.layer,
     Toast.layer,
     Content.layer,
     Auth.layer,
   ).pipe(Layer.provideMerge(storageLayer));
-  return Layer.mergeAll(DraftEditor.layer, Submissions.layer).pipe(
+  const relationalLayer = Layer.mergeAll(
+    Forms.layer,
+    NotificationDelivery.layer,
+  ).pipe(Layer.provideMerge(databaseLayer));
+  const notificationLayer = FormNotifications.layer.pipe(
+    Layer.provideMerge(relationalLayer),
+    Layer.provideMerge(baseLayer),
+  );
+  return Layer.mergeAll(DraftEditor.layer, notificationLayer).pipe(
     Layer.provideMerge(baseLayer),
     Layer.provideMerge(Env.layer),
   );
@@ -100,7 +82,28 @@ export const makeAppLayer = (
 /** The fully-composed app layer (its error channel is `Env.layer`'s `ConfigError`). */
 export type AppLayer = ReturnType<typeof makeAppLayer>;
 
-const AppRuntime = ManagedRuntime.make(makeAppLayer(Storage.layerOptional));
+const AppRuntime = ManagedRuntime.make(
+  makeAppLayer(Storage.layerOptional, Database.layer),
+);
+
+/** Build the shared app runtime and verify its migrated relational adapter. */
+export const checkAppReady = (): Promise<void> =>
+  AppRuntime.runPromise(
+    Effect.gen(function* () {
+      yield* (yield* Database.Service).ready;
+    }),
+  );
+
+/** Drain all currently eligible durable Form notification intents. */
+export const drainFormNotifications = (): Promise<number> =>
+  AppRuntime.runPromise(
+    Effect.gen(function* () {
+      return yield* (yield* FormNotifications.Service).drain;
+    }),
+  );
+
+/** Finalize the process-scoped application runtime during server shutdown. */
+export const disposeAppRuntime = (): Promise<void> => AppRuntime.dispose();
 
 const isResponse = (v: unknown): v is Response =>
   typeof v === 'object' && v !== null && v instanceof Response;
@@ -148,6 +151,8 @@ export interface RequestRuntime {
     args: RouteArgs,
     effect: Effect.Effect<A, E, R>,
   ) => Promise<A>;
+  /** Release resources owned by a layer-derived runtime; production is process-scoped. */
+  readonly dispose: () => Promise<void>;
 }
 
 /**
@@ -178,14 +183,19 @@ const runWithContext =
 /**
  * Build a {@link RequestRuntime} over a chosen app layer, sharing the runtime's
  * error → `Response` mapping. Production calls {@link makeRequestRuntime} (the
- * global `AppRuntime`); a test builds one over `makeAppLayer(layerTest(...))` so
- * a route/form action that writes (`Submissions.persist`) runs end-to-end against
- * an in-memory bucket through the real pipeline.
+ * global `AppRuntime`); a test builds one over `makeTestAppLayer(layerTest(...))`
+ * so relational Form writes and object-backed content reads run end-to-end
+ * through their real adapters.
  */
-export const makeRequestRuntimeFromLayer = (layer: AppLayer): RequestRuntime => ({
-  run: runWithContext(ManagedRuntime.make(layer)),
-});
+export const makeRequestRuntimeFromLayer = (layer: AppLayer): RequestRuntime => {
+  const runtime = ManagedRuntime.make(layer);
+  return {
+    run: runWithContext(runtime),
+    dispose: () => runtime.dispose(),
+  };
+};
 
 export const makeRequestRuntime = (): RequestRuntime => ({
   run: runWithContext(AppRuntime),
+  dispose: () => Promise.resolve(),
 });

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import {
   Form,
   type MetaFunction,
@@ -7,20 +7,22 @@ import {
   useLoaderData,
 } from "react-router";
 
-import { Content } from "~/lib/content.server";
-import { getEnabledPageOr404 } from "~/lib/content/page-guard.server";
+import { readPageView } from "~/lib/content/pages/pages.server";
 import { FormProvider, useForm } from "~/lib/conform";
-import { definitionToSchema, type DecodedForm } from "~/lib/forms/decode";
+import { definitionToSchema } from "~/lib/forms/decode";
 import { FormDefinition } from "~/lib/forms/definition";
+import { Forms } from "~/lib/forms/forms.server";
 import { FormFields } from "~/lib/forms/render";
+import {
+  newSubmissionCommandFields,
+  resolveSubmissionCommandFields,
+  SubmissionCommandInputs,
+} from "~/lib/forms/submission-command";
 import { formAction } from "~/lib/forms/action";
-import { formValidationError } from "~/lib/effect/errors";
 import { routeHandler } from "~/lib/effect/route";
 import { ReactRouterContext } from "~/lib/effect/router-context";
 import { useTranslate } from "~/lib/localization/context";
 import { getLocale } from "~/lib/localization/localization";
-import { toVolunteerView } from "~/lib/content/pages/project";
-import { Mailer } from "~/lib/mailer.server";
 import { Button } from "~/ui/button";
 import { fieldErrorStyle } from "~/ui/field-error";
 import { Main } from "~/ui/main";
@@ -45,85 +47,20 @@ export const meta: MetaFunction = ({ params }) => {
 export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
-  const content = yield* Content.Service;
+  const forms = yield* Forms.Service;
   // 404 when the volunteer page is disabled (Feature C); else project + load form.
-  const page = toVolunteerView(yield* getEnabledPageOr404("volunteer"), locale);
+  const page = yield* readPageView("volunteer", locale);
+  const published = yield* forms.current("volunteer");
   return {
     page,
-    definition: yield* content.getForm("volunteer"),
+    definition: published.definition,
+    command: newSubmissionCommandFields(published.version),
   };
 });
 
-// The string value of one decoded field, or `''` when absent — the decoder has
-// already proven these fields' types, so reading them off the generic
-// `DecodedForm` record is a projection, not re-validation (`boundary-discipline`).
-const str = (decoded: DecodedForm, name: string): string => {
-  const value = decoded[name];
-  return typeof value === "string" ? value : "";
-};
-
-/**
- * The method-specific contact line — email, phone, or both — mirroring the
- * hand-tuned action's `ts-pattern` match. The cross-field rules guarantee the
- * gated field is present, so the omitted branches never produce a blank line in
- * practice; a defensive empty string keeps the body well-formed either way.
- */
-const contactLine = (decoded: DecodedForm): string => {
-  const method = str(decoded, "method");
-  const email = `Email: ${str(decoded, "email")}`;
-  const phone = `Phone: ${str(decoded, "phone")}`;
-  if (method === "phone") return phone;
-  if (method === "both") return `${email}\n${phone}`;
-  return email;
-};
-
-/**
- * The vestigial `positions` line: the pre-migration form never populated
- * `data.positions` (a hardcoded `[]`), so its checkbox block never rendered and
- * the field was never submitted. The engine definition therefore carries no
- * `positions` field; this reads it defensively off the decoded payload (always
- * absent → `[]`) so the notification's `Positions:` line stays byte-identical to
- * the old action's always-empty output.
- */
-const positionsLine = (decoded: DecodedForm): string => {
-  const value = decoded["positions"];
-  const positions = Array.isArray(value) ? value : [];
-  return positions.join(", ");
-};
-
-// The volunteer action is the generic skeleton (Branch 6.2; persist-then-notify
-// wired in Branch 7.3): `Content.getForm` → `decodeForm` → `Submissions.persist`
-// → `notify` → `toast.redirect`. The form-specific part is the notification — the
-// same mailer body the hand-tuned action built, now over the PERSISTED record's
-// payload (the durable `submissions/volunteer/<id>.json` object is already written
-// when `notify` runs, so a mailer failure cannot lose the record).
 export const action = formAction({
   form: "volunteer",
   page: "volunteer",
-  notify: (submission) =>
-    Effect.gen(function* () {
-      const decoded = submission.payload;
-      const mailer = yield* Mailer.Service;
-      const name = str(decoded, "name");
-      const result = yield* Effect.exit(
-        mailer.send({
-          subject: `[!] Volunteer Request from ${name}`,
-          content: `Name: ${name}\n${contactLine(decoded)}
-        \nMessage: ${str(decoded, "why")}
-        \nBackground: ${str(decoded, "background")}
-        \nAge: ${str(decoded, "age")}
-        \nLocation: ${str(decoded, "location")}
-        \nPositions: ${positionsLine(decoded)}
-        `,
-        }),
-      );
-      if (result._tag === "Failure") {
-        yield* Effect.logError("Error sending email", result.cause);
-        return yield* formValidationError({
-          formErrors: ["contact.form.error"],
-        });
-      }
-    }),
   success: {
     title: "volunteer.form.success.title",
     description: "volunteer.form.success.description",
@@ -132,7 +69,7 @@ export const action = formAction({
 
 export default function Index() {
   const translate = useTranslate();
-  const { page, definition: encodedDefinition } =
+  const { page, definition: encodedDefinition, command } =
     useLoaderData<typeof loader>();
 
   // The loader JSON crossed a boundary; re-decode it through `FormDefinition` so
@@ -147,6 +84,10 @@ export default function Index() {
   );
 
   const actionData = useActionData<typeof action>();
+  const submissionCommand = resolveSubmissionCommandFields(
+    command,
+    actionData?.command,
+  );
   const { form: f } = useForm(clientSchema, {
     id: "volunteer",
     shouldValidate: "onSubmit",
@@ -175,6 +116,7 @@ export default function Index() {
 
       <FormProvider context={f.context}>
         <Form className="flex flex-col gap-4" method="POST" {...f.props}>
+          <SubmissionCommandInputs {...submissionCommand} />
           <FormFields definition={definition} formId={f.id} />
 
           <div>

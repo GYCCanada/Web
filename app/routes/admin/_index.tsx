@@ -1,27 +1,18 @@
 import { Link } from 'react-router';
 
 import { adminMeta, adminSecurityHeaders } from '~/lib/admin-headers';
-import { PAGE_IDS, type PageId } from '~/lib/content/pages/registry';
+import { PAGE_IDS, PAGE_LABELS } from '~/lib/content/pages/registry';
+import { FORM_IDS, type FormId } from '~/lib/forms/definition';
 
 export const meta = adminMeta;
 
 export const headers = adminSecurityHeaders;
 
-/**
- * Human label per `PageId` for the dashboard's per-page editor links. Exhaustive
- * over `PageId` so adding a page to the registry without a label fails to compile
- * (`make-impossible-states-unrepresentable`).
- */
-const PAGE_LABELS: { readonly [P in PageId]: string } = {
-  about: 'About',
-  faq: 'FAQ',
-  give: 'Give',
+const FORM_LABELS = {
   contact: 'Contact',
   volunteer: 'Volunteer',
-  archive: 'Archive',
-  home: 'Home (evergreen)',
-  team: 'Team',
-};
+  registration: 'Registration',
+} as const satisfies Record<FormId, string>;
 
 /**
  * The authenticated admin landing page. Reaching it means the `_layout` guard
@@ -48,6 +39,27 @@ export default function AdminIndex() {
         >
           Edit site content
         </Link>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
+          Forms
+        </h2>
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {FORM_IDS.map((form) => (
+            <li key={form}>
+              <Link
+                to={`/admin/forms/${form}`}
+                className="flex min-h-11 items-center justify-between rounded-md border border-neutral-300 px-4 text-sm font-medium transition-colors hover:bg-neutral-100"
+              >
+                <span>{FORM_LABELS[form]}</span>
+                <span aria-hidden className="text-neutral-400">
+                  →
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="space-y-3">

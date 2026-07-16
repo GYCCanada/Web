@@ -28,12 +28,12 @@ import { FormDefinition as FormDefinitionSchema } from './definition';
  *
  * Definitions are built from raw JSON (the on-bucket shape) and decoded through
  * the `FormDefinition` schema first, so the decoder is exercised on the same
- * branded values a real `forms/<form>.json` produces.
+ * branded values a published relational Form definition produces.
  */
 
 const text = (en: string, fr: string) => ({ en, fr });
 
-/** Decode a raw JSON definition through the schema (as `Content.getForm` would). */
+/** Decode a raw JSON definition through the domain boundary. */
 const asDefinition = (json: unknown): FormDefinition =>
   Schema.decodeUnknownSync(FormDefinitionSchema)(json);
 

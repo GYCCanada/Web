@@ -7,6 +7,10 @@ import dayjs from 'dayjs';
 import { FormProvider, useForm, useFormData } from '~/lib/conform';
 import { definitionToSchema } from '~/lib/forms/decode';
 import { FormDefinition } from '~/lib/forms/definition';
+import {
+  type SubmissionCommandFields,
+  SubmissionCommandInputs,
+} from '~/lib/forms/submission-command';
 import { useTranslate } from '~/lib/localization/context';
 import { Button } from '~/ui/button';
 import { Checkbox, Checkboxes, CheckboxGroup } from '~/ui/checkbox';
@@ -94,11 +98,8 @@ const RegistrantInput = Schema.Struct({
  * is not in the closed `FieldKind` set), so it wraps the per-registrant codec in
  * `{ registrants: Array(...) }`.
  *
- * The definition is read from `Content.getForm('registration')` in each
- * `{2024,2025,2026}/form` loader and passed in as the `definition` prop (BLOCKER 2:
- * registration is now CMS-backed like contact/volunteer — editing the stored
- * `forms/registration.json` changes what the form accepts and how it renders, with
- * no code change; ADR 0007/0008 consequence). The loader JSON crossed a boundary,
+ * Each `{2024,2025,2026}/form` loader reads the current immutable definition from
+ * Forms and passes it with its version and attempt token. The loader JSON crossed a boundary,
  * so the component re-decodes it through `FormDefinition` (`boundary-discipline`)
  * before building the client codec.
  *
@@ -177,19 +178,20 @@ export const makeDefaultRegistrant = () => ({
  * heading year. This is a plain module (not referenced in `routes.ts`), so it
  * is not itself a route.
  *
- * `actionData` is passed in by the route wrapper. The registration action is a
- * deliberate no-op, so `useActionData` is `undefined` today and `lastResult` is
- * effectively unused — it is kept wired (typed as conform's `SubmissionResult`)
- * so a future real action's result flows straight through.
+ * `actionData` is passed in by the route wrapper. It carries the relational
+ * action's Conform result so validation failures reattach to their registrant
+ * fields while the exact submission command remains available for safe retry.
  */
 export function RegistrationForm({
   year,
   definition: encodedDefinition,
+  command,
   initialRegistrants,
   actionData,
 }: {
   year: number;
   definition: typeof FormDefinition.Encoded;
+  command: SubmissionCommandFields;
   /**
    * The form's seed registrants — defaults to one blank attendee shell
    * (`makeDefaultRegistrant()`). Overridable so a test (or a future
@@ -271,6 +273,7 @@ export function RegistrationForm({
           className="flex flex-col gap-4"
           {...form.props}
         >
+          <SubmissionCommandInputs {...command} />
           {registrants.map((registrant, index) => {
             const type = liveValues[index]?.type as 'attendee' | 'exhibitor';
 
@@ -283,9 +286,8 @@ export function RegistrationForm({
             const volunteer = fields.volunteer.getFieldset();
 
             return (
-              <>
+              <React.Fragment key={registrant.key}>
                 <fieldset
-                  key={registrant.key}
                   name={registrant.name}
                   className="flex flex-col gap-4"
                 >
@@ -730,7 +732,7 @@ export function RegistrationForm({
                     </>
                   )}
                 </fieldset>
-              </>
+              </React.Fragment>
             );
           })}
           <div>

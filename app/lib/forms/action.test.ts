@@ -1,55 +1,92 @@
-import { describe, expect, it } from 'bun:test';
-import { Effect, ManagedRuntime } from 'effect';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { Effect, Layer, ManagedRuntime, Option } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
 import { Schema } from 'effect';
 
-import { Content } from '../content.server';
-import {
-  defaultContactForm,
-  defaultContactPage,
-} from '../content/pages/defaults';
-import { formObjectKey, pageObjectKey } from '../content/pages/registry';
+import { defaultContactPage } from '../content/pages/defaults';
+import { pageObjectKey } from '../content/pages/registry';
 import { ContactPage } from '../content/pages/schema';
-import { formValidationError } from '../effect/errors';
-import { makeAppLayer, makeRequestRuntimeFromLayer } from '../effect/runtime';
-import { ReactRouterContext, type RouteArgs } from '../effect/router-context';
-import { Storage } from '../storage.server';
+import {
+  makeRequestRuntimeFromLayer,
+  type RequestRuntime,
+} from '../effect/runtime';
+import { makeTestAppLayer } from '../effect/runtime.test-helper';
+import type { RouteArgs } from '../effect/router-context';
+import { Mailer } from '../mailer.server';
 import { layerTest } from '../storage.test-helper';
 
 import { formAction } from './action';
-import { FormDefinition } from './definition';
-import type { Submission } from './submission';
+import { Forms } from './forms.server';
+import {
+  FORM_VERSION_FIELD,
+  IDEMPOTENCY_TOKEN_FIELD,
+  newSubmissionCommandFields,
+  resolveSubmissionCommandFields,
+} from './submission-command';
+
+interface SentMail {
+  readonly subject: string;
+  readonly content: string;
+  readonly idempotencyKey?: string;
+}
+
+const capturingMailer = (sent: SentMail[]) =>
+  Layer.succeed(
+    Mailer.Service,
+    Mailer.Service.of({
+      send: (input) =>
+        Effect.sync(() => {
+          sent.push(input);
+        }),
+    }),
+  );
+
+const requestRuntimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(requestRuntimes.splice(0).map((runtime) => runtime.dispose()));
+});
 
 /**
  * Branch 6.2 — the generic action skeleton; Branch 7.3 — persist-then-notify.
  *
- * `formAction({ form, notify, success })` collapses the `parse → decode → persist
- * → notify → toast.redirect` pipeline the form routes triplicate into one wrapped
- * route action. These tests pin the pipeline WIRING (`prove-it-works`) — the
- * per-kind decode semantics are covered exhaustively in `decode.test.ts` and the
- * durable-write contract in `submissions.server.test.ts`, so here the form is
- * `contact` driven by a minimal VALID contact payload. We pin only the skeleton's
- * own wiring:
- *   - a valid submission PERSISTS the durable record, then runs `notify` with the
- *     STORED `Submission` (Branch 7.3 — the email references the persisted record),
- *     then redirects with the success toast;
- *   - a `notify` failure (e.g. a mailer error mapped to a form-level key) aborts
+ * `formAction({ form, page, success })` collapses the `parse → relational commit
+ * → notification dispatch → toast.redirect` pipeline into one wrapped route
+ * action. These tests pin the pipeline WIRING (`prove-it-works`) — the per-kind
+ * decode semantics are covered exhaustively in `decode.test.ts` and the durable
+ * commit contract in `forms.server.test.ts`. We pin only the adapter's own wiring:
+ *   - a valid submission commits the durable record, sends its canonical
+ *     notification through `Mailer`, then redirects with the success toast;
+ *   - a `Mailer` failure mapped to a form-level key aborts
  *     the redirect and surfaces as a form error report — and the record is ALREADY
  *     persisted (persist ran first), the record-vs-notify separation settled #8
  *     demands;
- *   - the honeypot short-circuit (inherited from `routeFormAction`) skips the
- *     body entirely (no persist, no notify).
+ *   - the honeypot short-circuit skips the body entirely (no commit, no mail).
  *
- * The action runs through the real request runtime, but over `makeAppLayer` with
- * an IN-MEMORY `Storage` (`layerTest`) so the `Submissions.persist` write
- * succeeds end-to-end — a bucket-less production `Storage.layerOptional` would
- * fail the write. `Content` (the bundled default form definition), `Toast`, and
- * the `Mailer` are the same layers the live server provides.
+ * The action runs through the real request runtime with an isolated relational
+ * database and in-memory object storage for the owning Page. `Forms`, `Content`,
+ * `Toast`, and `Mailer` are the same application boundaries the live server
+ * provides.
  */
 
-const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
-  const body = new URLSearchParams(fields);
+const makeFormArgs = async (
+  fields: Record<string, string>,
+  mailerLayer: NonNullable<Parameters<typeof makeTestAppLayer>[1]> = Mailer.layer,
+): Promise<RouteArgs> => {
+  const appLayer = makeTestAppLayer(layerTest({}), mailerLayer);
+  const runtime = ManagedRuntime.make(appLayer);
+  const published = await runtime.runPromise(
+    Effect.gen(function* () {
+      return yield* (yield* Forms.Service).current('contact');
+    }),
+  );
+  await runtime.dispose();
+  const command = newSubmissionCommandFields(published.version);
+  const body = new URLSearchParams({
+    ...fields,
+    [FORM_VERSION_FIELD]: command.definitionVersion,
+    [IDEMPOTENCY_TOKEN_FIELD]: command.idempotencyToken,
+  });
   const url = 'http://localhost/contact';
   const request = new Request(url, {
     method: 'POST',
@@ -57,7 +94,8 @@ const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
   });
   const context = new RouterContextProvider();
-  context.runtime = makeRequestRuntimeFromLayer(makeAppLayer(layerTest({})));
+  context.runtime = makeRequestRuntimeFromLayer(appLayer);
+  requestRuntimes.push(context.runtime);
   return {
     request,
     url: new URL(url),
@@ -68,15 +106,11 @@ const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
 };
 
 describe('formAction', () => {
-  it('persists, runs notify with the stored record, then redirects with the success toast', async () => {
-    let notified: Submission | undefined;
+  it('persists, sends the stored record notification, then redirects with the success toast', async () => {
+    const sent: SentMail[] = [];
     const action = formAction({
       form: 'contact',
       page: 'contact',
-      notify: (submission) =>
-        Effect.sync(() => {
-          notified = submission;
-        }),
       success: {
         title: 'contact.form.success.title',
         description: 'contact.form.success.description',
@@ -86,12 +120,12 @@ describe('formAction', () => {
     let thrown: unknown;
     try {
       await action(
-        makeFormArgs({
+        await makeFormArgs({
           method: 'email',
           name: 'Ada',
           email: 'ada@example.com',
           message: 'hi',
-        }),
+        }, capturingMailer(sent)),
       );
     } catch (error) {
       thrown = error;
@@ -105,16 +139,12 @@ describe('formAction', () => {
     expect(response.headers.get('location')).toBe('/contact');
     // The success toast was flashed (the set-cookie carries the toast session).
     expect(response.headers.get('set-cookie')).toContain('toast');
-    // notify ran with the STORED record: a real branded id + form, and the
-    // decoded payload as the source of truth the email references (Branch 7.3).
-    expect(notified?.form).toBe('contact');
-    expect(typeof notified?.id).toBe('string');
-    expect(notified?.payload).toEqual({
-      method: 'email',
-      name: 'Ada',
-      email: 'ada@example.com',
-      message: 'hi',
-    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.subject).toBe('[!] Contact Inquiry from Ada');
+    expect(sent[0]?.content).toBe(
+      'Name: Ada\nEmail: ada@example.com\nMessage: hi',
+    );
+    expect(sent[0]?.idempotencyKey).toMatch(/^form:[A-Za-z0-9_-]+:admin-email$/);
   });
 
   // BLOCKER 1 regression pin: contact's `email`/`phone` are `optional: true` and
@@ -127,14 +157,10 @@ describe('formAction', () => {
   // `parseSubmission` (no `stripEmptyValues`), so a present `''` is kept, exactly
   // as the browser sends it.
   it('the rendered method=phone payload (email field absent) decodes to success', async () => {
-    let notified: Submission | undefined;
+    const sent: SentMail[] = [];
     const action = formAction({
       form: 'contact',
       page: 'contact',
-      notify: (submission) =>
-        Effect.sync(() => {
-          notified = submission;
-        }),
       success: {
         title: 'contact.form.success.title',
         description: 'contact.form.success.description',
@@ -144,12 +170,12 @@ describe('formAction', () => {
     let thrown: unknown;
     try {
       await action(
-        makeFormArgs({
+        await makeFormArgs({
           method: 'phone',
           name: 'Ada',
           phone: '123-456-7890',
           message: 'hi',
-        }),
+        }, capturingMailer(sent)),
       );
     } catch (error) {
       thrown = error;
@@ -157,19 +183,16 @@ describe('formAction', () => {
 
     expect(thrown).toBeInstanceOf(Response);
     expect((thrown as Response).status).toBe(302);
-    expect(notified?.payload).toEqual({
-      method: 'phone',
-      name: 'Ada',
-      phone: '123-456-7890',
-      message: 'hi',
-    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.content).toBe(
+      'Name: Ada\nPhone: 123-456-7890\nMessage: hi',
+    );
   });
 
   it('a present-blank inactive field (the pre-fix unconditional render) FAILS — why the renderer must gate it', async () => {
     const action = formAction({
       form: 'contact',
       page: 'contact',
-      notify: () => Effect.void,
       success: {
         title: 'contact.form.success.title',
         description: 'contact.form.success.description',
@@ -180,7 +203,7 @@ describe('formAction', () => {
     // `phone` (the bug the renderer fix prevents). `parseSubmission` keeps the
     // present `''`, and the `optional: true` phone codec rejects a present blank.
     const result = await action(
-      makeFormArgs({
+      await makeFormArgs({
         method: 'email',
         name: 'Ada',
         email: 'ada@example.com',
@@ -199,8 +222,6 @@ describe('formAction', () => {
     const action = formAction({
       form: 'contact',
       page: 'contact',
-      notify: () =>
-        Effect.fail(formValidationError({ formErrors: ['contact.form.error'] })),
       success: {
         title: 'contact.form.success.title',
         description: 'contact.form.success.description',
@@ -208,108 +229,132 @@ describe('formAction', () => {
     });
 
     const result = await action(
-      makeFormArgs({
+      await makeFormArgs({
         method: 'email',
         name: 'Ada',
         email: 'ada@example.com',
         message: 'hi',
-      }),
+      }, Layer.succeed(
+        Mailer.Service,
+        Mailer.Service.of({
+          send: () => Effect.fail(new Mailer.MailError({})),
+        }),
+      )),
     );
 
     expect(result.status).toBe('error');
     expect(result.result.error?.formErrors).toEqual(['contact.form.error']);
+    expect(
+      Schema.is(Forms.FormDefinitionVersionId)(
+        result.command.preserved[FORM_VERSION_FIELD],
+      ),
+    ).toBe(true);
+    expect(
+      Schema.is(Forms.IdempotencyToken)(
+        result.command.preserved[IDEMPOTENCY_TOKEN_FIELD],
+      ),
+    ).toBe(true);
+    expect(result.command.disposition).toBe('preserve');
   });
 
-  // settled #8 — persist-FIRST, notify-second: a notify failure provably cannot
-  // lose the record, because `Submissions.persist` ran and returned its durable
-  // object BEFORE `notify`. We build ONE app layer over a single in-memory bucket,
-  // run the action (whose notify fails) through it, then read that SAME bucket back
-  // through the same runtime and find the persisted `submissions/contact/<id>.json`.
-  it('a notify failure still leaves the persisted record on the bucket (persist-first)', async () => {
-    const storage = layerTest({});
-    const appLayer = makeAppLayer(storage);
-    const runtime = ManagedRuntime.make(appLayer);
-
-    const args = makeFormArgs({
-      method: 'email',
-      name: 'Persisted Ada',
-      email: 'ada@example.com',
-      message: 'hi',
-    });
-    // Run against the SAME runtime (so the readback sees the same in-memory
-    // bucket), providing `ReactRouterContext` exactly as the production runtime
-    // does.
-    args.context.runtime = {
-      run: (routeArgs, effect) =>
-        runtime.runPromise(
-          effect.pipe(Effect.provideService(ReactRouterContext, routeArgs)),
-        ),
-    };
-
+  it('refreshes the loader command after the rendered definition advances', async () => {
     const action = formAction({
       form: 'contact',
       page: 'contact',
-      notify: () =>
-        Effect.fail(formValidationError({ formErrors: ['contact.form.error'] })),
       success: {
         title: 'contact.form.success.title',
         description: 'contact.form.success.description',
       },
     });
+    const args = await makeFormArgs({
+      method: 'email',
+      name: 'Ada',
+      email: 'ada@example.com',
+      message: 'hi',
+    });
+    const published = await args.context.runtime.run(
+      args,
+      Effect.gen(function* () {
+        const forms = yield* Forms.Service;
+        const current = yield* forms.current('contact');
+        return yield* forms.publish({
+          form: 'contact',
+          expectedCurrentVersion: Option.some(current.version),
+          definition: {
+            ...current.definition,
+            title: { en: 'Advanced', fr: 'Avancé' },
+          },
+        });
+      }),
+    );
 
     const result = await action(args);
-    expect(result.status).toBe('error');
+    const fallback = newSubmissionCommandFields(published.version);
 
-    // The record is on the bucket despite the notify failure.
-    const listed = await runtime.runPromise(
-      Effect.gen(function* () {
-        const s = yield* Storage.Service;
-        return yield* s.list('submissions/contact/');
-      }),
+    expect(result.command.disposition).toBe('refreshDefinition');
+    expect(resolveSubmissionCommandFields(fallback, result.command)).toBe(
+      fallback,
     );
-    expect(listed.length).toBe(1);
-    expect(listed[0]?.key).toMatch(/^submissions\/contact\/.+\.json$/);
   });
 
-  // Single-Storage-instance proof: `makeAppLayer` shares ONE `Storage` between
-  // `Content` and `Submissions`. A CMS-edited `forms/contact.json` seeded into the
-  // injected bucket must be visible to `Content.getForm` (the read `Submissions.
-  // persist` makes), proving Content reads through the SAME injected bucket the
-  // persist path writes to — NOT a separate baked-in `Storage.layerOptional`. If
-  // Content read through a second instance, it would fall back to the bundled
-  // default title and this assertion would fail.
-  it('Content.getForm reads the CMS-edited form from the SAME injected bucket the persist path writes to', async () => {
-    const editedTitle = 'CMS-edited contact form';
-    const edited = FormDefinition.make({
-      ...defaultContactForm,
-      title: { ...defaultContactForm.title, en: editedTitle },
+  it('rotates the loader token after an idempotency conflict', async () => {
+    const action = formAction({
+      form: 'contact',
+      page: 'contact',
+      success: {
+        title: 'contact.form.success.title',
+        description: 'contact.form.success.description',
+      },
     });
-    const encodeForm = Schema.encodeUnknownEffect(
-      Schema.fromJsonString(FormDefinition),
+    const args = await makeFormArgs({
+      method: 'email',
+      name: 'Ada',
+      email: 'ada@example.com',
+      message: 'second command',
+    });
+    const posted = await args.request.clone().formData();
+    const version = Schema.decodeUnknownSync(Forms.FormDefinitionVersionId)(
+      posted.get(FORM_VERSION_FIELD),
     );
-    const json = await Effect.runPromise(encodeForm(edited));
-
-    const storage = layerTest({ [formObjectKey('contact')]: { body: json } });
-    const runtime = ManagedRuntime.make(makeAppLayer(storage));
-
-    // Resolved through the full app runtime — the same `Content.Service` the
-    // persist path calls `getForm` on. It reads the seeded, CMS-edited object.
-    const form = await runtime.runPromise(
+    const token = Schema.decodeUnknownSync(Forms.IdempotencyToken)(
+      posted.get(IDEMPOTENCY_TOKEN_FIELD),
+    );
+    await args.context.runtime.run(
+      args,
       Effect.gen(function* () {
-        const content = yield* Content.Service;
-        return yield* content.getForm('contact');
+        yield* (yield* Forms.Service).submit({
+          form: 'contact',
+          expectedVersion: version,
+          idempotencyToken: token,
+          payloads: [
+            {
+              method: 'email',
+              name: 'Ada',
+              email: 'ada@example.com',
+              message: 'first command',
+            },
+          ],
+        });
       }),
     );
-    expect(form.title.en).toBe(editedTitle);
+
+    const result = await action(args);
+    const fallback = newSubmissionCommandFields(version);
+
+    expect(result.command.disposition).toBe('rotateToken');
+    expect(resolveSubmissionCommandFields(fallback, result.command)).toBe(
+      fallback,
+    );
+    expect(fallback.idempotencyToken).not.toBe(token);
   });
 
   // Run a contact `formAction` whose owning page is seeded DISABLED, against the
-  // given POST body. Returns the thrown 404 (a `DataWithResponseInit`) + whether
-  // notify ran. The gate must 404 EVERY POST, including a honeypot-filled one, so
+  // given POST body. Returns the thrown 404 (a `DataWithResponseInit`) + the sent
+  // mail count. The gate must 404 EVERY POST, including a honeypot-filled one, so
   // both bodies route through this helper.
   const runDisabledPagePost = async (
     body: Record<string, string>,
-  ): Promise<{ thrown: unknown; notifyRan: boolean }> => {
+  ): Promise<{ thrown: unknown; sentCount: number }> => {
     const encodePage = Schema.encodeUnknownEffect(
       Schema.fromJsonString(ContactPage),
     );
@@ -317,14 +362,10 @@ describe('formAction', () => {
       encodePage(ContactPage.make({ ...defaultContactPage, enabled: false })),
     );
 
-    let notifyRan = false;
+    const sent: SentMail[] = [];
     const action = formAction({
       form: 'contact',
       page: 'contact',
-      notify: () =>
-        Effect.sync(() => {
-          notifyRan = true;
-        }),
       success: {
         title: 'contact.form.success.title',
         description: 'contact.form.success.description',
@@ -339,8 +380,12 @@ describe('formAction', () => {
     });
     const context = new RouterContextProvider();
     context.runtime = makeRequestRuntimeFromLayer(
-      makeAppLayer(layerTest({ [pageObjectKey('contact')]: { body: pageJson } })),
+      makeTestAppLayer(
+        layerTest({ [pageObjectKey('contact')]: { body: pageJson } }),
+        capturingMailer(sent),
+      ),
     );
+    requestRuntimes.push(context.runtime);
 
     let thrown: unknown;
     try {
@@ -354,14 +399,14 @@ describe('formAction', () => {
     } catch (error) {
       thrown = error;
     }
-    return { thrown, notifyRan };
+    return { thrown, sentCount: sent.length };
   };
 
   it('404s the action when the owning page is DISABLED (Feature C, Codex #6)', async () => {
     // A disabled page rejects POSTs too, not only its GET. The runtime maps the
     // yielded NotFoundError to a 404 (React Router's `data('Not Found', { status:
     // 404 })`, a `DataWithResponseInit`), and the body never ran.
-    const { thrown, notifyRan } = await runDisabledPagePost({
+    const { thrown, sentCount } = await runDisabledPagePost({
       method: 'email',
       name: 'Ada',
       email: 'ada@example.com',
@@ -369,31 +414,27 @@ describe('formAction', () => {
     });
     const status = (thrown as { init?: { status?: number } })?.init?.status;
     expect(status).toBe(404);
-    expect(notifyRan).toBe(false);
+    expect(sentCount).toBe(0);
   });
 
   it('404s a HONEYPOT-filled POST to a disabled page (gate runs before honeypot)', async () => {
     // The route-level gate runs BEFORE form-data parse + honeypot handling, so a
     // honeypot-filled POST to a disabled page 404s too — it must NOT short-circuit
     // to a 200-ish honeypot "success" that masks the disabled page (Codex #6).
-    const { thrown, notifyRan } = await runDisabledPagePost({
+    const { thrown, sentCount } = await runDisabledPagePost({
       name: 'Ada',
       website: 'https://spam.example', // honeypot
     });
     const status = (thrown as { init?: { status?: number } })?.init?.status;
     expect(status).toBe(404);
-    expect(notifyRan).toBe(false);
+    expect(sentCount).toBe(0);
   });
 
   it('skips the body (no notify) when the honeypot is filled', async () => {
-    let notifyRan = false;
+    const sent: SentMail[] = [];
     const action = formAction({
       form: 'contact',
       page: 'contact',
-      notify: () =>
-        Effect.sync(() => {
-          notifyRan = true;
-        }),
       success: {
         title: 'contact.form.success.title',
         description: 'contact.form.success.description',
@@ -401,10 +442,13 @@ describe('formAction', () => {
     });
 
     const result = await action(
-      makeFormArgs({ name: 'Ada', website: 'https://spam.example' }),
+      await makeFormArgs(
+        { name: 'Ada', website: 'https://spam.example' },
+        capturingMailer(sent),
+      ),
     );
 
-    expect(notifyRan).toBe(false);
+    expect(sent).toHaveLength(0);
     expect(result.status).toBe('success');
   });
 });

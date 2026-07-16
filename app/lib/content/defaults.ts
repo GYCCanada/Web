@@ -3,7 +3,6 @@ import { Schema } from "effect";
 import { root } from "../localization/translations";
 import {
   disabledAccommodationsSection,
-  disabledFaqCopySection,
   disabledMealsSection,
   disabledParkingSection,
   disabledRegistrationCopySection,

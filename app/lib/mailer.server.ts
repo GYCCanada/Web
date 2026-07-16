@@ -7,7 +7,9 @@ import { Env } from './env.server';
 
 export class MailError extends Schema.TaggedErrorClass<MailError>()(
   'Mailer.Error',
-  { cause: Schema.optional(Schema.Defect) },
+  {
+    cause: Schema.optional(Schema.Defect()),
+  },
 ) {}
 
 /**
@@ -25,6 +27,7 @@ export class Service extends Context.Service<
     readonly send: (input: {
       readonly subject: string;
       readonly content: string;
+      readonly idempotencyKey?: string;
     }) => Effect.Effect<void, MailError>;
   }
 >()('gycc/lib/mailer.server/Service') {}
@@ -52,10 +55,17 @@ export const layer = Layer.effect(
         user: mail.user,
         pass: Redacted.value(mail.pass),
       },
+      connectionTimeout: 30_000,
+      greetingTimeout: 30_000,
+      socketTimeout: 120_000,
     });
 
     const send = Effect.fn('Mailer.send')(
-      (input: { readonly subject: string; readonly content: string }) =>
+      (input: {
+        readonly subject: string;
+        readonly content: string;
+        readonly idempotencyKey?: string;
+      }) =>
         Effect.tryPromise({
           try: () =>
             transporter.sendMail({
@@ -63,6 +73,10 @@ export const layer = Layer.effect(
               to: mail.to,
               subject: input.subject,
               text: input.content,
+              messageId:
+                input.idempotencyKey === undefined
+                  ? undefined
+                  : `<${input.idempotencyKey.replace(/[^A-Za-z0-9_-]/g, '-')}@gyccanada.org>`,
             }),
           catch: (cause) => new MailError({ cause }),
         }).pipe(Effect.asVoid),

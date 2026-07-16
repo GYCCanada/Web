@@ -1,11 +1,22 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { Effect } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
 import { BadRequestError, formValidationError, redirect } from './errors';
 import { routeFormAction, SubmissionContext, type FormSuccess } from './form';
 import { HONEYPOT_FIELD } from '../honeypot';
-import { makeRequestRuntime } from './runtime';
+import {
+  makeRequestRuntimeFromLayer,
+  type RequestRuntime,
+} from './runtime';
+import { makeTestAppLayer } from './runtime.test-helper';
 import type { RouteArgs } from './router-context';
+import { layerTest } from '../storage.test-helper';
+
+const runtimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+});
 
 /**
  * Build {@link RouteArgs} whose request carries `fields` as a form POST, with the
@@ -21,7 +32,8 @@ const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
   });
   const context = new RouterContextProvider();
-  context.runtime = makeRequestRuntime();
+  context.runtime = makeRequestRuntimeFromLayer(makeTestAppLayer(layerTest({})));
+  runtimes.push(context.runtime);
   return {
     request,
     url: new URL(url),
@@ -63,6 +75,45 @@ describe('routeFormAction', () => {
     expect(result.result.error?.fieldErrors['email']).toEqual([
       'volunteer.form.email.invalid',
     ]);
+  });
+
+  it('preserves requested attempt fields across validation revalidation', async () => {
+    const action = routeFormAction(
+      function* () {
+        yield* formValidationError({ formErrors: ['contact.form.error'] });
+        return { reset: false } satisfies FormSuccess;
+      },
+      { preserveFields: ['attempt'] },
+    );
+
+    const result = await action(
+      makeFormArgs({ attempt: 'same-command', ignored: 'drop-me' }),
+    );
+
+    expect(result.command).toEqual({
+      disposition: 'preserve',
+      preserved: { attempt: 'same-command' },
+    });
+  });
+
+  it('carries an explicit refresh disposition without discarding submitted fields', async () => {
+    const action = routeFormAction(
+      function* () {
+        yield* formValidationError(
+          { formErrors: ['contact.form.error'] },
+          'refreshDefinition',
+        );
+        return { reset: false } satisfies FormSuccess;
+      },
+      { preserveFields: ['attempt'] },
+    );
+
+    const result = await action(makeFormArgs({ attempt: 'stale-command' }));
+
+    expect(result.command).toEqual({
+      disposition: 'refreshDefinition',
+      preserved: { attempt: 'stale-command' },
+    });
   });
 
   it('propagates a RedirectError as a redirect Response (C1 mapping)', async () => {
@@ -120,6 +171,7 @@ describe('routeFormAction', () => {
   it('runs the body when the honeypot field is empty', async () => {
     let bodyRan = false;
     const action = routeFormAction(function* () {
+      yield* Effect.void;
       bodyRan = true;
       return { reset: true } satisfies FormSuccess;
     });

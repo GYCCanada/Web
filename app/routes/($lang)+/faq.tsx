@@ -1,10 +1,9 @@
 import { type MetaFunction, useLoaderData } from 'react-router';
 
-import { getEnabledPageOr404 } from '~/lib/content/page-guard.server';
+import { readPageView } from '~/lib/content/pages/pages.server';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeHandler } from '~/lib/effect/route';
 import { getLocale } from '~/lib/localization/localization';
-import { toFaqView } from '~/lib/content/pages/project';
 import { Main } from '~/ui/main';
 import { RichText } from '~/ui/rich-text';
 
@@ -25,8 +24,7 @@ export const meta: MetaFunction = ({ params }) => {
 export const loader = routeHandler(function* () {
   const { params } = yield* ReactRouterContext;
   const locale = getLocale(params);
-  // 404 when the page is disabled (Feature C); else project the decoded page.
-  return { page: toFaqView(yield* getEnabledPageOr404('faq'), locale) };
+  return { page: yield* readPageView('faq', locale) };
 });
 
 export default function FaqPage() {

@@ -1,6 +1,6 @@
 # Structural form-builder with equivalence-harness migration
 
-**Status:** accepted
+**Status:** partially superseded by ADR 0010
 
 ## Context
 
@@ -27,11 +27,15 @@ kept in the tree as an oracle while a test feeds a payload corpus (valid + every
 variant) through both old and new and asserts identical decoded output *and* identical
 emitted `TranslationKey` sets. The oracle is removed once registration is fully migrated.
 
-Submissions persist as bucket objects (`submissions/<form>/<id>.json`) + email
-notification, seeding a possible future first-party registrar. For 2026 the **live
+ADR 0010 supersedes the original bucket-Submission decision: Submissions now persist as
+transactional relational aggregates tied to immutable Form versions, with email as an
+idempotent post-commit notification. For 2026 the **live
 registration channel is RegFox** (the Conference's `registrationUrl`); the on-site form is
 built and proven but not load-bearing for the launch, so a mid-flight builder cannot block
 Friday.
+
+ADR 0010 supersedes the persistence decision in the preceding paragraph. The structural
+form-builder decision and its equivalence-harness migration remain accepted.
 
 ## Consequences
 

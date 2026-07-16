@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
@@ -6,7 +6,11 @@ import { Auth } from '~/lib/auth.server';
 import { SITE_CONTENT_KEY } from '~/lib/content.server';
 import { defaultContent } from '~/lib/content/defaults';
 import { SiteContent } from '~/lib/content/schema';
-import { makeAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
+import {
+  makeRequestRuntimeFromLayer,
+  type RequestRuntime,
+} from '~/lib/effect/runtime';
+import { makeTestAppLayer } from '~/lib/effect/runtime.test-helper';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { Storage } from '~/lib/storage.server';
 import { layerTest } from '~/lib/storage.test-helper';
@@ -30,6 +34,10 @@ import { action } from './content';
 
 const PASSWORD = 'correct-horse';
 const SECRET = 'a-signing-secret-of-sufficient-length';
+const runtimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+});
 
 const adminConfig = ConfigProvider.layer(
   ConfigProvider.fromEnv({
@@ -46,7 +54,7 @@ const seedSite = (): Promise<string> =>
 /** Build the app layer (in-memory storage seeded with `site.json`) + admin config. */
 const makeLayer = (seed: string) =>
   Layer.provide(
-    makeAppLayer(layerTest({ [SITE_CONTENT_KEY]: { body: seed } })),
+    makeTestAppLayer(layerTest({ [SITE_CONTENT_KEY]: { body: seed } })),
     adminConfig,
   );
 
@@ -54,6 +62,7 @@ const makeContext = (seed: string) => {
   const layer = makeLayer(seed);
   const context = new RouterContextProvider();
   context.runtime = makeRequestRuntimeFromLayer(layer);
+  runtimes.push(context.runtime);
   return { layer, context };
 };
 

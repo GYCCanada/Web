@@ -1,13 +1,13 @@
-import { Cause, Clock, Effect, Option, Schema } from 'effect';
+import { Effect, Option, Schema } from 'effect';
 import {
   Form,
-  redirect,
   useActionData,
   useLoaderData,
   useNavigation,
 } from 'react-router';
 
-import { adminMeta, adminRedirectWithStatus, adminFlashStatus, adminSecurityHeaders } from '~/lib/admin-headers';
+import { requireAdminRequest } from '~/lib/admin-auth.server';
+import { adminMeta, adminFlashStatus, adminSecurityHeaders } from '~/lib/admin-headers';
 import {
   AddItemButton,
   Bilingual,
@@ -18,25 +18,20 @@ import {
   Section,
   Text,
 } from './controls';
-import { Auth } from '~/lib/auth.server';
 import { Env } from '~/lib/env.server';
 import {
   DraftEditor,
   siteScope,
-  type IssueError,
 } from '~/lib/content/draft-editor.server';
 import {
   assembleOverrides,
   collectTranslations,
   deepMerge,
-  imageUploadTarget,
-  isAcceptedImageType,
   translationFieldName,
-  uploadedImageKey,
   type Json,
 } from '~/lib/content/admin-form';
-import { prepareImage } from '~/lib/content/image-optimize.server';
-import { collectListOps, fieldName } from '~/lib/content/list-edit';
+import { handleAdminEditRequest } from '~/lib/content/admin-edit-request.server';
+import { fieldName } from '~/lib/content/list-edit';
 import {
   DraftSiteContent,
   ListItemId,
@@ -44,7 +39,6 @@ import {
 } from '~/lib/content/schema';
 import { ReactRouterContext } from '~/lib/effect/router-context';
 import { routeAction, routeHandler } from '~/lib/effect/route';
-import { Storage } from '~/lib/storage.server';
 
 export const meta = adminMeta;
 
@@ -81,25 +75,9 @@ const encodeDocument = Schema.encodeUnknownEffect(DraftSiteContent);
 
 type EncodedDocument = typeof DraftSiteContent.Encoded;
 
-/** Map a `DraftEditor` `IssueError` to the editor's JSON action response. */
-const issueResponse = (error: IssueError): Response =>
-  Response.json(
-    { ok: false, error: error.message, issues: error.issues },
-    { status: error.status },
-  );
-
 export const loader = routeHandler(function* () {
+  yield* requireAdminRequest();
   const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth.Service;
-  // 404 the whole area when disabled; the layout guard already redirected an
-  // unauthenticated visitor, but re-checking keeps this route safe on its own.
-  yield* auth.checkCookie(request.headers.get('cookie')).pipe(
-    Effect.catchTags({
-      'Auth.Disabled': () =>
-        Effect.fail(new Response('Not Found', { status: 404 })),
-      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
-    }),
-  );
 
   const editor = yield* DraftEditor.Service;
   const env = yield* Env.Service;
@@ -116,132 +94,19 @@ export const loader = routeHandler(function* () {
 });
 
 export const action = routeAction(function* () {
+  yield* requireAdminRequest();
   const { request } = yield* ReactRouterContext;
-  const auth = yield* Auth.Service;
-  yield* auth.checkCookie(request.headers.get('cookie')).pipe(
-    Effect.catchTags({
-      'Auth.Disabled': () =>
-        Effect.fail(new Response('Not Found', { status: 404 })),
-      'Auth.Unauthorized': () => Effect.fail(redirect('/admin/login')),
-    }),
-  );
 
-  const editor = yield* DraftEditor.Service;
-  const storage = yield* Storage.Service;
   const form = yield* Effect.promise(() => request.formData());
-  const intent = String(form.get('intent') ?? 'save-draft');
-
-  // ---- image upload --------------------------------------------------------
-  // The route owns the FormData side: validate the file, optimize it at the
-  // shared `prepareImage` boundary, and store the prepared bytes;
-  // `DraftEditor.applyImageUpload` then rewrites the targeted `…key` field on the
-  // draft so the new image survives a reload and a later publish.
-  const uploadTarget = imageUploadTarget(intent);
-  if (uploadTarget !== null) {
-    const file = form.get('file');
-    if (!(file instanceof File) || file.size === 0) {
-      return Response.json(
-        { ok: false, error: 'Choose an image before uploading.', issues: [] },
-        { status: 400 },
-      );
-    }
-    if (!isAcceptedImageType(file.type)) {
-      return Response.json(
-        {
-          ok: false,
-          error: 'Upload a JPEG, PNG, WebP, GIF, or AVIF image.',
-          issues: [],
-        },
-        { status: 400 },
-      );
-    }
-
-    // Shrink + re-encode at the ONE shared boundary (Feature B): WebP for the
-    // decodable raster types, GIF/originals passed through. The key + `storage.put`
-    // follow `prepared.contentType` — never `file.type` — or the served object's
-    // extension/type would lie.
-    const bytes = new Uint8Array(yield* Effect.promise(() => file.arrayBuffer()));
-    const prepared = yield* prepareImage(bytes, file.type);
-    const now = yield* Clock.currentTimeMillis;
-    const key = uploadedImageKey(uploadTarget, prepared.contentType, now);
-
-    const putExit = yield* Effect.exit(
-      storage.put(key, prepared.bytes, prepared.contentType),
-    );
-    if (putExit._tag === 'Failure') {
-      return Response.json(
-        {
-          ok: false,
-          error:
-            'Image upload failed — is the bucket configured? ' +
-            Cause.pretty(putExit.cause),
-          issues: [],
-        },
-        { status: 502 },
-      );
-    }
-
-    const applied = yield* editor
-      .applyImageUpload(siteScope, uploadTarget, key)
-      .pipe(Effect.result);
-    if (applied._tag === 'Failure') return issueResponse(applied.failure);
-    return adminRedirectWithStatus('/admin/content', `Image uploaded: ${key}`);
-  }
-
-  // ---- list op (add / remove / reorder) ------------------------------------
-  // A per-list Add / Remove / reorder control submits `list:<path>:<kind>` fields
-  // (ADR 0006). The route parses them into `ListOp`s; `DraftEditor.applyListOps`
-  // performs the id-keyed structural edit on the draft and auto-saves it (settled
-  // #10) so a freshly-added item's id exists server-side before a photo upload /
-  // field edit targets it. An "Add" appends an item carrying only its id — draft-
-  // valid, publish-invalid until its bilingual fields are filled (ADR 0006).
-  if (intent === 'list-op') {
-    const ops = collectListOps(form.entries());
-    if (ops.length === 0) {
-      return Response.json(
-        { ok: false, error: 'No list change to apply.', issues: [] },
-        { status: 400 },
-      );
-    }
-    const applied = yield* editor.applyListOps(siteScope, ops).pipe(Effect.result);
-    if (applied._tag === 'Failure') return issueResponse(applied.failure);
-    return Response.json({ ok: true as const });
-  }
-
-  if (intent !== 'save-draft' && intent !== 'publish') {
-    return Response.json(
-      { ok: false, error: 'Unknown submit intent.', issues: [] },
-      { status: 400 },
-    );
-  }
-
-  // ---- save / publish ------------------------------------------------------
-  // Parse the form into ONE override: dotted-path fields via `assembleOverrides`,
-  // plus the `t:<locale>:<key>` translation fields folded onto `translations`
-  // (their keys carry dots, so they can't ride the dotted-path convention).
-  // `DraftEditor.editDocument` merges it onto the current document, decodes at
-  // the single boundary, and stores the draft.
-  const override = deepMerge(assembleOverrides(form.entries()), {
-    translations: collectTranslations(form.entries()),
-  } as Json);
-
-  const edited = yield* editor
-    .editDocument(siteScope, override)
-    .pipe(Effect.result);
-  if (edited._tag === 'Failure') return issueResponse(edited.failure);
-
-  if (intent === 'save-draft') {
-    return adminRedirectWithStatus('/admin/content', 'Draft saved.');
-  }
-
-  // publish: promote the just-saved draft to the live document, drop the draft,
-  // and bust the read cache so the change is live on the next public read.
-  const published = yield* editor.publish(siteScope).pipe(Effect.result);
-  if (published._tag === 'Failure') return issueResponse(published.failure);
-  return adminRedirectWithStatus(
-    '/admin/content',
-    'Published. Live on the next page load.',
-  );
+  return yield* handleAdminEditRequest({
+    scope: siteScope,
+    form,
+    redirectTo: '/admin/content',
+    buildOverride: (submitted) =>
+      deepMerge(assembleOverrides(submitted.entries()), {
+        translations: collectTranslations(submitted.entries()),
+      } as Json),
+  });
 });
 
 // ---------------------------------------------------------------------------
