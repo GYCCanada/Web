@@ -42,6 +42,7 @@ jobs:
         run: bun test
 
   docker:
+    needs: build
     timeout-minutes: 20
 
     runs-on: ubuntu-latest
