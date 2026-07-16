@@ -101,8 +101,24 @@ const normalizeSubmissionAggregate = Effect.gen(function* () {
   `;
 });
 
+const notificationDeliveries = Effect.gen(function* () {
+  const sql = yield* SqlClient;
+  yield* sql`
+    CREATE TABLE notification_deliveries (
+      delivery_key text PRIMARY KEY,
+      status text NOT NULL CHECK (status IN ('failed', 'delivering', 'delivered')),
+      attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+      lease_until timestamptz,
+      delivered_at timestamptz,
+      last_error text,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `;
+});
+
 export const loader = Migrator.fromRecord({
   '0001_form_records': formRecords,
   '0002_submission_tokens': submissionTokens,
   '0003_normalize_submission_aggregate': normalizeSubmissionAggregate,
+  '0004_notification_deliveries': notificationDeliveries,
 });

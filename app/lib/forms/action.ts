@@ -12,6 +12,7 @@ import { formatValidationIssues } from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
 import type { TranslationKey } from '../localization/translations';
 import { Mailer } from '../mailer.server';
+import { NotificationDelivery } from '../notification-delivery.server';
 import { Toast } from '../toast.server';
 
 import { Forms } from './forms.server';
@@ -30,8 +31,9 @@ export interface SuccessToast {
 }
 
 /**
- * `notify` receives the committed relational Submission. A notification failure
- * cannot roll back the record and a retry reuses the explicit attempt token.
+ * `notify` receives the committed relational Submission through the durable
+ * delivery ledger. A failed delivery may retry; a delivered batch never sends
+ * again when its submission command is replayed.
  */
 export interface FormActionConfig<E> {
   readonly form: FormId;
@@ -73,6 +75,7 @@ export const formAction = <E>(config: FormActionConfig<E>) =>
       const submission = yield* SubmissionContext;
       const forms = yield* Forms.Service;
       const toast = yield* Toast;
+      const deliveries = yield* NotificationDelivery.Service;
 
       const {
         [FORM_VERSION_FIELD]: rawVersion,
@@ -127,7 +130,17 @@ export const formAction = <E>(config: FormActionConfig<E>) =>
           }),
         );
 
-      yield* config.notify(stored.submissions[0]);
+      const delivery = yield* deliveries.deliver(
+        NotificationDelivery.DeliveryKey.make(
+          `form:${stored.id}:admin-email`,
+        ),
+        config.notify(stored.submissions[0]),
+      );
+      if (delivery._tag === 'InProgress') {
+        return yield* formValidationError({
+          formErrors: [`${config.form}.form.error`],
+        });
+      }
 
       yield* toast.redirect(url.pathname, {
         title: config.success.title,

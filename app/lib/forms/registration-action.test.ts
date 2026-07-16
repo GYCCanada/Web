@@ -195,7 +195,7 @@ describe('registrationAction', () => {
     expect(notifications).toBe(1);
   });
 
-  it('an exact retry with the same explicit token returns the same record ids', async () => {
+  it('an exact retry returns the same records without redelivering notification', async () => {
     const { runtime, command } = await makeRegistrationHarness();
     const notifiedIds: string[][] = [];
     const action = registrationAction({
@@ -215,8 +215,7 @@ describe('registrationAction', () => {
       expect((thrown as Response).status).toBe(302);
     }
 
-    expect(notifiedIds).toHaveLength(2);
-    expect(notifiedIds[1]).toEqual(notifiedIds[0]);
+    expect(notifiedIds).toHaveLength(1);
   });
 
   it('a notify failure leaves the committed group available to an exact retry', async () => {

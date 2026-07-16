@@ -14,6 +14,7 @@ import {
 } from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
 import { Mailer } from '../mailer.server';
+import { NotificationDelivery } from '../notification-delivery.server';
 import { Toast } from '../toast.server';
 
 import type { SuccessToast } from './action';
@@ -27,9 +28,9 @@ import {
 
 /**
  * Configure the registration action. `notify` runs the registration-specific
- * notification over committed registrant records and fails (with any `AppError`, e.g. a
- * mailer failure mapped to a form-level key) to abort the redirect; `success` is
- * the post-submit toast copy.
+ * notification over committed registrant records through the durable delivery
+ * ledger and fails (with any `AppError`, e.g. a mailer failure mapped to a
+ * form-level key) to abort the redirect; `success` is the post-submit toast copy.
  */
 export interface RegistrationActionConfig<E> {
   readonly notify: (
@@ -55,6 +56,7 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
     const submission = yield* SubmissionContext;
     const forms = yield* Forms.Service;
     const toast = yield* Toast;
+    const deliveries = yield* NotificationDelivery.Service;
 
     const commandSchema = Schema.Struct({
       [FORM_VERSION_FIELD]: Forms.FormDefinitionVersionId,
@@ -106,7 +108,17 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
         }),
       );
 
-    yield* config.notify(stored.submissions);
+    const delivery = yield* deliveries.deliver(
+      NotificationDelivery.DeliveryKey.make(
+        `form:${stored.id}:admin-email`,
+      ),
+      config.notify(stored.submissions),
+    );
+    if (delivery._tag === 'InProgress') {
+      return yield* formValidationError({
+        formErrors: ['registration.form.error'],
+      });
+    }
 
     yield* toast.redirect(url.pathname, {
       title: config.success.title,

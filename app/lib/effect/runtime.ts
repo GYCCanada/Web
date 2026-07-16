@@ -9,6 +9,7 @@ import { Env } from '~/lib/env.server';
 import { Forms } from '~/lib/forms/forms.server';
 import { Sendgrid, SendgridDisabled, SendgridError } from '~/lib/sendgrid.server';
 import { Mailer, MailError } from '~/lib/mailer.server';
+import { NotificationDelivery } from '~/lib/notification-delivery.server';
 import { NotFound, Storage, StorageError } from '~/lib/storage.server';
 import { Toast } from '~/lib/toast.server';
 
@@ -28,6 +29,7 @@ export type AppServices =
   | Content.Service
   | DraftEditor.Service
   | Forms.Service
+  | NotificationDelivery.Service
   | Auth.Service
   | Storage.Service
   | Toast;
@@ -59,8 +61,11 @@ export const makeAppLayer = (
     Content.layer,
     Auth.layer,
   ).pipe(Layer.provideMerge(storageLayer));
-  const formsLayer = Forms.layer.pipe(Layer.provideMerge(databaseLayer));
-  return Layer.mergeAll(DraftEditor.layer, formsLayer).pipe(
+  const relationalLayer = Layer.mergeAll(
+    Forms.layer,
+    NotificationDelivery.layer,
+  ).pipe(Layer.provideMerge(databaseLayer));
+  return Layer.mergeAll(DraftEditor.layer, relationalLayer).pipe(
     Layer.provideMerge(baseLayer),
     Layer.provideMerge(Env.layer),
   );
