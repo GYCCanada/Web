@@ -30,6 +30,13 @@ The environment file must satisfy [`.env.example`](../.env.example). Production 
 SendGrid, and `/admin` remain optional and are enabled only by their complete configuration
 sets.
 
+Before moving the CMS channel to `open`, the same environment file must also contain a
+public HTTPS `PUBLIC_ORIGIN`, `STRIPE_API_KEY`, and `STRIPE_WEBHOOK_SECRET`. Configure the
+Stripe endpoint as `POST <PUBLIC_ORIGIN>/api/stripe-webhook`, subscribe it to Checkout,
+asynchronous-payment, expiry, and refund events, and verify a signed test delivery. Startup
+without those values is allowed so `external` remains the safe default; the CMS readiness
+check refuses `open` or `reopen` until Stripe and the durable Order runner are available.
+
 Authenticate the host to GHCR using a read-only package token, then pull both digests:
 
 ```sh
@@ -128,7 +135,8 @@ For a registrar-capable release, leave the CMS channel in `external` or move it 
 Verify an administrator can preview the pinned Form definition and adaptive price while
 anonymous requests cannot create a Submission, Checkout Session, or Order. Move the channel
 to `open` only for the scheduled launch after Stripe webhook configuration and durable Order
-processing have been verified against the candidate endpoint.
+processing have been verified against the candidate endpoint. Confirm container logs show
+the process-scoped Order runner and the periodic expiry worker without repeated failures.
 
 ## Cut over
 
