@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it } from 'bun:test';
 import { Effect, ManagedRuntime } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
@@ -27,6 +27,7 @@ const makeArgs = (url = 'http://localhost/test'): RouteArgs => ({
 
 const testLayer = makeTestAppLayer(layerTest({}));
 const runtime = makeRequestRuntimeFromLayer(testLayer);
+afterAll(() => runtime.dispose());
 
 /**
  * `runtime.run` rethrows the mapped error. Capture whatever it throws so the
@@ -59,6 +60,7 @@ describe('runtime tagged-error mapping', () => {
         yield* (yield* Database.Service).ready;
       }),
     );
+    await managed.dispose();
   });
 
   it('maps RedirectError to a redirect Response carrying init headers', async () => {

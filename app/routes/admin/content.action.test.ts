@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
@@ -6,7 +6,11 @@ import { Auth } from '~/lib/auth.server';
 import { SITE_CONTENT_KEY } from '~/lib/content.server';
 import { defaultContent } from '~/lib/content/defaults';
 import { SiteContent } from '~/lib/content/schema';
-import { makeTestAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
+import {
+  makeTestAppLayer,
+  makeRequestRuntimeFromLayer,
+  type RequestRuntime,
+} from '~/lib/effect/runtime';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { Storage } from '~/lib/storage.server';
 import { layerTest } from '~/lib/storage.test-helper';
@@ -30,6 +34,10 @@ import { action } from './content';
 
 const PASSWORD = 'correct-horse';
 const SECRET = 'a-signing-secret-of-sufficient-length';
+const runtimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+});
 
 const adminConfig = ConfigProvider.layer(
   ConfigProvider.fromEnv({
@@ -54,6 +62,7 @@ const makeContext = (seed: string) => {
   const layer = makeLayer(seed);
   const context = new RouterContextProvider();
   context.runtime = makeRequestRuntimeFromLayer(layer);
+  runtimes.push(context.runtime);
   return { layer, context };
 };
 

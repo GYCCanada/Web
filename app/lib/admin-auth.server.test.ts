@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { ConfigProvider, Effect, Layer, ManagedRuntime } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
-import { makeRequestRuntimeFromLayer, makeTestAppLayer } from './effect/runtime';
+import {
+  makeRequestRuntimeFromLayer,
+  makeTestAppLayer,
+  type RequestRuntime,
+} from './effect/runtime';
 import type { RouteArgs } from './effect/router-context';
 import { Auth } from './auth.server';
 import { requireAdminRequest } from './admin-auth.server';
@@ -10,6 +14,10 @@ import { layerTest } from './storage.test-helper';
 
 const PASSWORD = 'correct-horse';
 const SECRET = 'a-signing-secret-of-sufficient-length';
+const runtimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+});
 
 const makeLayer = (env: Record<string, string>) =>
   Layer.provide(
@@ -24,6 +32,7 @@ const makeArgs = (
   const url = 'http://localhost/admin';
   const context = new RouterContextProvider();
   context.runtime = makeRequestRuntimeFromLayer(layer);
+  runtimes.push(context.runtime);
   return {
     request: new Request(url, {
       headers: cookie === undefined ? undefined : { cookie },

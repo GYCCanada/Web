@@ -1,15 +1,24 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { Effect, Schema } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
 import { defaultHomePage } from '~/lib/content/pages/defaults';
 import { pageObjectKey } from '~/lib/content/pages/registry';
 import { HomePage } from '~/lib/content/pages/schema';
-import { makeTestAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
+import {
+  makeTestAppLayer,
+  makeRequestRuntimeFromLayer,
+  type RequestRuntime,
+} from '~/lib/effect/runtime';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { layerTest } from '~/lib/storage.test-helper';
 
 import { action } from './_index';
+
+const runtimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+});
 
 /**
  * The home route owns the newsletter POST action. Feature C / Codex #6 require a
@@ -30,6 +39,7 @@ const seedDisabledHome = async (): Promise<RouteArgs['context']> => {
   context.runtime = makeRequestRuntimeFromLayer(
     makeTestAppLayer(layerTest({ [pageObjectKey('home')]: { body: json } })),
   );
+  runtimes.push(context.runtime);
   return context;
 };
 

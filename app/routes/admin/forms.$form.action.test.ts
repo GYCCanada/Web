@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { ConfigProvider, Effect, Layer, ManagedRuntime } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
@@ -6,6 +6,7 @@ import { Auth } from '~/lib/auth.server';
 import {
   makeRequestRuntimeFromLayer,
   makeTestAppLayer,
+  type RequestRuntime,
 } from '~/lib/effect/runtime';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { Forms } from '~/lib/forms/forms.server';
@@ -15,6 +16,11 @@ import { action, loader } from './forms.$form';
 
 const PASSWORD = 'correct-horse';
 const SECRET = 'a-signing-secret-of-sufficient-length';
+const runtimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+});
+
 const adminConfig = ConfigProvider.layer(
   ConfigProvider.fromEnv({
     env: { ADMIN_PASSWORD: PASSWORD, COOKIE_SECRET: SECRET },
@@ -37,6 +43,7 @@ const makeHarness = async () => {
 
   const context = new RouterContextProvider();
   context.runtime = makeRequestRuntimeFromLayer(layer);
+  runtimes.push(context.runtime);
   return { context, cookie };
 };
 

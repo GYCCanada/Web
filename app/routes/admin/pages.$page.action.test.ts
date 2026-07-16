@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { ConfigProvider, Effect, Layer, ManagedRuntime } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
@@ -10,7 +10,11 @@ import { getEnabledPageOr404 } from '~/lib/content/page-guard.server';
 import { pageDraftKey } from '~/lib/content/pages/registry';
 import { pageObjectKey } from '~/lib/content/pages/registry';
 import { DraftTeamPage } from '~/lib/content/pages/schema';
-import { makeTestAppLayer, makeRequestRuntimeFromLayer } from '~/lib/effect/runtime';
+import {
+  makeTestAppLayer,
+  makeRequestRuntimeFromLayer,
+  type RequestRuntime,
+} from '~/lib/effect/runtime';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { NotFoundError } from '~/lib/effect/errors';
 import { Storage } from '~/lib/storage.server';
@@ -34,6 +38,10 @@ import { action } from './pages.$page';
 
 const PASSWORD = 'correct-horse';
 const SECRET = 'a-signing-secret-of-sufficient-length';
+const runtimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+});
 
 /** The admin-enabled config provider injected over the app layer. */
 const adminConfig = ConfigProvider.layer(
@@ -51,6 +59,7 @@ const makeContext = (objects: Parameters<typeof layerTest>[0] = {}) => {
   const layer = makeLayer(objects);
   const context = new RouterContextProvider();
   context.runtime = makeRequestRuntimeFromLayer(layer);
+  runtimes.push(context.runtime);
   return { layer, context };
 };
 

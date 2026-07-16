@@ -1,13 +1,22 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { Effect } from 'effect';
 import { RouterContextProvider } from 'react-router';
 
 import { BadRequestError, formValidationError, redirect } from './errors';
 import { routeFormAction, SubmissionContext, type FormSuccess } from './form';
 import { HONEYPOT_FIELD } from '../honeypot';
-import { makeRequestRuntimeFromLayer, makeTestAppLayer } from './runtime';
+import {
+  makeRequestRuntimeFromLayer,
+  makeTestAppLayer,
+  type RequestRuntime,
+} from './runtime';
 import type { RouteArgs } from './router-context';
 import { layerTest } from '../storage.test-helper';
+
+const runtimes: RequestRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+});
 
 /**
  * Build {@link RouteArgs} whose request carries `fields` as a form POST, with the
@@ -24,6 +33,7 @@ const makeFormArgs = (fields: Record<string, string>): RouteArgs => {
   });
   const context = new RouterContextProvider();
   context.runtime = makeRequestRuntimeFromLayer(makeTestAppLayer(layerTest({})));
+  runtimes.push(context.runtime);
   return {
     request,
     url: new URL(url),
