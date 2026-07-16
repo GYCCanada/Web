@@ -8,6 +8,7 @@ import {
   routeFormAction,
   SubmissionContext,
 } from '../effect/form';
+import { formatValidationIssues } from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
 import type { TranslationKey } from '../localization/translations';
 import { Mailer } from '../mailer.server';
@@ -103,10 +104,9 @@ export const formAction = <E>(config: FormActionConfig<E>) =>
         .pipe(
           Effect.catchTag('Forms.SubmissionRejected', (error) => {
             const issue = error.issues[0];
-            return formValidationError({
-              formErrors: issue?.formErrors,
-              fieldErrors: issue?.fieldErrors,
-            });
+            return formValidationError(
+              formatValidationIssues(issue?.issues ?? []),
+            );
           }),
           Effect.catchTags({
             'Forms.DefinitionAdvanced': () =>

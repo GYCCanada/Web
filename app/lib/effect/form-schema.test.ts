@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { Schema } from 'effect';
 
-import { formatSchemaResult, parseSchema } from './form-schema';
+import {
+  formatSchemaResult,
+  formatValidationIssues,
+  parseSchema,
+} from './form-schema';
 
 describe('formatSchemaResult', () => {
   it('returns null when the payload decodes successfully', () => {
@@ -59,5 +63,18 @@ describe('formatSchemaResult', () => {
     const formatted = formatSchemaResult(result);
     expect(formatted?.formErrors).toEqual(['form.required']);
     expect(formatted?.fieldErrors).toEqual({});
+  });
+
+  it('formats a caller-supplied structured batch path at the web boundary', () => {
+    const formatted = formatValidationIssues([
+      {
+        path: ['registrants', 2, 'email'],
+        message: 'registration.email.required',
+      },
+    ]);
+
+    expect(formatted.fieldErrors?.['registrants[2].email']).toEqual([
+      'registration.email.required',
+    ]);
   });
 });

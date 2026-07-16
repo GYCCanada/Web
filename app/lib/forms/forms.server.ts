@@ -19,7 +19,7 @@ import {
   defaultRegistrationForm,
   defaultVolunteerForm,
 } from '../content/pages/defaults';
-import { formatSchemaResult } from '../effect/form-schema';
+import { ValidationIssue, validationIssues } from '../validation-issue';
 
 import { decodeForm, definitionToSchema } from './decode';
 import { FORM_IDS, FormDefinition, FormId } from './definition';
@@ -125,8 +125,7 @@ export class DefinitionAdvanced extends Schema.TaggedErrorClass<DefinitionAdvanc
 
 export const SubmissionIssue = Schema.Struct({
   index: Schema.Number,
-  formErrors: Schema.Array(Schema.String),
-  fieldErrors: Schema.Record(Schema.String, Schema.Array(Schema.String)),
+  issues: Schema.Array(ValidationIssue),
 });
 export type SubmissionIssue = typeof SubmissionIssue.Type;
 
@@ -491,21 +490,9 @@ export const layer = Layer.effect(
         if (Result.isSuccess(result)) {
           decoded.push(result.success);
         } else {
-          const formatted = formatSchemaResult(result) ?? {
-            formErrors: [],
-            fieldErrors: {},
-          };
           rejected.push({
             index,
-            formErrors: formatted.formErrors ? [...formatted.formErrors] : [],
-            fieldErrors: formatted.fieldErrors
-              ? Object.fromEntries(
-                  Object.entries(formatted.fieldErrors).map(([key, value]) => [
-                    key,
-                    [...value],
-                  ]),
-                )
-              : {},
+            issues: validationIssues(result),
           });
         }
       }

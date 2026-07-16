@@ -7,7 +7,11 @@ import {
   routeFormAction,
   SubmissionContext,
 } from '../effect/form';
-import { formatSchemaResult, parseSchema } from '../effect/form-schema';
+import {
+  formatSchemaResult,
+  formatValidationIssues,
+  parseSchema,
+} from '../effect/form-schema';
 import { ReactRouterContext } from '../effect/router-context';
 import { Mailer } from '../mailer.server';
 import { Toast } from '../toast.server';
@@ -72,16 +76,16 @@ export const registrationAction = <E>(config: RegistrationActionConfig<E>) =>
       })
       .pipe(
         Effect.catchTag('Forms.SubmissionRejected', (error) => {
-          const formErrors = error.issues.flatMap((issue) => issue.formErrors);
-          const fieldErrors = Object.fromEntries(
-            error.issues.flatMap((issue) =>
-              Object.entries(issue.fieldErrors).map(([field, messages]) => [
-                `registrants[${issue.index}].${field}`,
-                messages,
-              ]),
-            ),
+          const issues = error.issues.flatMap((submission) =>
+            submission.issues.map((issue) => ({
+              ...issue,
+              path:
+                issue.path.length === 0
+                  ? issue.path
+                  : ['registrants', submission.index, ...issue.path],
+            })),
           );
-          return formValidationError({ formErrors, fieldErrors });
+          return formValidationError(formatValidationIssues(issues));
         }),
         Effect.catchTags({
           'Forms.DefinitionAdvanced': () =>

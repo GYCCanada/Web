@@ -1,8 +1,11 @@
 import { formatPath } from '@conform-to/dom/future';
-import { Result, Schema, SchemaIssue, SchemaParser } from 'effect';
+import { Result, Schema, SchemaParser } from 'effect';
 import type { Issue } from 'effect/SchemaIssue';
-import type { StandardSchemaV1 } from '@standard-schema/spec';
 
+import {
+  validationIssues,
+  type ValidationIssue,
+} from '../validation-issue';
 import type { FormValidationErrorInput } from './errors';
 
 /**
@@ -16,31 +19,6 @@ import type { FormValidationErrorInput } from './errors';
 export interface FormSchemaError {
   readonly formErrors: string[];
   readonly fieldErrors: Record<string, string[]>;
-}
-
-const formatter = SchemaIssue.makeFormatterStandardSchemaV1();
-
-/**
- * Serialize a Standard Schema issue path into a conform field name. Object path
- * segments (`{ key }`) are unwrapped; numbers stay numeric so {@link formatPath}
- * renders them as `[n]` array indices. Anything that is neither string nor
- * number is dropped — those segments cannot name a form field.
- */
-function issuePathToName(
-  path: ReadonlyArray<PropertyKey | StandardSchemaV1.PathSegment> | undefined,
-): string {
-  if (!path || path.length === 0) return '';
-  const segments: Array<string | number> = [];
-  for (const segment of path) {
-    const value =
-      typeof segment === 'object' && segment !== null && 'key' in segment
-        ? segment.key
-        : segment;
-    if (typeof value === 'string' || typeof value === 'number') {
-      segments.push(value);
-    }
-  }
-  return formatPath(segments);
 }
 
 /**
@@ -66,12 +44,18 @@ export const formatSchemaResult = <A>(
 ): FormValidationErrorInput | null => {
   if (Result.isSuccess(result)) return null;
 
-  const issues = formatter(result.failure).issues;
+  return formatValidationIssues(validationIssues(result));
+};
+
+/** Serialize neutral structured paths only at the Conform web boundary. */
+export const formatValidationIssues = (
+  issues: ReadonlyArray<ValidationIssue>,
+): FormValidationErrorInput => {
   const formErrors: string[] = [];
   const fieldErrors: Record<string, string[]> = {};
 
   for (const issue of issues) {
-    const name = issuePathToName(issue.path);
+    const name = issue.path.length === 0 ? '' : formatPath([...issue.path]);
     if (name === '') {
       formErrors.push(issue.message);
     } else {
