@@ -257,7 +257,7 @@ export const applyCommand = (
   definition: FormDefinition,
   command: Command,
 ): ApplyResult => {
-  let encoded = Schema.encodeSync(FormDefinition)(definition) as unknown as EncodedDefinition;
+  let encoded: EncodedDefinition = Schema.encodeSync(FormDefinition)(definition);
   switch (command._tag) {
     case 'setCopy':
       {
@@ -311,7 +311,7 @@ export const applyCommand = (
     case 'removeVariant':
       {
         const { variant: _variant, ...withoutVariant } = encoded;
-        encoded = withoutVariant as EncodedDefinition;
+        encoded = withoutVariant;
       }
       break;
     case 'setRules':
