@@ -9,6 +9,7 @@ import {
   makeLayer,
   StripeGateway,
   Unavailable,
+  RequestFailed,
 } from './stripe-gateway.server';
 
 const command = {
@@ -89,6 +90,23 @@ describe('StripeGateway', () => {
       expect(error).toBeInstanceOf(Unavailable);
     }).pipe(Effect.provide(makeLayer(Option.none()))),
   );
+
+  it.effect('preserves the provider failure detail after adapter retries are exhausted', () => {
+    const client: Client = {
+      createCheckout: () => Effect.fail(new Error('provider unavailable')),
+      refund: () => Effect.die('unused'),
+      constructEvent: () => Effect.die('unused'),
+    };
+    return Effect.gen(function* () {
+      const gateway = yield* StripeGateway.Service;
+      const error = yield* gateway.createCheckout(command).pipe(Effect.flip);
+      expect(error).toBeInstanceOf(RequestFailed);
+      if (error instanceof RequestFailed) {
+        expect(error.operation).toBe('create Checkout Session');
+        expect(error.detail).toContain('provider unavailable');
+      }
+    }).pipe(Effect.provide(makeLayer(Option.some(client))));
+  });
 
   it.effect('requests a full refund by PaymentIntent with Order metadata', () => {
     const calls: unknown[] = [];

@@ -1,6 +1,6 @@
 export * as OrderActor from './order-actor.server';
 
-import { Clock, Context, Effect, Layer, Result, Schedule, Schema } from 'effect';
+import { Clock, Context, Effect, Layer, Result, Schema } from 'effect';
 import { Actor } from 'effect-encore';
 
 import {
@@ -156,18 +156,13 @@ const processor =
           return yield* Effect.die(checkout.failure);
         }
         const now = yield* Clock.currentTimeMillis;
-        const created = yield* stripe
-          .createCheckout({
-            ...checkout.success,
-            now,
-          })
-          .pipe(
-            Effect.retry({
-              times: 5,
-              schedule: Schedule.exponential('1 second'),
-            }),
-            Effect.result,
-          );
+        const created = yield* stripe.createCheckout({
+          ...checkout.success,
+          now,
+        }).pipe(Effect.result);
+        if (Result.isFailure(created)) {
+          yield* Effect.logError('Stripe Checkout creation failed', created.failure);
+        }
         yield* repository
           .apply(
             Result.isSuccess(created)
@@ -242,28 +237,23 @@ const processor =
             .pipe(Effect.asVoid, Effect.orDie);
           return;
         }
-        const refunded = yield* stripe
-          .refund({
-            orderId,
-            paymentIntentId,
-            idempotencyKey: `registration:refund:${orderId}`,
-          })
-          .pipe(
-            Effect.retry({
-              times: 5,
-              schedule: Schedule.exponential('1 second'),
-            }),
-            Effect.result,
-          );
+        const refunded = yield* stripe.refund({
+          orderId,
+          paymentIntentId,
+          idempotencyKey: `registration:refund:${orderId}`,
+        }).pipe(Effect.result);
 
         if (Result.isFailure(refunded)) {
+          const detail = refunded.failure instanceof StripeGateway.RequestFailed
+            ? `${refunded.failure.operation}: ${refunded.failure.detail}`
+            : 'Stripe is unavailable';
           yield* repository
             .apply({
               orderId,
               event: {
                 _tag: 'RefundFailed',
                 at: completedAt,
-                detail: 'Stripe did not accept the full refund after retries',
+                detail,
               },
             })
             .pipe(Effect.asVoid, Effect.orDie);

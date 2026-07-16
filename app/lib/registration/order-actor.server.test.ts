@@ -90,7 +90,7 @@ describe('Registration Order actor', () => {
     }).pipe(Effect.provide(test.layer));
   });
 
-  it.effect('retries Checkout transport before recording terminal failure', () => {
+  it.effect('records terminal Checkout failure after the Stripe adapter exhausts retries', () => {
     let attempts = 0;
     const client: Client = {
       createCheckout: () => {
@@ -110,7 +110,7 @@ describe('Registration Order actor', () => {
       );
       yield* TestClock.adjust('1 minute');
       yield* Fiber.join(execution);
-      expect(attempts).toBe(6);
+      expect(attempts).toBe(1);
       expect(test.state().status).toBe('failed');
       expect(test.events.map((command) => command.event._tag)).toEqual([
         'CheckoutCreationFailed',
@@ -174,7 +174,7 @@ describe('Registration Order actor', () => {
     }).pipe(Effect.provide(test.layer));
   });
 
-  it.effect('retries refund transport before opening operator review', () => {
+  it.effect('opens operator review after the Stripe adapter exhausts refund retries', () => {
     let attempts = 0;
     const client: Client = {
       createCheckout: () => Effect.die('unused'),
@@ -201,7 +201,7 @@ describe('Registration Order actor', () => {
       }).pipe(Effect.forkChild);
       yield* TestClock.adjust('1 minute');
       yield* Fiber.join(execution);
-      expect(attempts).toBe(6);
+      expect(attempts).toBe(1);
       expect(test.state().status).toBe('refund_failed');
       expect(test.events.map((command) => command.event._tag)).toEqual([
         'RefundRequested',

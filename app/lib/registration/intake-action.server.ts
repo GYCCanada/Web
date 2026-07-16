@@ -1,4 +1,4 @@
-import { DateTime, Effect, Result, Schema } from 'effect';
+import { Clock, DateTime, Effect, Result, Schema } from 'effect';
 import { redirect } from 'react-router';
 
 import { formValidationError } from '../effect/errors';
@@ -34,13 +34,14 @@ export const registrationIntakeAction = routeFormAction(function* () {
     return yield* formValidationError(formatSchemaResult(command) ?? {});
   }
 
+  const now = yield* Clock.currentTimeMillis;
   const result = yield* (yield* RegistrationIntake.Service)
     .submit({
       conference: ConferenceSlug.make('/2026'),
       expectedVersion: command.success[FORM_VERSION_FIELD],
       idempotencyToken: command.success[IDEMPOTENCY_TOKEN_FIELD],
       shell: submission.payload,
-      at: DateTime.makeUnsafe(Date.now()),
+      at: DateTime.makeUnsafe(now),
     })
     .pipe(
       Effect.catchTags({

@@ -5,6 +5,7 @@ import {
   DEFAULT_API_BASE_URL,
   PostCheckoutSessions,
   PostRefunds,
+  Retry,
   Webhooks,
 } from '@distilled.cloud/stripe';
 import { Context, Effect, Layer, Option, Schema } from 'effect';
@@ -58,13 +59,27 @@ export class Unavailable extends Schema.TaggedErrorClass<Unavailable>()(
 
 export class RequestFailed extends Schema.TaggedErrorClass<RequestFailed>()(
   'StripeGateway.RequestFailed',
-  { operation: Schema.String },
+  { operation: Schema.String, detail: Schema.String },
 ) {}
 
 export class InvalidWebhook extends Schema.TaggedErrorClass<InvalidWebhook>()(
   'StripeGateway.InvalidWebhook',
   {},
 ) {}
+
+const failureDetail = (cause: unknown): string => {
+  if (typeof cause !== 'object' || cause === null) return String(cause);
+  const tagged = '_tag' in cause && typeof cause._tag === 'string'
+    ? cause._tag
+    : cause.constructor.name;
+  const message = 'message' in cause && typeof cause.message === 'string'
+    ? cause.message
+    : '';
+  return message === '' ? tagged : `${tagged}: ${message}`;
+};
+
+const requestFailed = (operation: string, cause: unknown): RequestFailed =>
+  new RequestFailed({ operation, detail: failureDetail(cause) });
 
 export interface Client {
   readonly createCheckout: (
@@ -114,6 +129,7 @@ export const makeLayer = (
         if (expiresAt === undefined) {
           return yield* new RequestFailed({
             operation: 'honor Checkout quote deadline',
+            detail: 'Quote expires before Stripe minimum Checkout lifetime',
           });
         }
         const output = yield* client.value
@@ -156,13 +172,14 @@ export const makeLayer = (
             { idempotencyKey: command.idempotencyKey },
           )
           .pipe(
-            Effect.mapError(
-              () => new RequestFailed({ operation: 'create Checkout Session' }),
+            Effect.mapError((cause) =>
+              requestFailed('create Checkout Session', cause),
             ),
           );
         if (output.url === null) {
           return yield* new RequestFailed({
             operation: 'resolve hosted Checkout URL',
+            detail: 'Stripe response did not include a hosted Checkout URL',
           });
         }
         return { sessionId: output.id, url: output.url };
@@ -183,7 +200,10 @@ export const makeLayer = (
               const refund = output as { readonly id?: unknown; readonly status?: unknown };
               if (typeof refund.id !== 'string') {
                 return Effect.fail(
-                  new RequestFailed({ operation: 'decode refund response' }),
+                  new RequestFailed({
+                    operation: 'decode refund response',
+                    detail: 'Stripe response did not include a refund id',
+                  }),
                 );
               }
               return Effect.succeed({
@@ -195,9 +215,7 @@ export const makeLayer = (
               });
             }),
             Effect.flatten,
-            Effect.mapError(
-              () => new RequestFailed({ operation: 'create full refund' }),
-            ),
+            Effect.mapError((cause) => requestFailed('create full refund', cause)),
           );
       }),
       constructEvent: Effect.fn('StripeGateway.constructEvent')(function* (
@@ -215,6 +233,7 @@ export const makeLayer = (
 const liveClient = (config: StripeConfig): Client => {
   const stripeLayer = Layer.mergeAll(
     FetchHttpClient.layer,
+    Layer.succeed(Retry.Retry, Retry.makeDefault),
     Layer.succeed(
       Credentials,
       Effect.succeed({
