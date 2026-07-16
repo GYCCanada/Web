@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'effect-bun-test';
 import { Effect, Layer, Option } from 'effect';
+import * as ShardingConfig from 'effect/unstable/cluster/ShardingConfig';
 
 import { Cents } from '../forms/pricing';
 import { OrderActor } from './order-actor.server';
@@ -48,7 +49,10 @@ const harness = (
     Layer.succeed(OrderRepository.Service, repository),
     stripeLayer(Option.some(client)),
   );
-  const layer = OrderActor.processorLayer.pipe(Layer.provide(dependencies));
+  const layer = OrderActor.testHandlers.pipe(
+    Layer.provideMerge(dependencies),
+    Layer.provideMerge(ShardingConfig.layerDefaults),
+  );
   return { events, layer, state: () => state };
 };
 
@@ -71,8 +75,7 @@ describe('Registration Order actor', () => {
       client,
     );
     return Effect.gen(function* () {
-      const processor = yield* OrderActor.Processor;
-      yield* processor.createCheckout(orderId);
+      yield* OrderActor.Order.CreateCheckout.execute({ orderId });
       expect(checkoutCalls).toHaveLength(1);
       expect(test.state().status).toBe('awaiting_payment');
       expect(test.state().stripeCheckoutSessionId).toBe('cs_actor');
@@ -93,8 +96,9 @@ describe('Registration Order actor', () => {
       client,
     );
     return Effect.gen(function* () {
-      const processor = yield* OrderActor.Processor;
-      const exit = yield* Effect.exit(processor.createCheckout(orderId));
+      const exit = yield* Effect.exit(
+        OrderActor.Order.CreateCheckout.execute({ orderId }),
+      );
       expect(exit._tag).toBe('Failure');
       expect(test.state().status).toBe('preparing_checkout');
       expect(test.events).toEqual([]);
@@ -121,8 +125,11 @@ describe('Registration Order actor', () => {
       client,
     );
     return Effect.gen(function* () {
-      const processor = yield* OrderActor.Processor;
-      yield* processor.refund(orderId, 100);
+      yield* OrderActor.Order.Refund.execute({
+        orderId,
+        attemptId: 'attempt-1',
+        at: 100,
+      });
       expect(refundCalls).toHaveLength(1);
       expect(refundCalls).toEqual([
         {
@@ -170,8 +177,13 @@ describe('Registration Order actor', () => {
       client,
     );
     return Effect.gen(function* () {
-      const processor = yield* OrderActor.Processor;
-      const exit = yield* Effect.exit(processor.refund(orderId, 100));
+      const exit = yield* Effect.exit(
+        OrderActor.Order.Refund.execute({
+          orderId,
+          attemptId: 'attempt-1',
+          at: 100,
+        }),
+      );
       expect(exit._tag).toBe('Failure');
       expect(test.state().status).toBe('refund_pending');
       expect(test.events.map((command) => command.event._tag)).toEqual([
@@ -201,8 +213,11 @@ describe('Registration Order actor', () => {
       client,
     );
     return Effect.gen(function* () {
-      const processor = yield* OrderActor.Processor;
-      yield* processor.refund(orderId, 100);
+      yield* OrderActor.Order.Refund.execute({
+        orderId,
+        attemptId: 'attempt-1',
+        at: 100,
+      });
       expect(refundCalls).toHaveLength(1);
       expect(test.state().status).toBe('refunded');
       expect(test.events.map((command) => command.event._tag)).toEqual([

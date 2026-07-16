@@ -87,11 +87,8 @@ const orderDependencies = Layer.mergeAll(
   OrderRepository.layer,
   stripeLayer(Option.some(stripeClient)),
 );
-const orderProcessor = OrderActor.processorLayer.pipe(
-  Layer.provideMerge(orderDependencies),
-);
 const orderHandlers = OrderActor.handlers.pipe(
-  Layer.provideMerge(orderProcessor),
+  Layer.provideMerge(orderDependencies),
 );
 
 const testLayer = Layer.mergeAll(

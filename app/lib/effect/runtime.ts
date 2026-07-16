@@ -87,15 +87,12 @@ export const makeAppLayer = (
   const stripeLayer = StripeGateway.layer.pipe(
     Layer.provideMerge(Env.layer),
   );
-  const orderProcessor = OrderActor.processorLayer.pipe(
-    Layer.provideMerge(Layer.merge(relationalCore, stripeLayer)),
-  );
   const orderSender =
     runnerStorage === 'memory'
       ? OrderActor.senderLayer.pipe(
           Layer.provideMerge(
             OrderActor.testHandlers.pipe(
-              Layer.provideMerge(orderProcessor),
+              Layer.provideMerge(Layer.merge(relationalCore, stripeLayer)),
               Layer.provideMerge(ShardingConfig.layerDefaults),
             ),
           ),
@@ -103,7 +100,7 @@ export const makeAppLayer = (
       : OrderActor.senderLayer.pipe(
           Layer.provideMerge(
             OrderActor.handlers.pipe(
-              Layer.provideMerge(orderProcessor),
+              Layer.provideMerge(Layer.merge(relationalCore, stripeLayer)),
               Layer.provideMerge(
                 SingleRunner.layer({
                   runnerStorage: 'sql',

@@ -62,24 +62,6 @@ export const Order = Actor.fromEntity('RegistrationOrder', {
   },
 });
 
-export class Processor extends Context.Service<
-  Processor,
-  {
-    readonly createCheckout: (orderId: OrderId) => Effect.Effect<void>;
-    readonly applyStripeEvent: (command: {
-      readonly orderId: OrderId;
-      readonly stripeEventId: StripeEventId;
-      readonly stripeEventType: string;
-      readonly event: typeof OrderEvent.Type;
-    }) => Effect.Effect<void>;
-    readonly expire: (orderId: OrderId, at: number) => Effect.Effect<void>;
-    readonly refund: (
-      orderId: OrderId,
-      at: number,
-    ) => Effect.Effect<void>;
-  }
->()('gycc/lib/registration/order-actor.server/Processor') {}
-
 export class EnqueueError extends Schema.TaggedErrorClass<EnqueueError>()(
   'OrderActor.EnqueueError',
   { operation: Schema.String },
@@ -161,8 +143,7 @@ export const senderLayer = Layer.effect(
   }),
 );
 
-export const processorLayer = Layer.effect(
-  Processor,
+const processor =
   Effect.gen(function* () {
     const repository = yield* OrderRepository.Service;
     const stripe = yield* StripeGateway.Service;
@@ -287,24 +268,23 @@ export const processorLayer = Layer.effect(
       },
     );
 
-    return Processor.of({
+    return {
       createCheckout,
       applyStripeEvent,
       expire,
       refund,
-    });
-  }),
-);
+    };
+  });
 
 const builder = Effect.gen(function* () {
-  const processor = yield* Processor;
+  const implementation = yield* processor;
   return Order.of({
     CreateCheckout: ({ operation }) =>
-      processor.createCheckout(operation.orderId),
+      implementation.createCheckout(operation.orderId),
     ApplyStripeEvent: ({ operation }) =>
-      processor.applyStripeEvent(operation),
-    Expire: ({ operation }) => processor.expire(operation.orderId, operation.at),
-    Refund: ({ operation }) => processor.refund(operation.orderId, operation.at),
+      implementation.applyStripeEvent(operation),
+    Expire: ({ operation }) => implementation.expire(operation.orderId, operation.at),
+    Refund: ({ operation }) => implementation.refund(operation.orderId, operation.at),
   });
 });
 
