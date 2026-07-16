@@ -85,8 +85,8 @@ export type PageScope<P extends PageId = PageId> = {
 };
 
 /**
- * What a `DraftEditor` operation targets. A closed union over the three object
- * families ADR 0008 splits storage into. Widened from a single inhabitant in
+ * What a `DraftEditor` operation targets. A closed union over the two content
+ * object families ADR 0008 leaves in object storage. Widened from a single inhabitant in
  * Branch 1; the Page member carries the closed `PageId` so no scope
  * can name an object that does not exist.
  */
@@ -131,7 +131,7 @@ export const scopeKeys = (scope: ContentScope): ScopeKeys => {
  * Map a `ContentScope` (which carries the draft/published key PAIR) to the
  * `Content` read path's `BustTarget` (which names only the *published* cache to
  * invalidate). `publish` promotes a scope's draft to its published object, so the
- * cache it must bust is that scope's published read cache — site / page / form —
+ * cache it must bust is that scope's published read cache — site or page —
  * so the change is live on the next read with no redeploy, and ONLY that object's
  * cache is invalidated (ADR 0008's per-object isolation).
  */

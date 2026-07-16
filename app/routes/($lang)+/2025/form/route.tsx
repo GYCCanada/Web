@@ -45,9 +45,8 @@ export const loader = routeHandler(function* () {
   const content = yield* Content.Service;
   const forms = yield* Forms.Service;
   const conference = yield* content.getCurrentConference(locale);
-  // The registration form definition is CMS-backed (BLOCKER 2): editing the stored
-  // `forms/registration.json` changes the form's validation + copy with no code
-  // change, exactly like contact/volunteer.
+  // The current immutable relational definition drives validation and copy; an
+  // admin publication changes both with no code deploy.
   const published = yield* forms.current('registration');
   return {
     conference,

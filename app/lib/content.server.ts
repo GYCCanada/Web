@@ -481,14 +481,14 @@ const decodeDocument = (json: string) =>
 /**
  * Which read cache a `bust` invalidates (ADR 0008, registration-launch Branch 5.3).
  * A closed union over the object families `Content` reads: the one `site.json`
- * document, one evergreen `page` object, or one `form` definition object. Editing
- * About busts ONLY About's cache, not the conference (`site`) cache — that
+ * document or one evergreen `page` object. Editing About busts ONLY About's
+ * cache, not the conference (`site`) cache — that
  * per-object isolation is ADR 0008's headline blast-radius property, and it is
  * expressible here precisely because the target is this closed union, not a free
  * string (`make-impossible-states-unrepresentable`).
  *
- * This type is intentionally defined here, over the registry's closed `PageId` /
- * `FormId`, rather than reusing `DraftEditor`'s `ContentScope`: the read path
+ * This type is intentionally defined here, over the registry's closed `PageId`,
+ * rather than reusing `DraftEditor`'s `ContentScope`: the read path
  * never touches the draft/published key PAIR a scope carries — it only ever reads
  * the *published* object — so the bust target is the lighter "which published
  * cache" discriminator. `DraftEditor.publish` maps its `ContentScope` onto this

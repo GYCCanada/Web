@@ -44,11 +44,10 @@ import {
  *   - the honeypot short-circuit (inherited from `routeFormAction`) skips the
  *     body entirely (no persist, no notify).
  *
- * The action runs through the real request runtime, but over `makeAppLayer` with
- * an IN-MEMORY `Storage` (`layerTest`) so the `Submissions.persist` write
- * succeeds end-to-end — a bucket-less production `Storage.layerOptional` would
- * fail the write. `Content` (the bundled default form definition), `Toast`, and
- * the `Mailer` are the same layers the live server provides.
+ * The action runs through the real request runtime with an isolated relational
+ * database and in-memory object storage for the owning Page. `Forms`, `Content`,
+ * `Toast`, and `Mailer` are the same application boundaries the live server
+ * provides.
  */
 
 const makeFormArgs = async (

@@ -178,10 +178,9 @@ export const makeDefaultRegistrant = () => ({
  * heading year. This is a plain module (not referenced in `routes.ts`), so it
  * is not itself a route.
  *
- * `actionData` is passed in by the route wrapper. The registration action is a
- * deliberate no-op, so `useActionData` is `undefined` today and `lastResult` is
- * effectively unused — it is kept wired (typed as conform's `SubmissionResult`)
- * so a future real action's result flows straight through.
+ * `actionData` is passed in by the route wrapper. It carries the relational
+ * action's Conform result so validation failures reattach to their registrant
+ * fields while the exact submission command remains available for safe retry.
  */
 export function RegistrationForm({
   year,

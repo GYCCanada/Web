@@ -27,13 +27,12 @@ import {
  * repeating `{ registrants: Registrant[] }` shell, so it does NOT flow through
  * the flat `formAction` skeleton (proven in `action.test.ts`): it owns
  * `registrationAction`, the slice's headline net-new server path (settled #9).
- * The service-level `Submissions.persist` round-trip is pinned in
- * `submissions.server.test.ts`; here we pin the ACTION's distinct code path —
- * the parts `formAction` does not exercise:
+ * The service-level relational commit is pinned in `forms.server.test.ts`; here
+ * we pin the ACTION's distinct code path — the parts `formAction` does not
+ * exercise:
  *   - decoding the `{ registrants: Array(definitionToSchema(def)) }` shell from
  *     the conform-parsed bracket payload (`registrants[n].field`);
- *   - the per-registrant persist LOOP — N registrants → N distinct durable
- *     `submissions/registration/<id>.json` objects;
+ *   - one atomic group commit — N registrants → N distinct durable rows;
  *   - persist-FIRST, notify-SECOND ordering for THIS path: `notify` receives the
  *     STORED `Submission[]`, and a notify failure still leaves every record on
  *     the bucket (settled #8 — losing a registrant must never look like success).

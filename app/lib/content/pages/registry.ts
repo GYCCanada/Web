@@ -102,7 +102,6 @@ export const pageObjectKey = (page: PageId): string =>
 export const pageDraftKey = (page: PageId): string =>
   `content/pages/${page}.draft.json`;
 
-/** The published bucket key a Form definition object lives at (`forms/<form>.json`). */
 // ---------------------------------------------------------------------------
 // Object specs (schema + default per id)
 // ---------------------------------------------------------------------------

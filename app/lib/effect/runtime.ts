@@ -162,9 +162,9 @@ const runWithContext =
 /**
  * Build a {@link RequestRuntime} over a chosen app layer, sharing the runtime's
  * error → `Response` mapping. Production calls {@link makeRequestRuntime} (the
- * global `AppRuntime`); a test builds one over `makeAppLayer(layerTest(...))` so
- * a route/form action that writes (`Submissions.persist`) runs end-to-end against
- * an in-memory bucket through the real pipeline.
+ * global `AppRuntime`); a test builds one over `makeTestAppLayer(layerTest(...))`
+ * so relational Form writes and object-backed content reads run end-to-end
+ * through their real adapters.
  */
 export const makeRequestRuntimeFromLayer = (layer: AppLayer): RequestRuntime => ({
   run: runWithContext(ManagedRuntime.make(layer)),
