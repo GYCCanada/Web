@@ -13,18 +13,14 @@ import * as FetchHttpClient from 'effect/unstable/http/FetchHttpClient';
 import { Env, type StripeConfig } from '../env.server';
 import type { Cents } from '../forms/pricing';
 import type { OrderId } from './order-repository.server';
-
-const THIRTY_MINUTES = 30 * 60 * 1_000;
-const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1_000;
+import { checkoutLifetime } from './checkout-lifetime';
 
 export const checkoutExpiresAt = (
   now: number,
   quoteExpiresAt: number,
-): number => {
-  const floor = Math.ceil((now + THIRTY_MINUTES) / 1_000);
-  const cap = Math.floor((now + TWENTY_FOUR_HOURS) / 1_000);
-  const quote = Math.floor(quoteExpiresAt / 1_000);
-  return Math.min(Math.max(quote, floor), cap);
+): number | undefined => {
+  const lifetime = checkoutLifetime(now, quoteExpiresAt);
+  return lifetime.ok ? lifetime.expiresAtSeconds : undefined;
 };
 
 export type CreateCheckout = {
@@ -114,6 +110,12 @@ export const makeLayer = (
         command: CreateCheckout,
       ) {
         if (Option.isNone(client)) return yield* new Unavailable();
+        const expiresAt = checkoutExpiresAt(command.now, command.quoteExpiresAt);
+        if (expiresAt === undefined) {
+          return yield* new RequestFailed({
+            operation: 'honor Checkout quote deadline',
+          });
+        }
         const output = yield* client.value
           .createCheckout(
             {
@@ -121,7 +123,7 @@ export const makeLayer = (
               client_reference_id: command.orderId,
               customer_email: command.receiptEmail,
               currency: 'cad',
-              expires_at: checkoutExpiresAt(command.now, command.quoteExpiresAt),
+              expires_at: expiresAt,
               line_items: [
                 {
                   quantity: 1,

@@ -253,6 +253,25 @@ describe('compiled registration quotes', () => {
     });
   });
 
+  test('refuses a quote inside Stripe minimum lifetime instead of extending the deadline', () => {
+    const compiled = compileForm(definition());
+    const decoded = compiled.decodeRegistration({
+      party: { _tag: 'perRegistrant' },
+      registrants: [registrant('Ada', 'ada@example.com')],
+    });
+    if (Result.isFailure(decoded)) throw new Error('fixture did not decode');
+    const pricedAt = at('2026-08-10T03:40:00.001Z');
+
+    expect(compiled.readiness(pricedAt)).toContainEqual({
+      code: 'checkout-window-too-short',
+      message: 'Registration closes too soon to create a Stripe Checkout Session.',
+    });
+    expect(compiled.quoteRegistration(decoded.success, pricedAt)).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ code: 'checkout-window-too-short' })],
+    });
+  });
+
   test('reports missing commerce configuration before opening', () => {
     const legacy = Schema.decodeUnknownSync(FormDefinition)({
       title: text('Legacy registration'),

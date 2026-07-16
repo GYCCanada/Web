@@ -18,16 +18,14 @@ const command = {
   receiptEmail: 'payer@example.com',
   idempotencyKey: 'checkout-order-1',
   now: Date.parse('2026-08-01T12:00:00Z'),
-  quoteExpiresAt: Date.parse('2026-08-01T12:10:00Z'),
+  quoteExpiresAt: Date.parse('2026-08-01T13:00:00Z'),
 };
 
 describe('StripeGateway', () => {
-  it.effect('keeps Checkout expiry inside Stripe 30-minute/24-hour bounds', () =>
+  it.effect('rejects a too-short quote instead of extending it past Registration close', () =>
     Effect.sync(() => {
       const now = Date.parse('2026-08-01T12:00:00.500Z');
-      expect(checkoutExpiresAt(now, now + 10 * 60_000)).toBe(
-        Math.ceil((now + 30 * 60_000) / 1_000),
-      );
+      expect(checkoutExpiresAt(now, now + 10 * 60_000)).toBeUndefined();
       expect(checkoutExpiresAt(now, now + 60 * 60_000)).toBe(
         Math.floor((now + 60 * 60_000) / 1_000),
       );

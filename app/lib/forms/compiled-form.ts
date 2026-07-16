@@ -12,12 +12,14 @@ import {
   type RegistrationShellDecoded,
   registrationShellDecoder,
 } from './registration-shell';
+import { checkoutLifetime } from '../registration/checkout-lifetime';
 
 export type ReadinessIssue = {
   readonly code:
     | 'registration-party-missing'
     | 'registration-pricing-missing'
     | 'registration-closed'
+    | 'checkout-window-too-short'
     | 'per-registrant-email-missing';
   readonly message: string;
 };
@@ -91,6 +93,16 @@ const registrationReadiness = (
     issues.push({
       code: 'registration-closed',
       message: 'The registration deadline has passed.',
+    });
+  } else if (
+    !checkoutLifetime(
+      DateTime.toEpochMillis(at),
+      DateTime.toEpochMillis(pricing.registrationClosesAt),
+    ).ok
+  ) {
+    issues.push({
+      code: 'checkout-window-too-short',
+      message: 'Registration closes too soon to create a Stripe Checkout Session.',
     });
   }
 
