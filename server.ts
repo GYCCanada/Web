@@ -195,7 +195,7 @@ const stripQuery = (url: string): string => {
   return q === -1 ? url : url.slice(0, q);
 };
 
-// Readiness probe for Railway. Plain text, no app services — answering 200 here
+// Container readiness probe. Plain text, no app services — answering 200 here
 // means the process is up and the env layer (below) validated at boot.
 const HealthRoute = HttpRouter.add(
   'GET',

@@ -136,14 +136,15 @@ Architectural decisions are recorded as ADRs under `docs/adr/`:
 - **0001** — Collapse to a single Bun + React Router v7 app; delete the PayloadCMS scaffold.
 - **0002** — Replace React Aria with shadcn-on-base-ui; Tailwind v4 CSS-first; preserve identity.
 - **0003** — Effect v4 on Bun (paulo-suzanne pattern); oxlint + tsgo + bun test.
-- **0004** — Railway via Bun auto-detect; environment via Effect Config.
+- **0004** — Effect Config remains the environment boundary; its Railway deployment decision
+  is superseded by ADR 0009.
 - **0005** — Effect everywhere: Effect Schema is the sole validation layer, the Effect
   runtime the sole loader/action path, conform `/future` + StandardSchema for forms, and a
   tagged `Http.*` error taxonomy. Removes `zod` / `@conform-to/zod`.
 - **0006** — Stable list-item identities across CMS edits.
 - **0007** — Structural, data-driven Form definitions with an equivalence-harness migration.
 - **0008** — Independent Page and site content objects with local decode/fallback boundaries.
-- **0009** — Railway deploys a checked-in Docker image with an exact Bun runtime pin.
+- **0009** — CI publishes a pinned Docker image; the custom server runs an immutable digest.
 - **0010** — Immutable Form definition versions and relational, transactional Submissions.
 
 ## Notes for the revival
