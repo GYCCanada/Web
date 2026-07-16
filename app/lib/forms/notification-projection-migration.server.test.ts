@@ -2,7 +2,7 @@ import { describe, expect, it } from 'effect-bun-test';
 import { Effect, Schema } from 'effect';
 import { SqlClient } from 'effect/unstable/sql/SqlClient';
 
-import { Database } from '../database.server';
+import { DatabaseTest } from '../database.test-helper';
 
 import {
   defaultContactForm,
@@ -114,6 +114,6 @@ describe('notification projection preflight migration', () => {
         rows[0]?.definition,
       );
       expect(migrated.notification).toEqual(mappings.contact);
-    }).pipe(Effect.provide(Database.layerTest)),
+    }).pipe(Effect.provide(DatabaseTest.layer)),
   );
 });

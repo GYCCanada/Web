@@ -5,6 +5,7 @@ import { AdminDisabled, Auth, BadPassword, Unauthorized } from '~/lib/auth.serve
 import { Content } from '~/lib/content.server';
 import { DraftEditor } from '~/lib/content/draft-editor.server';
 import { Database } from '~/lib/database.server';
+import type { DatabaseTest } from '~/lib/database.test-helper';
 import { Env } from '~/lib/env.server';
 import { Forms } from '~/lib/forms/forms.server';
 import { FormNotifications } from '~/lib/form-notifications.server';
@@ -54,7 +55,7 @@ export type AppError =
  */
 export const makeAppLayer = (
   storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
-  databaseLayer: typeof Database.layer | typeof Database.layerTest,
+  databaseLayer: typeof Database.layer | typeof DatabaseTest.layer,
   mailerLayer: Layer.Layer<Mailer.Service, never, Env.Service> = Mailer.layer,
 ) => {
   const baseLayer = Layer.mergeAll(
@@ -77,12 +78,6 @@ export const makeAppLayer = (
     Layer.provideMerge(Env.layer),
   );
 };
-
-/** Build the complete app over isolated in-memory storage and PostgreSQL. */
-export const makeTestAppLayer = (
-  storageLayer: Layer.Layer<Storage.Service, never, Env.Service>,
-  mailerLayer: Layer.Layer<Mailer.Service, never, Env.Service> = Mailer.layer,
-) => makeAppLayer(storageLayer, Database.layerTest, mailerLayer);
 
 /** The fully-composed app layer (its error channel is `Env.layer`'s `ConfigError`). */
 export type AppLayer = ReturnType<typeof makeAppLayer>;

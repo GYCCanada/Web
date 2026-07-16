@@ -11,10 +11,8 @@ import {
 } from './errors';
 import { Database } from '../database.server';
 import { layerTest } from '../storage.test-helper';
-import {
-  makeRequestRuntimeFromLayer,
-  makeTestAppLayer,
-} from './runtime';
+import { makeRequestRuntimeFromLayer } from './runtime';
+import { makeTestAppLayer } from './runtime.test-helper';
 import type { RouteArgs } from './router-context';
 
 const makeArgs = (url = 'http://localhost/test'): RouteArgs => ({

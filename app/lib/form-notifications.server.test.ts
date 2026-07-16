@@ -2,7 +2,7 @@ import { describe, expect, it } from 'effect-bun-test';
 import { Effect, Layer } from 'effect';
 import { SqlClient } from 'effect/unstable/sql/SqlClient';
 
-import { makeTestAppLayer } from './effect/runtime';
+import { makeTestAppLayer } from './effect/runtime.test-helper';
 import { defaultContactForm } from './forms/defaults';
 import { Forms } from './forms/forms.server';
 import { Mailer } from './mailer.server';

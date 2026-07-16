@@ -9,9 +9,9 @@ import { pageObjectKey } from '../content/pages/registry';
 import { ContactPage } from '../content/pages/schema';
 import {
   makeRequestRuntimeFromLayer,
-  makeTestAppLayer,
   type RequestRuntime,
 } from '../effect/runtime';
+import { makeTestAppLayer } from '../effect/runtime.test-helper';
 import type { RouteArgs } from '../effect/router-context';
 import { Mailer } from '../mailer.server';
 import { layerTest } from '../storage.test-helper';

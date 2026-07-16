@@ -3,13 +3,13 @@ import { Deferred, Effect, Fiber, Layer } from 'effect';
 import { SqlClient } from 'effect/unstable/sql/SqlClient';
 import { TestClock } from 'effect/testing';
 
-import { Database } from './database.server';
+import { DatabaseTest } from './database.test-helper';
 import { adminEmailDeliveryKey } from './forms/notification-intent';
 import { SubmissionGroupId } from './forms/forms.server';
 import { NotificationDelivery } from './notification-delivery.server';
 
 const testLayer = NotificationDelivery.layer.pipe(
-  Layer.provideMerge(Database.layerTest),
+  Layer.provideMerge(DatabaseTest.layer),
 );
 
 const seedIntent = Effect.fn('test.seedNotificationIntent')(function* () {

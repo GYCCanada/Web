@@ -19,9 +19,9 @@ import {
 import { pageObjectKey } from '../app/lib/content/pages/registry';
 import { GivePage, TeamPage } from '../app/lib/content/pages/schema';
 import {
-  makeTestAppLayer,
   makeRequestRuntimeFromLayer,
 } from '../app/lib/effect/runtime';
+import { makeTestAppLayer } from '../app/lib/effect/runtime.test-helper';
 import { layerTest } from '../app/lib/storage.test-helper';
 
 import { loader as layoutLoader } from '../app/routes/($lang)+/_layout';

@@ -3,6 +3,7 @@ import { Effect } from 'effect';
 import { SqlClient } from 'effect/unstable/sql/SqlClient';
 
 import { Database } from './database.server';
+import { DatabaseTest } from './database.test-helper';
 
 describe('Database lifecycle', () => {
   it.effect('runs the Form persistence migrations before reporting ready', () =>
@@ -31,6 +32,6 @@ describe('Database lifecycle', () => {
         'submission_batches',
         'submissions',
       ]);
-    }).pipe(Effect.provide(Database.layerTest)),
+    }).pipe(Effect.provide(DatabaseTest.layer)),
   );
 });

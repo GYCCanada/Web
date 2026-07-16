@@ -3,7 +3,7 @@ import { Effect, Layer } from 'effect';
 import { SqlClient } from 'effect/unstable/sql/SqlClient';
 
 import { defaultContactForm } from './defaults';
-import { Database } from '../database.server';
+import { DatabaseTest } from '../database.test-helper';
 import { layerTest } from '../storage.test-helper';
 
 import { migrate } from './legacy-migration.server';
@@ -28,7 +28,7 @@ const objects = {
   'forms/contact.draft.json': { body: '{}' },
 };
 
-const testLayer = Layer.merge(layerTest(objects), Database.layerTest);
+const testLayer = Layer.merge(layerTest(objects), DatabaseTest.layer);
 
 describe('legacy Form storage migration', () => {
   it.effect('dry-runs without writing relational records', () =>
@@ -84,7 +84,7 @@ describe('legacy Form storage migration', () => {
         'forms/contact.json': { body: JSON.stringify(defaultContactForm) },
         [`submissions/contact/${id}.json`]: { body: '{"id":' },
       }),
-      Database.layerTest,
+      DatabaseTest.layer,
     );
     return Effect.gen(function* () {
       const error = yield* migrate({ apply: true }).pipe(Effect.flip);

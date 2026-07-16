@@ -5,9 +5,9 @@ import { RouterContextProvider } from 'react-router';
 import { Auth } from '~/lib/auth.server';
 import {
   makeRequestRuntimeFromLayer,
-  makeTestAppLayer,
   type RequestRuntime,
 } from '~/lib/effect/runtime';
+import { makeTestAppLayer } from '~/lib/effect/runtime.test-helper';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { Forms } from '~/lib/forms/forms.server';
 import { layerTest } from '~/lib/storage.test-helper';

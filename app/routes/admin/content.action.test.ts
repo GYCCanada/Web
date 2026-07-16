@@ -7,10 +7,10 @@ import { SITE_CONTENT_KEY } from '~/lib/content.server';
 import { defaultContent } from '~/lib/content/defaults';
 import { SiteContent } from '~/lib/content/schema';
 import {
-  makeTestAppLayer,
   makeRequestRuntimeFromLayer,
   type RequestRuntime,
 } from '~/lib/effect/runtime';
+import { makeTestAppLayer } from '~/lib/effect/runtime.test-helper';
 import type { RouteArgs } from '~/lib/effect/router-context';
 import { Storage } from '~/lib/storage.server';
 import { layerTest } from '~/lib/storage.test-helper';

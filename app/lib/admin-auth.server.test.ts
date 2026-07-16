@@ -4,9 +4,9 @@ import { RouterContextProvider } from 'react-router';
 
 import {
   makeRequestRuntimeFromLayer,
-  makeTestAppLayer,
   type RequestRuntime,
 } from './effect/runtime';
+import { makeTestAppLayer } from './effect/runtime.test-helper';
 import type { RouteArgs } from './effect/router-context';
 import { Auth } from './auth.server';
 import { requireAdminRequest } from './admin-auth.server';

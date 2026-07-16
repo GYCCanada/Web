@@ -1,7 +1,6 @@
 export * as Database from './database.server';
 
 import { PgClient } from '@effect/sql-pg';
-import { PgliteClient } from '@effect/sql-pglite';
 import { Config, Context, Effect, Layer, Schema } from 'effect';
 import * as Migrator from 'effect/unstable/sql/Migrator';
 import { SqlClient } from 'effect/unstable/sql/SqlClient';
@@ -20,7 +19,7 @@ export class Service extends Context.Service<
   }
 >()('gycc/lib/database.server/Service') {}
 
-const makeLayer = <A, E, R>(clientLayer: Layer.Layer<A, E, R>) => {
+export const makeLayer = <A, E, R>(clientLayer: Layer.Layer<A, E, R>) => {
   const migratedClient = Layer.effectDiscard(
     Migrator.make({})({ loader }),
   ).pipe(Layer.provideMerge(clientLayer));
@@ -46,5 +45,3 @@ export const layer = Layer.unwrap(
     return makeLayer(PgClient.layer({ url, applicationName: 'gycc' }));
   }),
 );
-
-export const layerTest = makeLayer(PgliteClient.layer({}));

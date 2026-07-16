@@ -2,12 +2,12 @@ import { describe, expect, it } from 'effect-bun-test';
 import { Effect, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql/SqlClient';
 
-import { Database } from '../database.server';
+import { DatabaseTest } from '../database.test-helper';
 
 import { defaultContactForm } from './defaults';
 import { Forms } from './forms.server';
 
-const testLayer = Forms.layer.pipe(Layer.provideMerge(Database.layerTest));
+const testLayer = Forms.layer.pipe(Layer.provideMerge(DatabaseTest.layer));
 
 const validContact = {
   name: 'Ada Lovelace',
