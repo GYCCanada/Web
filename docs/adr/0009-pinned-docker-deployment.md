@@ -42,6 +42,18 @@ not the mutable `latest` tag. The server remains responsible for container lifec
 environment variables, persistence mounts or external services, TLS, and the public endpoint.
 Effect Config remains the sole application configuration boundary under ADR 0004.
 
+Before replacing a container with a release that tightens a persisted-data contract, the
+operator runs the image's documented dry-run migration against production, supplies any
+explicit mapping it requests, applies it, and only then starts the new server. For the Form
+notification projection rollout, that sequence is:
+
+1. `bun run migrate:form-notifications --dry-run`;
+2. if requested, rerun with `--mapping /mounted/projection-map.json --dry-run`; and
+3. rerun the clean preflight with `--apply` before replacing the serving container.
+
+The application startup audit is the postcondition, not the first opportunity to repair
+customized historical definitions.
+
 ## Rejected alternatives
 
 - **Platform build auto-detection.** Production does not run on a managed application

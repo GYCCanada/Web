@@ -44,6 +44,7 @@ COPY --from=build /app/build ./build
 # tsconfig.json: Bun resolves the `~/*` path alias from it at runtime
 COPY package.json tsconfig.json server.ts ./
 COPY app ./app
+COPY scripts ./scripts
 
 USER bun
 EXPOSE 3000

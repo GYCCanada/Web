@@ -10,6 +10,7 @@
     "dev": "bun --hot ./server.ts",
     "lint": "oxlint",
     "migrate:legacy-forms": "bun scripts/migrate-legacy-forms.ts",
+    "migrate:form-notifications": "bun scripts/migrate-form-notification-projections.ts",
     "start": "NODE_ENV=production bun ./server.ts",
     "typecheck": "react-router typegen && tsgo --noEmit",
     "test": "bun test",

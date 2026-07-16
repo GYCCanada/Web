@@ -67,6 +67,46 @@ const assertFieldKinds = (
   }
 };
 
+const assertRequiredText = (
+  fields: ReadonlyMap<string, FieldKind>,
+  role: string,
+  name: string,
+  issues: string[],
+): void => {
+  const field = fields.get(name);
+  if (
+    field !== undefined &&
+    (field._tag !== 'requiredText' || field.optional === true)
+  ) {
+    issues.push(
+      `notification.${role} must reference a non-optional requiredText field`,
+    );
+  }
+};
+
+const assertConditionalRule = (
+  definition: FormDefinition,
+  method: string,
+  target: string,
+  requiredValues: readonly string[],
+  role: string,
+  issues: string[],
+): void => {
+  const matches = (definition.rules ?? []).filter(
+    (rule) => rule.when === method && rule.target === target,
+  );
+  const covered = new Set(
+    matches.flatMap((rule) => rule.equals.map((value) => String(value))),
+  );
+  for (const value of requiredValues) {
+    if (!covered.has(value)) {
+      issues.push(
+        `notification.${role} requires a requiredWhenEquals rule for method="${value}"`,
+      );
+    }
+  }
+};
+
 /** Normalize historical definitions and reject dangling semantic field roles. */
 export const normalizeNotificationProjection = (
   form: FormId,
@@ -105,7 +145,7 @@ export const normalizeNotificationProjection = (
   switch (notification._tag) {
     case 'contact':
     case 'volunteer': {
-      assertFieldKinds(fields, 'name', notification.name, TEXT_KINDS, issues);
+      assertRequiredText(fields, 'name', notification.name, issues);
       assertFieldKinds(
         fields,
         'email',
@@ -114,6 +154,22 @@ export const normalizeNotificationProjection = (
         issues,
       );
       assertFieldKinds(fields, 'phone', notification.phone, TEXT_KINDS, issues);
+      assertConditionalRule(
+        definition,
+        notification.method,
+        notification.email,
+        ['email', 'both'],
+        'email',
+        issues,
+      );
+      assertConditionalRule(
+        definition,
+        notification.method,
+        notification.phone,
+        ['phone', 'both'],
+        'phone',
+        issues,
+      );
       const method = fields.get(notification.method);
       if (method !== undefined) {
         if (method._tag !== 'literal') {
@@ -132,22 +188,16 @@ export const normalizeNotificationProjection = (
         }
       }
       if (notification._tag === 'contact') {
-        assertFieldKinds(
-          fields,
-          'message',
-          notification.message,
-          TEXT_KINDS,
-          issues,
-        );
+        assertRequiredText(fields, 'message', notification.message, issues);
       } else {
         for (const role of ['why', 'background', 'age', 'location'] as const) {
-          assertFieldKinds(fields, role, notification[role], TEXT_KINDS, issues);
+          assertRequiredText(fields, role, notification[role], issues);
         }
       }
       break;
     }
     case 'registration':
-      assertFieldKinds(fields, 'name', notification.name, TEXT_KINDS, issues);
+      assertRequiredText(fields, 'name', notification.name, issues);
       assertFieldKinds(
         fields,
         'email',

@@ -120,6 +120,39 @@ describe('Forms', () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect('requires mandatory notification fields and conditional contact rules', () =>
+    Effect.gen(function* () {
+      const forms = yield* Forms.Service;
+      const initial = yield* forms.current('contact');
+      const rejected = yield* forms
+        .publish({
+          form: 'contact',
+          expectedCurrentVersion: Option.some(initial.version),
+          definition: {
+            ...initial.definition,
+            fields: initial.definition.fields.map((field) =>
+              field.name === 'name' ? { ...field, optional: true } : field,
+            ),
+            rules: initial.definition.rules?.filter(
+              (rule) => rule.target !== 'phone',
+            ),
+          },
+        })
+        .pipe(Effect.flip);
+
+      expect(rejected._tag).toBe('Forms.DefinitionRejected');
+      if (Forms.DefinitionRejected.is(rejected)) {
+        const issues = rejected.issues.join('\n');
+        expect(issues).toContain(
+          'notification.name must reference a non-optional requiredText field',
+        );
+        expect(issues).toContain(
+          'notification.phone requires a requiredWhenEquals rule',
+        );
+      }
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect('validates a whole batch before consuming its idempotency token', () =>
     Effect.gen(function* () {
       const forms = yield* Forms.Service;

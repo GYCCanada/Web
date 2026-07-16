@@ -738,7 +738,7 @@ export const layer = Layer.effect(
       );
       if (normalized.issues.length > 0) {
         return yield* new FormPersistenceError({
-          operation: `audit current ${form} notification projection: ${normalized.issues.join('; ')}`,
+          operation: `audit current ${form} notification projection (run migrate:form-notifications preflight): ${normalized.issues.join('; ')}`,
         });
       }
       if (currentDefinition.definition.notification === undefined) {
