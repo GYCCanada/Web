@@ -5,6 +5,7 @@ import {
   Effect,
   Fiber,
   Layer,
+  Option,
   Redacted,
   Schedule,
   Schema,
@@ -16,6 +17,17 @@ import { Actor } from 'effect-encore';
 import { Database } from '../database.server';
 import { ConferenceSlug } from '../content/schema';
 import { ActiveOrders, Registrar } from './registrar.server';
+import { OrderActor } from './order-actor.server';
+import {
+  OrderId,
+  OrderRepository,
+  StripeEventId,
+} from './order-repository.server';
+import { Cents } from '../forms/pricing';
+import {
+  type Client as StripeClient,
+  makeLayer as stripeLayer,
+} from './stripe-gateway.server';
 
 const databaseUrl = process.env['TEST_DATABASE_URL'];
 if (databaseUrl === undefined || databaseUrl.length === 0) {
@@ -62,7 +74,31 @@ const runnerLayer = SingleRunner.layer({
   },
 }).pipe(Layer.provideMerge(databaseLayer));
 
-const testLayer = Layer.merge(probeHandlers, Registrar.layer).pipe(
+const stripeClient: StripeClient = {
+  createCheckout: () =>
+    Effect.succeed({
+      id: 'cs_postgres_actor',
+      url: 'https://checkout.stripe.test/cs_postgres_actor',
+    }),
+  refund: () => Effect.die('unused'),
+  constructEvent: () => Effect.die('unused'),
+};
+const orderDependencies = Layer.mergeAll(
+  OrderRepository.layer,
+  stripeLayer(Option.some(stripeClient)),
+);
+const orderProcessor = OrderActor.processorLayer.pipe(
+  Layer.provideMerge(orderDependencies),
+);
+const orderHandlers = OrderActor.handlers.pipe(
+  Layer.provideMerge(orderProcessor),
+);
+
+const testLayer = Layer.mergeAll(
+  probeHandlers,
+  Registrar.layer,
+  orderHandlers,
+).pipe(
   Layer.provideMerge(runnerLayer),
 );
 const test = it.scopedLive.layer(testLayer);
@@ -316,6 +352,189 @@ test(
       expect(blocked).toBeInstanceOf(ActiveOrders);
       if (blocked instanceof ActiveOrders) expect(blocked.count).toBe(1);
       expect((yield* registrar.get(conference)).state).toBe('draining');
+    }),
+  20_000,
+);
+
+test(
+  'Registration Order actor durably creates Checkout then settles a separately keyed Stripe event',
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient;
+      yield* sql`TRUNCATE cluster_replies, cluster_messages CASCADE`;
+      yield* sql`DELETE FROM registration_order_reviews`;
+      yield* sql`DELETE FROM stripe_event_receipts`;
+      yield* sql`DELETE FROM registration_order_registrants`;
+      yield* sql`DELETE FROM registration_orders`;
+      yield* sql`DELETE FROM registrants`;
+      yield* sql`DELETE FROM registrations`;
+      yield* sql`DELETE FROM submissions`;
+      yield* sql`DELETE FROM submission_batches`;
+      yield* sql`DELETE FROM registration_channels`;
+      yield* sql`DELETE FROM form_definition_versions`;
+      yield* sql`DELETE FROM forms`;
+
+      yield* sql`INSERT INTO forms (form_id) VALUES ('registration')`;
+      yield* sql`
+        INSERT INTO form_definition_versions (form_id, version_id, definition)
+        VALUES ('registration', 'v-actor', '{}'::jsonb)
+      `;
+      yield* sql`
+        INSERT INTO registration_channels (
+          conference_slug,
+          state,
+          form_id,
+          form_definition_version_id,
+          conference_timezone
+        ) VALUES (
+          '/2026', 'open', 'registration', 'v-actor', 'America/Toronto'
+        )
+      `;
+      yield* sql`
+        INSERT INTO submission_batches (
+          batch_id,
+          form_id,
+          definition_version_id,
+          idempotency_token,
+          command_hash
+        ) VALUES (
+          'batch-actor', 'registration', 'v-actor', 'attempt-actor', 'hash-actor'
+        )
+      `;
+      yield* sql`
+        INSERT INTO submissions (submission_id, batch_id, ordinal, payload)
+        VALUES ('submission-actor', 'batch-actor', 0, '{}'::jsonb)
+      `;
+      yield* sql`
+        INSERT INTO registrations (
+          registration_id,
+          conference_slug,
+          form_id,
+          form_definition_version_id,
+          submission_batch_id,
+          idempotency_token,
+          command_hash,
+          public_token_hash,
+          billing_mode,
+          currency,
+          total_amount,
+          priced_at,
+          quote_expires_at
+        ) VALUES (
+          'registration-actor', '/2026', 'registration', 'v-actor',
+          'batch-actor', 'commerce-actor', 'commerce-hash-actor',
+          'public-hash-actor', 'group', 'cad', 5000,
+          '2026-08-01T12:00:00Z', '2026-08-02T12:00:00Z'
+        )
+      `;
+      yield* sql`
+        INSERT INTO registrants (
+          registrant_id,
+          registration_id,
+          submission_id,
+          ordinal
+        ) VALUES ('registrant-actor', 'registration-actor', 'submission-actor', 0)
+      `;
+      const orderId = OrderId.make('order-postgres-actor');
+      yield* sql`
+        INSERT INTO registration_orders (
+          order_id,
+          registration_id,
+          ordinal,
+          status,
+          amount,
+          currency,
+          receipt_email,
+          quote_snapshot,
+          priced_at,
+          quote_expires_at,
+          stripe_idempotency_key
+        ) VALUES (
+          ${orderId}, 'registration-actor', 0, 'preparing_checkout', 5000,
+          'cad', 'payer@example.com', '{}'::jsonb,
+          '2026-08-01T12:00:00Z', '2026-08-02T12:00:00Z',
+          'checkout-postgres-actor'
+        )
+      `;
+      yield* sql`
+        INSERT INTO registration_order_registrants (
+          order_id,
+          registrant_id,
+          registration_id
+        ) VALUES (${orderId}, 'registrant-actor', 'registration-actor')
+      `;
+
+      yield* sql.withTransaction(
+        OrderActor.Order.CreateCheckout.send({ orderId }),
+      );
+      const afterCheckout = yield* sql<{ status: string }>`
+        SELECT status FROM registration_orders WHERE order_id = ${orderId}
+      `.pipe(
+        Effect.flatMap((rows) =>
+          rows[0]?.status === 'awaiting_payment'
+            ? Effect.succeed(rows)
+            : Effect.fail('Checkout pending'),
+        ),
+        Effect.retry({ times: 200, schedule: Schedule.spaced('25 millis') }),
+      );
+      expect(afterCheckout[0]?.status).toBe('awaiting_payment');
+
+      yield* OrderActor.Order.ApplyStripeEvent.send({
+        orderId,
+        stripeEventId: StripeEventId.make('evt_postgres_actor'),
+        stripeEventType: 'checkout.session.completed',
+        event: {
+          _tag: 'CheckoutCompleted',
+          at: Date.parse('2026-08-01T12:05:00Z'),
+          paymentStatus: 'paid',
+          amountTotal: Cents.make(5_000),
+          paymentIntentId: 'pi_postgres_actor',
+        },
+      });
+      const settled = yield* sql<{
+        orderStatus: string;
+        registrantStatus: string;
+      }>`
+        SELECT
+          registration_order.status AS "orderStatus",
+          registrant.status AS "registrantStatus"
+        FROM registration_orders AS registration_order
+        JOIN registration_order_registrants AS link
+          ON link.order_id = registration_order.order_id
+        JOIN registrants AS registrant
+          ON registrant.registrant_id = link.registrant_id
+        WHERE registration_order.order_id = ${orderId}
+      `.pipe(
+        Effect.flatMap((rows) =>
+          rows[0]?.orderStatus === 'confirmed'
+            ? Effect.succeed(rows)
+            : Effect.fail('settlement pending'),
+        ),
+        Effect.retry({ times: 200, schedule: Schedule.spaced('25 millis') }),
+      );
+      expect(settled[0]).toEqual({
+        orderStatus: 'confirmed',
+        registrantStatus: 'confirmed',
+      });
+
+      const actorMessages = yield* sql<{ tag: string; messageId: string }>`
+        SELECT tag, message_id AS "messageId"
+        FROM cluster_messages
+        WHERE entity_type = 'RegistrationOrder'
+        ORDER BY tag
+      `;
+      expect(actorMessages).toEqual([
+        {
+          tag: 'ApplyStripeEvent',
+          messageId:
+            'RegistrationOrder/order-postgres-actor/ApplyStripeEvent/evt_postgres_actor',
+        },
+        {
+          tag: 'CreateCheckout',
+          messageId:
+            'RegistrationOrder/order-postgres-actor/CreateCheckout/order-postgres-actor',
+        },
+      ]);
     }),
   20_000,
 );

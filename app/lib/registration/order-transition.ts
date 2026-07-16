@@ -27,36 +27,35 @@ export type OrderState = {
   readonly refundedAt?: number;
 };
 
-export type OrderEvent =
-  | {
-      readonly _tag: 'CheckoutCreated';
-      readonly sessionId: string;
-      readonly checkoutUrl: string;
-    }
-  | { readonly _tag: 'CheckoutCreationFailed' }
-  | {
-      readonly _tag: 'CheckoutCompleted';
-      readonly at: number;
-      readonly paymentStatus: 'paid' | 'unpaid' | 'no_payment_required';
-      readonly amountTotal: Cents;
-      readonly paymentIntentId?: string;
-    }
-  | {
-      readonly _tag: 'AsyncPaymentSucceeded';
-      readonly at: number;
-      readonly amountTotal: Cents;
-      readonly paymentIntentId?: string;
-    }
-  | { readonly _tag: 'AsyncPaymentFailed' }
-  | { readonly _tag: 'CheckoutExpired'; readonly at: number }
-  | { readonly _tag: 'LocalExpired'; readonly at: number }
-  | { readonly _tag: 'RefundRequested'; readonly at: number }
-  | { readonly _tag: 'RefundSucceeded'; readonly at: number }
-  | {
-      readonly _tag: 'RefundFailed';
-      readonly at: number;
-      readonly detail: string;
-    };
+export const OrderEvent = Schema.TaggedUnion({
+  CheckoutCreated: {
+    sessionId: Schema.NonEmptyString,
+    checkoutUrl: Schema.NonEmptyString,
+  },
+  CheckoutCreationFailed: {},
+  CheckoutCompleted: {
+    at: Schema.Number,
+    paymentStatus: Schema.Literals(['paid', 'unpaid', 'no_payment_required']),
+    amountTotal: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+      Schema.brand('Cents'),
+    ),
+    paymentIntentId: Schema.optionalKey(Schema.NonEmptyString),
+  },
+  AsyncPaymentSucceeded: {
+    at: Schema.Number,
+    amountTotal: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+      Schema.brand('Cents'),
+    ),
+    paymentIntentId: Schema.optionalKey(Schema.NonEmptyString),
+  },
+  AsyncPaymentFailed: {},
+  CheckoutExpired: { at: Schema.Number },
+  LocalExpired: { at: Schema.Number },
+  RefundRequested: { at: Schema.Number },
+  RefundSucceeded: { at: Schema.Number },
+  RefundFailed: { at: Schema.Number, detail: Schema.NonEmptyString },
+});
+export type OrderEvent = typeof OrderEvent.Type;
 
 export type Review = {
   readonly reason: 'late_payment' | 'refund_failed' | 'amount_mismatch';
@@ -174,7 +173,7 @@ export const transitionOrder = (
         ? changed({ ...state, status: 'expired', expiredAt: event.at })
         : unchanged(state);
     case 'RefundRequested':
-      return state.status === 'confirmed'
+      return state.status === 'confirmed' || state.status === 'refund_failed'
         ? changed(
             {
               ...state,

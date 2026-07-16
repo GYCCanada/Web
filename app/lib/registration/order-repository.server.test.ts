@@ -103,6 +103,28 @@ const seedOrder = Effect.gen(function* () {
 });
 
 describe('OrderRepository', () => {
+  test('reads the frozen Checkout request only while it is preparing', () =>
+    Effect.gen(function* () {
+      yield* seedOrder;
+      const sql = yield* SqlClient;
+      yield* sql`
+        UPDATE registration_orders
+        SET status = 'preparing_checkout'
+        WHERE order_id = ${orderId}
+      `;
+      const repository = yield* OrderRepository.Service;
+      const checkout = yield* repository.checkout(orderId);
+      expect(checkout).toEqual({
+        orderId,
+        registrationId: 'registration-1',
+        amount: Cents.make(5_000),
+        receiptEmail: 'payer@example.com',
+        idempotencyKey: 'checkout-order-1',
+        quoteExpiresAt: Date.parse('2026-08-02T12:00:00Z'),
+      });
+    }),
+  );
+
   test('atomically confirms an Order and every linked Registrant', () =>
     Effect.gen(function* () {
       yield* seedOrder;

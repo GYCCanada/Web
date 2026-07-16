@@ -35,8 +35,6 @@ export type CreateCheckout = {
   readonly idempotencyKey: string;
   readonly now: number;
   readonly quoteExpiresAt: number;
-  readonly successUrl: string;
-  readonly cancelUrl: string;
 };
 
 export type Checkout = {
@@ -104,7 +102,10 @@ export class Service extends Context.Service<
   }
 >()('gycc/lib/registration/stripe-gateway.server/Service') {}
 
-export const makeLayer = (client: Option.Option<Client>) =>
+export const makeLayer = (
+  client: Option.Option<Client>,
+  publicOrigin = 'https://gyc.ca',
+) =>
   Layer.succeed(
     Service,
     Service.of({
@@ -147,8 +148,8 @@ export const makeLayer = (client: Option.Option<Client>) =>
                   registrationId: command.registrationId,
                 },
               },
-              success_url: command.successUrl,
-              cancel_url: command.cancelUrl,
+              success_url: `${publicOrigin}/registration/status?session_id={CHECKOUT_SESSION_ID}`,
+              cancel_url: `${publicOrigin}/registration/status?order=${encodeURIComponent(command.orderId)}`,
             },
             { idempotencyKey: command.idempotencyKey },
           )
@@ -237,6 +238,12 @@ const liveClient = (config: StripeConfig): Client => {
 export const layer = Layer.unwrap(
   Effect.gen(function* () {
     const env = yield* Env.Service;
-    return makeLayer(Option.map(env.stripe, liveClient));
+    return makeLayer(
+      Option.map(env.stripe, liveClient),
+      Option.match(env.stripe, {
+        onNone: () => '',
+        onSome: (config) => config.publicOrigin,
+      }),
+    );
   }),
 );

@@ -19,8 +19,6 @@ const command = {
   idempotencyKey: 'checkout-order-1',
   now: Date.parse('2026-08-01T12:00:00Z'),
   quoteExpiresAt: Date.parse('2026-08-01T12:10:00Z'),
-  successUrl: 'https://gyc.ca/registration/status/token',
-  cancelUrl: 'https://gyc.ca/registration/status/token',
 };
 
 describe('StripeGateway', () => {
@@ -75,6 +73,9 @@ describe('StripeGateway', () => {
                 price_data: expect.objectContaining({ unit_amount: 0 }),
               }),
             ],
+            success_url:
+              'https://gyc.ca/registration/status?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url: 'https://gyc.ca/registration/status?order=order-1',
           }),
           options: { idempotencyKey: 'checkout-order-1' },
         },

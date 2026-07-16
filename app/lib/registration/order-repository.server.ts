@@ -36,6 +36,15 @@ export type ApplyResult =
   | { readonly _tag: 'Applied'; readonly transition: Transition }
   | { readonly _tag: 'DuplicateStripeEvent' };
 
+export type CheckoutOrder = {
+  readonly orderId: OrderId;
+  readonly registrationId: string;
+  readonly amount: Cents;
+  readonly receiptEmail: string;
+  readonly idempotencyKey: string;
+  readonly quoteExpiresAt: number;
+};
+
 export class OrderNotFound extends Schema.TaggedErrorClass<OrderNotFound>()(
   'OrderRepository.OrderNotFound',
   { orderId: OrderId },
@@ -52,6 +61,9 @@ export class Service extends Context.Service<
     readonly apply: (
       command: ApplyCommand,
     ) => Effect.Effect<ApplyResult, OrderNotFound | PersistenceError>;
+    readonly checkout: (
+      orderId: OrderId,
+    ) => Effect.Effect<CheckoutOrder, OrderNotFound | PersistenceError>;
   }
 >()('gycc/lib/registration/order-repository.server/Service') {}
 
@@ -65,6 +77,15 @@ interface OrderRow {
   readonly expiredAt: string | null;
   readonly refundStartedAt: string | null;
   readonly refundedAt: string | null;
+}
+
+interface CheckoutRow {
+  readonly orderId: string;
+  readonly registrationId: string;
+  readonly amount: number;
+  readonly receiptEmail: string;
+  readonly idempotencyKey: string;
+  readonly quoteExpiresAt: string;
 }
 
 const millis = (value: string | null): number | undefined =>
@@ -241,6 +262,37 @@ export const layer = Layer.effect(
       );
     });
 
-    return Service.of({ apply });
+    const checkout = Effect.fn('OrderRepository.checkout')(function* (
+      orderId: OrderId,
+    ) {
+      const rows = yield* sql<CheckoutRow>`
+        SELECT
+          order_id AS "orderId",
+          registration_id AS "registrationId",
+          amount,
+          receipt_email AS "receiptEmail",
+          stripe_idempotency_key AS "idempotencyKey",
+          quote_expires_at::text AS "quoteExpiresAt"
+        FROM registration_orders
+        WHERE order_id = ${orderId}
+          AND status = 'preparing_checkout'
+      `.pipe(
+        Effect.mapError(
+          () => new PersistenceError({ operation: 'read Checkout Order' }),
+        ),
+      );
+      const row = rows[0];
+      if (row === undefined) return yield* new OrderNotFound({ orderId });
+      return {
+        orderId: OrderId.make(row.orderId),
+        registrationId: row.registrationId,
+        amount: Cents.make(row.amount),
+        receiptEmail: row.receiptEmail,
+        idempotencyKey: row.idempotencyKey,
+        quoteExpiresAt: Date.parse(row.quoteExpiresAt),
+      };
+    });
+
+    return Service.of({ apply, checkout });
   }),
 );
